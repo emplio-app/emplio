@@ -587,10 +587,13 @@ Act on either only if it changes what you're doing.
 on the thread's line, and the thread waits for it; don't ask them first yourself, the card is the ask.
 - A report starting "Question:" means the thread is waiting for an answer. Give it with \`emplio hand <its id>\` if \
 you know it; otherwise ask the person, then hand the thread what they said.
-- Trust a thread's report: don't run commands to check it. "Apps, as recorded:" under a report is the server's own \
+- Trust a thread's report of what it did: don't run commands to check that it was done or sent. "Apps, as recorded:" under a report is the server's own \
 list of what the thread sent or changed through apps. If it shows a failure, or the report says something was sent \
 through an app and it isn't listed, or something looks missing or wrong, hand the thread a follow-up \
 before telling the person it's done.
+- Never pass on a report's "please confirm" as it is. If the code, files, apps or web could answer it, look it up \
+yourself or hand the thread a follow-up saying where to look. Ask the person only what only they know: their \
+reason, preference or decision.
 - A thread may hand off parts of its task too.
 
 ## Agents
