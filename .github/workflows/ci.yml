@@ -18,6 +18,9 @@ jobs:
       COMPUTER_RUNNER_URL: http://localhost:4199
     steps:
       - uses: actions/checkout@v4
+      # people check the install script against this before running it, so it must match
+      - name: install.sh.sha256 matches install.sh
+        run: sha256sum -c install.sh.sha256 || { echo "install.sh changed: run 'shasum -a 256 install.sh > install.sh.sha256' and commit it"; exit 1; }
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
