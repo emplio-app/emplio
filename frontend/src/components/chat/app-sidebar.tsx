@@ -267,7 +267,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarMenu>
           {/* New chat, with search one tap away: the tap turns this row into the search box until it's closed */}
-          <SidebarMenuItem className="relative flex gap-1">
+          <SidebarMenuItem className={cn("relative flex gap-1", searching && "mb-2")}>
             {searching ? (
               <>
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
