@@ -187,6 +187,26 @@ Emplio runs commands and opens websites for you, so treat it like a member of st
 - Only the small `runner` service controls Docker, and only for Emplio's own two images. Don't give that access to anything else.
 - Never put this on the internet without HTTPS.
 
+## Where your data goes
+
+Emplio does its thinking with an AI model through [OpenRouter](https://openrouter.ai), so the model company you choose sees what it works on:
+
+- what people send it in chat, files included
+- the company notes it opens for a job (staff never get the restricted ones)
+- what its commands print, the text of pages it reads, and what it pulls from connected apps
+- new messages in a quiet chat, which a smaller model reads so the background agent knows what's going on
+
+The model never gets:
+
+- saved passwords and keys, or the keys and sign-ins for connected apps. They're stored encrypted on your server, and the server uses them itself, so the model only knows their names and sees the results. Once a password is typed into a website, though, the agent could read it back from that browser.
+- browser cookies, your database or your encryption key
+
+Other services only get data if you add their key: Exa (web searches), Composio (app connections), Sarvam (voice notes), Resend (sign-in emails) and Telegram (messages sent there).
+
+You pick the model in Settings. To stop model companies keeping what they're sent, turn on zero data retention in your [OpenRouter privacy settings](https://openrouter.ai/settings/privacy).
+
+OpenRouter is the only option today. We're working on more providers, and on running local models so nothing has to leave your server.
+
 ## Community
 
 Questions, ideas, or want to show what Emplio does for your business? Join us on [Discord](https://discord.gg/vjAr5ARex).
