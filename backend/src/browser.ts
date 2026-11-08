@@ -8,13 +8,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "./db";
-import { workspaceMembers } from "./db/schema";
+import { conversations, workspaceMembers } from "./db/schema";
 import { cloud } from "./cloud";
 import { decrypt, encrypt } from "./secrets";
 
 // stopped after this long without a browser command (billed while open); long enough for the
 // user to solve a CAPTCHA or enter a code in the live view after the agent asks
 const IDLE_MS = 10 * 60_000;
+// how long after that the chat's Live browser button can still start it again
+const REOPEN_MS = 24 * 60 * 60_000;
+
+export const canReopen = (usedAt: Date | null, now = Date.now()) => !!usedAt && now - usedAt.getTime() < REOPEN_MS;
 
 // owner: whose sign-ins it carries (unknown for one picked up after a restart until a command uses it)
 export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; owner?: Owner };
@@ -58,14 +62,17 @@ async function readState(cdpUrl: string) {
   try {
     const { cookies } = await cdp.send("Storage.getCookies");
     const storage: BrowserState["storage"] = {};
+    // the tab in front, for the Live browser button to come back to
+    let page: string | undefined;
     const { targetInfos } = await cdp.send("Target.getTargets");
     for (const t of (targetInfos as { targetId: string; type: string; url: string }[]).filter((t) => t.type === "page" && /^https?:/.test(t.url))) {
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: t.targetId, flatten: true });
-      const r = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify([location.origin, {...localStorage}])", returnByValue: true }, sessionId);
-      const [origin, items] = JSON.parse(r.result.value) as [string, Record<string, string>];
+      const r = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify([location.origin, {...localStorage}, document.visibilityState])", returnByValue: true }, sessionId);
+      const [origin, items, visibility] = JSON.parse(r.result.value) as [string, Record<string, string>, string];
       if (Object.keys(items).length) storage[origin] = items;
+      if (visibility === "visible" || !page) page = t.url;
     }
-    return { cookies: cookies as Cookie[], storage };
+    return { cookies: cookies as Cookie[], storage, page };
   } finally {
     cdp.close();
   }
@@ -84,7 +91,15 @@ async function saveState(owner: Owner, cdpUrl: string) {
   const before = await savedState(owner);
   const state: BrowserState = { cookies: now.cookies, storage: { ...before?.storage, ...now.storage }, savedAt: new Date().toISOString() };
   await db.update(workspaceMembers).set({ browserState: encrypt(JSON.stringify(state)) }).where(memberWhere(owner));
+  return now.page;
 }
+
+const markUsed = (conversationId: string, page?: string) =>
+  db
+    .update(conversations)
+    .set({ browserUsedAt: new Date(), ...(page && { browserPage: encrypt(page) }) })
+    .where(eq(conversations.id, conversationId))
+    .catch((e) => console.error("browser use not noted:", e));
 
 // Put a kept state into a fresh browser: cookies, then each site's local storage.
 export async function restoreState(cdpUrl: string, state: BrowserState) {
@@ -116,11 +131,14 @@ export async function stopBrowser(conversationId: string) {
   if (!live) return;
   clearTimeout(live.timer);
   // a browser that has already ended doesn't answer: don't hold the stop up for it
-  if (live.owner)
-    await Promise.race([saveState(live.owner, live.cdpUrl), Bun.sleep(20_000).then(() => Promise.reject(new Error("timed out")))]).catch((e) =>
-      console.error("browser state not kept:", e),
-    );
+  const page = live.owner
+    ? await Promise.race([saveState(live.owner, live.cdpUrl), Bun.sleep(20_000).then(() => Promise.reject(new Error("timed out")))]).catch((e) => {
+        console.error("browser state not kept:", e);
+        return undefined;
+      })
+    : undefined;
   await cloud.browser.stopHosted(live.id).catch(() => {});
+  await markUsed(conversationId, page);
 }
 
 // Every browser ends at its timeout; a minute early here so we never hand out a dead one.
@@ -167,7 +185,10 @@ export function holdOpen(conversationId: string, live: LiveBrowser) {
 
 // The chat's browser, found or started on first use; each call pushes the idle stop back.
 export async function browserFor(conversationId: string, owner: Owner): Promise<LiveBrowser> {
-  if (!open.has(conversationId)) remember(conversationId, find(conversationId).then((found) => found ?? start(conversationId, owner)));
+  if (!open.has(conversationId)) {
+    remember(conversationId, find(conversationId).then((found) => found ?? start(conversationId, owner)));
+    await markUsed(conversationId);
+  }
   const live = await open.get(conversationId)!;
   // a live-view check that found nothing may still be settling
   if (!live) {
@@ -214,6 +235,28 @@ export async function liveView(conversationId: string) {
   }
   const live = await open.get(conversationId)?.catch(() => null);
   return live && Date.now() < live.ends ? live.liveUrl : null;
+}
+
+// The Live browser button: the chat's browser, started again if it stopped, on the page it was on. Sign-ins come
+// back with it; other tabs and anything half typed don't.
+export async function reopenBrowser(conversationId: string, owner: Owner, page: string | null) {
+  const running = await liveView(conversationId);
+  const live = await browserFor(conversationId, owner);
+  if (!running && page) await goTo(live.cdpUrl, decrypt(page)).catch((e) => console.error("browser page not restored:", e));
+  return live.liveUrl;
+}
+
+async function goTo(cdpUrl: string, url: string) {
+  const cdp = await devtools(cdpUrl);
+  try {
+    const { targetInfos } = await cdp.send("Target.getTargets");
+    const tab = (targetInfos as { targetId: string; type: string }[]).find((t) => t.type === "page");
+    if (!tab) return;
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: tab.targetId, flatten: true });
+    await cdp.send("Page.navigate", { url }, sessionId);
+  } finally {
+    cdp.close();
+  }
 }
 
 // A link on our own address for signing in from a phone (Telegram has no live view beside the chat): it

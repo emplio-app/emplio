@@ -140,6 +140,10 @@ export const conversations = pgTable(
     headId: text(),
     // the checklist the agent keeps for a job of several steps (plan.ts)
     plan: jsonb().$type<PlanStep[]>(),
+    // when this chat's browser last ran, and the page it was on when it stopped (encrypted): what its Live browser
+    // button reopens (browser.ts)
+    browserUsedAt: timestamp({ withTimezone: true }),
+    browserPage: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

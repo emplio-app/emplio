@@ -27,7 +27,7 @@ import { context, contextOf, type Ctx } from "./auth";
 import { db } from "./db";
 import { channelLinks, conversations, messages } from "./db/schema";
 import { mainChat } from "./channels";
-import { liveView, stopBrowser } from "./browser";
+import { canReopen, liveView, reopenBrowser, stopBrowser } from "./browser";
 import { hidePointer, isShowing, sayShowing, showingFor, startShowing, stopShowing } from "./browser-show";
 import { forModel, isOwnFile, readStored, resolveFiles } from "./files";
 import { recordUploads } from "./made";
@@ -1184,8 +1184,23 @@ export async function chatRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>("/conversations/:id/browser", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    if (!(await findConversation(req.params.id, ctx))) return reply.code(404).send({ error: "Not found" });
-    return { liveUrl: await liveView(req.params.id), showing: isShowing(req.params.id), showingFor: showingFor(req.params.id) };
+    const conversation = await findConversation(req.params.id, ctx);
+    if (!conversation) return reply.code(404).send({ error: "Not found" });
+    // a chat with no browser lately needn't ask the browser service
+    const recent = canReopen(conversation.browserUsedAt);
+    return { liveUrl: recent ? await liveView(req.params.id) : null, canReopen: recent, showing: isShowing(req.params.id), showingFor: showingFor(req.params.id) };
+  });
+
+  // the Live browser button: starts it again if it has stopped (billed like any browser, and stops the same way)
+  app.post<{ Params: { id: string } }>("/conversations/:id/browser/open", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const conversation = await findConversation(req.params.id, ctx);
+    if (!conversation) return reply.code(404).send({ error: "Not found" });
+    if (!canReopen(conversation.browserUsedAt)) return reply.code(409).send({ error: "This browser closed too long ago." });
+    const paused = await cloud.credit.pausedReason(ctx.workspaceId);
+    if (paused) return reply.code(402).send({ error: paused });
+    return { liveUrl: await reopenBrowser(req.params.id, { workspaceId: ctx.workspaceId, userId: ctx.userId }, conversation.browserPage) };
   });
 
   // the person has the mouse (Take control, Show Emplio how): Emplio's pretend pointer stays away
