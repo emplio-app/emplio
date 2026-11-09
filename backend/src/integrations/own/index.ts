@@ -7,14 +7,20 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { connections } from "../../db/schema";
-import { decrypt } from "../../secrets";
+import { decrypt, encrypt } from "../../secrets";
 import { AppsError, type Provider } from "../types";
 import { anthropic, google, openai, openrouter } from "./ai";
+import { airtable } from "./airtable";
+import { notion } from "./notion";
+import { asana } from "./asana";
+import { calendly } from "./calendly";
+import { clickup } from "./clickup";
 import { exa } from "./exa";
 import { fireflies } from "./fireflies";
 import { fly } from "./fly";
 import { github } from "./github";
 import { hostinger } from "./hostinger";
+import { hubspot } from "./hubspot";
 import { indiamart } from "./indiamart";
 import { livekit } from "./livekit";
 import { msg91 } from "./msg91";
@@ -22,7 +28,9 @@ import { neon } from "./neon";
 import { plivo } from "./plivo";
 import { razorpay } from "./razorpay";
 import { sarvam } from "./sarvam";
+import { stripe } from "./stripe";
 import { swipe } from "./swipe";
+import { todoist } from "./todoist";
 import { vercel } from "./vercel";
 
 export type OwnAction = {
@@ -32,6 +40,18 @@ export type OwnAction = {
   run(input: any, key: string): Promise<unknown>;
   // only looks things up: runs without asking the person first
   readOnly?: boolean;
+};
+// a login that runs out, and how to get the next one (seconds it lasts, as the app says)
+export type OAuthTokens = { token: string; refreshToken?: string; expiresIn?: number };
+// One delivery to /webhooks/app/<app>/<connection>[/<rest>], with the body as sent.
+export type Delivery = { body: string; headers: Record<string, string | string[] | undefined>; connection: string; rest: string };
+export type WebhookEvent = {
+  // the app's delivery id, so a retry doesn't run twice
+  id?: string;
+  // the triggers it starts, by short name
+  triggers: string[];
+  // what the automation sees, and what its settings are checked against
+  data: unknown;
 };
 export type OwnApp = {
   app: string;
@@ -44,8 +64,10 @@ export type OwnApp = {
   oauth?: {
     ready(): boolean;
     authorizeUrl(redirect: string, state: string): string;
-    // the login a finished sign-in's code is worth
-    exchange(code: string, redirect: string): Promise<string>;
+    // the login a finished sign-in's code is worth; a plain string never runs out
+    exchange(code: string, redirect: string): Promise<string | OAuthTokens>;
+    // for apps whose logins run out: the next one. Throws AppsError(…, true) when the person has to sign in again
+    refresh?(refreshToken: string): Promise<OAuthTokens>;
   };
   actions: Record<string, OwnAction>;
   // events the app tells us about the moment they happen
@@ -58,15 +80,53 @@ export type OwnApp = {
     start(key: string, connection: string, event: string, config: unknown): Promise<string>;
     // the last automation on that id is gone; apps that can't take a webhook back leave this out
     stop?(key: string, id: string): Promise<void>;
+    // apps served by the shared webhook route. Null: not really from the app (401). `headers` go on the answer
+    // (a handshake); `events` runs after we've answered, so it may call the app.
+    receive?(delivery: Delivery, key: string): Promise<{ headers?: Record<string, string>; events(): Promise<WebhookEvent[]> } | null>;
+    // whether this automation's settings want the event (default: yes)
+    wanted?(config: unknown, data: unknown): boolean;
   };
 };
 
-const APPS: Record<string, OwnApp> = { indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
 const callbackUrl = (app: string, back: string) => `${new URL(back).origin}/oauth/${app}/callback`;
 const stateSig = (payload: string) => createHmac("sha256", process.env.ENCRYPTION_KEY!).update(`oauth:${payload}`).digest("base64url");
+
+// a login with less than this left is renewed before it's used
+const MARGIN_MS = 60_000;
+const untilExpiry = (t: OAuthTokens) => (t.expiresIn ? new Date(Date.now() + t.expiresIn * 1000) : null);
+
+type Stored = { id: string; app: string; secret: string | null; refreshToken: string | null; expiresAt: Date | null };
+const saveRenewed = async (id: string, values: Pick<Stored, "secret" | "refreshToken" | "expiresAt">) => {
+  await db.update(connections).set({ ...values, updatedAt: new Date() }).where(eq(connections.id, id));
+};
+
+// One renewal per connection at a time: some apps cancel a refresh token the moment it's used, so a second call would log the person out.
+// ponytail: per process; a lock in Postgres if the API ever runs on more than one machine
+const renewing = new Map<string, Promise<string>>();
+
+// A connection's login, decrypted, renewed first if it's about to run out.
+export function freshSecret(c: Stored, save = saveRenewed): Promise<string | null> {
+  const oauth = APPS[c.app]?.oauth;
+  if (!c.secret) return Promise.resolve(null);
+  if (!c.expiresAt || c.expiresAt.getTime() - Date.now() > MARGIN_MS || !c.refreshToken || !oauth?.refresh) return Promise.resolve(decrypt(c.secret));
+  const ongoing = renewing.get(c.id);
+  if (ongoing) return ongoing;
+  const refreshToken = decrypt(c.refreshToken);
+  const renew = oauth
+    .refresh(refreshToken)
+    .then(async (t) => {
+      // apps that don't send a new refresh token mean the old one stays good
+      await save(c.id, { secret: encrypt(t.token), refreshToken: encrypt(t.refreshToken ?? refreshToken), expiresAt: untilExpiry(t) });
+      return t.token;
+    })
+    .finally(() => renewing.delete(c.id));
+  renewing.set(c.id, renew);
+  return renew;
+}
 
 const split = (action: string) => {
   const [app = "", name = ""] = action.split(".");
@@ -126,8 +186,9 @@ export const own: Provider = {
 
   async finishSignIn(app, code, back) {
     const a = APPS[app]!;
-    const secret = await a.oauth!.exchange(code, callbackUrl(app, back));
-    return { secret, label: (await a.check(secret)) || null };
+    const got = await a.oauth!.exchange(code, callbackUrl(app, back));
+    const t = typeof got === "string" ? { token: got } : got;
+    return { secret: t.token, label: (await a.check(t.token)) || null, refreshToken: t.refreshToken, expiresAt: untilExpiry(t) ?? undefined };
   },
 
   async connectWithKey(app, key) {
@@ -179,6 +240,7 @@ export const own: Provider = {
     const stop = APPS[app]?.push?.stop;
     if (!stop) return;
     const row = await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) });
-    if (row?.secret) await stop(decrypt(row.secret), id);
+    const key = row && (await freshSecret(row));
+    if (key) await stop(key, id);
   },
 };

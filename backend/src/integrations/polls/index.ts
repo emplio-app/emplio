@@ -8,7 +8,10 @@
 import type { ActionDetail, ActionInfo } from "@emplio/shared";
 import { z } from "zod";
 import type { TriggerDetail } from "../types";
+import { airtable } from "./airtable";
+import { notion } from "./notion";
 import { github } from "./github";
+import { hubspot } from "./hubspot";
 import { indiamart } from "./indiamart";
 import { razorpay } from "./razorpay";
 import { todoist } from "./todoist";
@@ -28,7 +31,7 @@ export type PollTrigger = {
 };
 
 // Every app's polled triggers, one file per app (polls/<app>.ts), each exporting its triggers by short name.
-const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, github };
+const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, github, hubspot, notion, airtable };
 const POLLS: Record<string, PollTrigger> = Object.fromEntries(
   Object.entries(APPS).flatMap(([app, triggers]) => Object.entries(triggers).map(([name, t]) => [`${app}.${name}`, t])),
 );

@@ -1,6 +1,6 @@
 {
-  "id": "23b117b6-d616-4340-af33-c9163aea8dcf",
-  "prevId": "b3a8e405-7e09-40c9-bba5-ca194cc56647",
+  "id": "1c61c8ff-c47b-40ec-9297-03c4b4dc7e79",
+  "prevId": "2a69ae77-7df7-42b2-a1d0-7e5025f3b8c7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -989,6 +989,18 @@
         "secret": {
           "name": "secret",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

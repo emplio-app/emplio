@@ -56,7 +56,7 @@ import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
 import { AttachmentTray, MessageAttachments, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
 import { QuoteButton, QuoteChips, QuotedText, addQuote, withQuotes, type Quote } from "@/components/chat/quote";
 import { Button } from "@/components/ui/button";
-import { useCreditStatus } from "@cloud/client";
+import { pausedNote, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
@@ -900,7 +900,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 {error && !reconnecting && (
                   <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">
                     <TriangleAlertIcon className="size-4 shrink-0 text-destructive" />
-                    <span className="flex-1">{paused ? error.message : "Something went wrong while generating a reply."}</span>
+                    <span className="flex-1">{paused ? pausedNote(error.message) : "Something went wrong while generating a reply."}</span>
                     {/* what it did before failing is saved: carry on from there instead of redoing it */}
                     {!paused && messages.at(-1)?.role === "assistant" && (
                       <Button size="sm" variant="outline" onClick={() => handlers.current.dispatch({ text: "Continue", files: [] })}>
