@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type ChatJob, type Mention } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -49,7 +49,8 @@ import { ChatSendContext } from "@/components/chat/connect-card";
 import { ReplyContext } from "@/components/chat/ask-card";
 import { BrowserChip, BrowserPanel, BrowserProvider, useLiveBrowser } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
-import { AssistantReply, userFacingText } from "@/components/chat/assistant-reply";
+import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
+import { NextStepCard } from "@/components/chat/next-step-card";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { useMentionMenu } from "@/components/chat/mention-menu";
 import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
@@ -488,31 +489,31 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     dispatch({ text, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
   };
 
-  // What they'd likely send next, made by a small model after each reply (backend chat.ts suggestNext): shown
-  // greyed in the empty box, Tab or a tap on "Use" puts it in. Opening a chat only shows one already made.
-  const [suggestion, setSuggestion] = useState("");
-  const suggestedAfter = useRef(status);
+  // The closable card after each reply, made by a small model (backend chat.ts nextStep). Opening a chat only
+  // shows one already made.
+  const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  const nextStepAfter = useRef(status);
   useEffect(() => {
-    const wasBusy = suggestedAfter.current === "submitted" || suggestedAfter.current === "streaming";
-    suggestedAfter.current = status;
-    if (status === "submitted" || status === "streaming") return setSuggestion("");
+    const wasBusy = nextStepAfter.current === "submitted" || nextStepAfter.current === "streaming";
+    nextStepAfter.current = status;
+    if (status === "submitted" || status === "streaming") return setNextStep(null);
     if (isNew && !wasBusy) return;
     if (status !== "ready" || (wasBusy && queue.length)) return;
     let current = true;
-    api<{ text: string }>(`/conversations/${id}/suggestion${wasBusy ? "" : "?peek=1"}`)
-      .then((r) => current && setSuggestion(r.text))
+    api<{ card: NextStep | null }>(`/conversations/${id}/next-step${wasBusy ? "" : "?peek=1"}`)
+      .then((r) => current && setNextStep(r.card))
       .catch(() => {});
     return () => void (current = false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on a reply finishing (and opening the chat), not as the queue changes
   }, [status, id]);
-  const offered = !input && !busy && suggestion ? suggestion : "";
-  const takeSuggestion = () => {
-    setInput(offered);
-    requestAnimationFrame(() => {
-      const box = document.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
-      box?.focus();
-      box?.setSelectionRange(offered.length, offered.length);
-    });
+  // the bubble shows the button's words; Emplio also gets the question, since it didn't write the card itself
+  const answerNextStep = (button: string) => {
+    sendText(`${CLICK_PREFIX}${button}\nForm values: ${JSON.stringify({ question: nextStep?.question })}`);
+    setNextStep(null);
+  };
+  const closeNextStep = () => {
+    setNextStep(null);
+    void api(`/conversations/${id}/next-step`, undefined, "DELETE").catch(() => {});
   };
 
   // Stopping means "hold on": queued messages come back into the composer instead of firing.
@@ -944,10 +945,6 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           onKeyDown={(e) => {
             mentionMenu.onKeyDown(e);
             if (!e.defaultPrevented) skillMenu.onKeyDown(e);
-            if (!e.defaultPrevented && e.key === "Tab" && !e.shiftKey && offered) {
-              e.preventDefault();
-              takeSuggestion();
-            }
             eraseMark(e, input, marks, setInput);
           }}
           onSelect={mentionMenu.onSelect}
@@ -957,24 +954,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             e.preventDefault();
             attachments.add(files);
           }}
-          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : offered || (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
+          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className={cn("px-4 pt-4 text-[15px]", offered && "type-in pr-16")}
-          style={offered ? ({ "--type-len": offered.length } as React.CSSProperties) : undefined}
+          className="px-4 pt-4 text-[15px]"
         />
-        {offered && (
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={takeSuggestion}
-            aria-label={`Use suggested message: ${offered}`}
-            className="absolute top-3.5 right-3 rounded-md border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            <span className="pointer-fine:hidden">Use</span>
-            <span className="hidden pointer-fine:inline">Tab</span>
-          </button>
-        )}
       </div>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
           buttons out from under the finger before it lifts, and the tap is lost. */}
@@ -1159,6 +1143,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     onSendNow={busy ? sendNow : undefined}
                   />
                 )}
+                {nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />}
                 {onTelegram ? <TelegramOnly /> : composer}
               </div>
             </>
