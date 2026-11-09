@@ -29,6 +29,13 @@
       "when": 1794226543423,
       "tag": "20261109121543_paid_sites",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794234172072,
+      "tag": "20261109142252_push_devices",
+      "breakpoints": true
     }
   ]
 }
