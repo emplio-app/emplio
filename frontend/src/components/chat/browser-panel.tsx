@@ -3,6 +3,7 @@
 import type { UIMessage } from "ai";
 import { CircleDotIcon, EyeIcon, GlobeIcon, MicIcon, MicOffIcon, MousePointerClickIcon, XIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +20,8 @@ import { startVoice } from "./show-voice";
 import { transcribe } from "./voice-input";
 
 // The chat's browser, watched live beside the chat. The agent drives it with `emplio browser`;
-// the server stops it after 10 minutes unused, so the link is checked while it's showing.
+// the server stops it after 10 minutes unused, so the link is checked while it's showing. For 24 hours after that
+// the Live browser button starts it again.
 // A command that used it carries only the browser's id (the agent never sees the live link); the link
 // itself comes from the server. (Older chats carry the link.)
 
@@ -32,9 +34,35 @@ const browsersOf = (messages: UIMessage[]) =>
     }),
   );
 
+// Whether the panel was showing when they left this chat, per device.
+const panelKey = (id: string) => `browser-open:${id}`;
+const panelWasOpen = (id: string) => {
+  try {
+    return localStorage.getItem(panelKey(id)) === "1";
+  } catch {
+    return false;
+  }
+};
+const keepPanel = (id: string, on: boolean) => {
+  try {
+    if (on) localStorage.setItem(panelKey(id), "1");
+    else localStorage.removeItem(panelKey(id));
+  } catch {}
+};
+
 export function useLiveBrowser(id: string, messages: UIMessage[]) {
   const [url, setUrl] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setShown] = useState(false);
+  const setOpen = useCallback(
+    (on: boolean) => {
+      setShown(on);
+      keepPanel(id, on);
+    },
+    [id],
+  );
+  // stopped, but its button can still start it again
+  const [canReopen, setCanReopen] = useState(false);
+  const [reopening, setReopening] = useState(false);
   // "Show Emplio how" is recording (the server's word: it can end there too)
   const [showing, setShowing] = useState(false);
   // when it began on this device's clock: their voice and the timer count from it
@@ -55,34 +83,39 @@ export function useLiveBrowser(id: string, messages: UIMessage[]) {
   useEffect(() => {
     if (!latest || latest === seen.current) return;
     seen.current = latest;
-    api<{ liveUrl: string | null }>(`/conversations/${id}/browser`)
+    api<{ liveUrl: string | null; canReopen?: boolean }>(`/conversations/${id}/browser`)
       .then((r) => {
         setUrl(r.liveUrl);
+        setCanReopen(!!r.canReopen);
         setOpen(!!r.liveUrl);
       })
       .catch(() => {});
-  }, [id, latest]);
+  }, [id, latest, setOpen]);
 
-  // reopening a chat that used a browser: is it still running?
-  const used = marks.length > 0;
+  // coming back to a chat: is its browser still running, and was the panel showing when they left?
+  const started = messages.length > 0;
   useEffect(() => {
-    if (!used) return;
-    api<{ liveUrl: string | null; showing?: boolean; showingFor?: number | null }>(`/conversations/${id}/browser`)
+    if (!started) return;
+    api<{ liveUrl: string | null; canReopen?: boolean; showing?: boolean; showingFor?: number | null }>(`/conversations/${id}/browser`)
       .then((r) => {
         setUrl(r.liveUrl);
+        setCanReopen(!!r.canReopen);
+        // it stopped while they were away: the button brings it back, it doesn't start by itself
+        setOpen(!!r.liveUrl && panelWasOpen(id));
         setShowing(!!r.showing);
         setBegan(r.showing ? Date.now() - (r.showingFor ?? 0) : null);
       })
       .catch(() => {});
-  }, [id, used]);
+  }, [id, started, setOpen]);
 
   // notice when it stops (idle, or closed elsewhere)
   useEffect(() => {
     if (!url) return;
     const timer = setInterval(() => {
-      api<{ liveUrl: string | null; showing?: boolean }>(`/conversations/${id}/browser`)
+      api<{ liveUrl: string | null; canReopen?: boolean; showing?: boolean }>(`/conversations/${id}/browser`)
         .then((r) => {
           setShowing(!!r.showing);
+          setCanReopen(!!r.canReopen);
           if (r.liveUrl) return;
           setUrl(null);
           setOpen(false);
@@ -90,7 +123,7 @@ export function useLiveBrowser(id: string, messages: UIMessage[]) {
         .catch(() => {});
     }, 15_000);
     return () => clearInterval(timer);
-  }, [id, url]);
+  }, [id, url, setOpen]);
 
   // the recording ended without Done here (too long, the server restarted): let go of the mic
   useEffect(() => {
@@ -117,6 +150,8 @@ export function useLiveBrowser(id: string, messages: UIMessage[]) {
     };
     return {
       url,
+      canReopen,
+      reopening,
       open: open && !!url,
       showing,
       began,
@@ -155,13 +190,26 @@ export function useLiveBrowser(id: string, messages: UIMessage[]) {
       },
       show: () => setOpen(true),
       hide: () => setOpen(false),
+      reopen: async () => {
+        setReopening(true);
+        try {
+          const r = await api<{ liveUrl: string }>(`/conversations/${id}/browser/open`, {});
+          setUrl(r.liveUrl);
+          setOpen(true);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Couldn't open the browser. Try again.");
+        } finally {
+          setReopening(false);
+        }
+      },
       close: () => {
         setUrl(null);
         setOpen(false);
+        setCanReopen(true);
         void api(`/conversations/${id}/browser`, undefined, "DELETE").catch(() => {});
       },
     };
-  }, [id, url, open, showing, began, mic, hidePointer]);
+  }, [id, url, canReopen, reopening, open, setOpen, showing, began, mic, hidePointer]);
 }
 
 type LiveBrowser = ReturnType<typeof useLiveBrowser>;
@@ -169,18 +217,20 @@ const BrowserContext = createContext<LiveBrowser | null>(null);
 export const BrowserProvider = BrowserContext.Provider;
 export const useBrowser = () => useContext(BrowserContext);
 
-// "Live browser" button: in the header and under a run of commands, whenever the panel is hidden.
+// "Live browser" button: in the header and under a run of commands, whenever the panel is hidden. Once the browser
+// has stopped, it starts it again.
 export function BrowserChip({ className = "" }: { className?: string }) {
   const browser = useBrowser();
-  if (!browser?.url || browser.open) return null;
+  if (!browser || browser.open || (!browser.url && !browser.canReopen)) return null;
   return (
     <button
       type="button"
-      onClick={browser.show}
-      className={`inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent ${className}`}
+      disabled={browser.reopening}
+      onClick={browser.url ? browser.show : browser.reopen}
+      className={`inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-60 ${className}`}
     >
-      <LiveDot />
-      Live browser
+      {browser.url ? <LiveDot /> : <GlobeIcon className="size-3.5 text-muted-foreground" />}
+      {browser.reopening ? "Opening…" : "Live browser"}
     </button>
   );
 }
