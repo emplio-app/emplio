@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, isReport, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, type Approval, type ChatJob, type JobInfo, type JobSummary } from "@emplio/shared";
+import { FROM_EMPLIO, isReport, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -208,7 +208,7 @@ async function began(w: Row, stop: () => void) {
   // its last words are its report: a question waits for an answer
   return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false) => {
     const report = answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)");
-    const status = outcome === "completed" ? (/^\W*question\b/i.test(report) ? "asking" : "done") : outcome;
+    const status = outcome === "completed" ? (asks(report) ? "asking" : "done") : outcome;
     await db.update(jobs).set({ status, report, finishedAt: new Date() }).where(eq(jobs.id, w.id));
     live.delete(w.id);
     e.end();
@@ -236,11 +236,12 @@ export function cardsIn(chunk: { type: string; output?: unknown }, shown: Set<st
 
 // A message to the job from whoever started it, as the next message in its chat: after the reply running there,
 // if one is (steered: it wraps up after its current command).
-async function send(w: Row, text: string) {
+// `run`: the prompt's message id, which marks the run in the job's chat (runOf)
+async function send(w: Row, text: string, run = generateId()) {
   const e = track(w.id);
   if (w.depth === 1) owed.add(w.id);
   const person = await personFor(w.workspaceId, w.userId);
-  const message: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }] };
+  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }] };
   const log = { error: (obj: unknown, msg: string) => console.error(`job ${w.id}: ${msg}`, obj) };
   let error: string | null = null;
   try {
@@ -272,8 +273,13 @@ async function send(w: Row, text: string) {
 // What it did, from its chat: each command it ran and what came of it (files, cards, the jobs it started)
 async function actionsOf(w: Pick<Row, "chatId" | "actions">): Promise<Action[]> {
   if (!w.chatId) return w.actions;
+  return actionsIn(await loadMessages(w.chatId));
+}
+
+type ChatMessages = Awaited<ReturnType<typeof loadMessages>>;
+function actionsIn(msgs: ChatMessages): Action[] {
   type Bash = { type: string; toolCallId: string; state: string; preliminary?: boolean; input?: { description?: string }; output?: Partial<Action> };
-  return (await loadMessages(w.chatId)).flatMap((m) =>
+  return msgs.flatMap((m) =>
     m.role !== "assistant"
       ? []
       : (m.parts as unknown as (Bash & { input?: { command?: string } })[])
@@ -291,6 +297,31 @@ async function actionsOf(w: Pick<Row, "chatId" | "actions">): Promise<Action[]> 
             jobs: p.output?.jobs,
           })),
   );
+}
+
+// A job's card for one run (the prompt that started it, see send). The latest run is the job's own status and
+// report; an earlier one is finished, with what it did and said then. A prompt not in the chat yet is queued.
+const asks = (report: string) => /^\W*question\b/i.test(report);
+const textOf = (m: { parts: unknown }) =>
+  ((m.parts as { type?: string; text?: string }[]) ?? []).flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("");
+
+// The messages of one run: from its prompt up to the next prompt from Emplio. null while the prompt isn't in the chat.
+export function runSpan<M extends { id: string; role: string; parts: unknown }>(msgs: M[], run: string) {
+  const at = msgs.findIndex((m) => m.id === run);
+  if (at < 0) return null;
+  const next = msgs.findIndex((m, i) => i > at && m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
+  return { msgs: msgs.slice(at, next < 0 ? undefined : next), latest: next < 0 };
+}
+
+async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "report" | "actions">> {
+  if (!run || !w.chatId) return { status: w.status, report: w.report, actions: await actionsOf(w) };
+  const span = runSpan(await loadMessages(w.chatId), run);
+  if (!span) return { status: "working", report: null, actions: [] };
+  const actions = actionsIn(span.msgs);
+  if (span.latest) return { status: w.status, report: w.report, actions };
+  const last = [...span.msgs].reverse().find((m) => m.role === "assistant" && textOf(m).trim());
+  const text = last ? textOf(last).trim() : "";
+  return { status: asks(text) ? "asking" : "done", report: text || null, actions };
 }
 
 const agentName = (slug: string | null) => slug?.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ?? null;
@@ -411,11 +442,12 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
         const busy = live.has(w.id);
         if (busy) steer(w.chatId);
         track(w.id);
-        void send(w, brief);
+        const run = generateId();
+        void send(w, brief, run);
         record({ ...who, conversationId, kind: "job", summary: `Carried on "${w.name}"`, detail: { job: w.id, pick: "carry on", agent: w.agent, brief: brief.slice(0, 4000) } });
         return busy
           ? { text: `sent to ${short(w.id)} "${w.name}": it reads it after the step it's on` }
-          : { text: `${short(w.id)} "${w.name}" is working on it`, started: [w.id] };
+          : { text: `${short(w.id)} "${w.name}" is working on it`, started: [runRef(w.id, run)] };
       }
       const level = set.level === "strong" || set.level === "light" ? set.level : null;
       if (set.level && !level) return { text: "error: --level is light or strong" };
@@ -443,10 +475,11 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
         .values({ ...who, conversationId, chatId, parentId: caller.jobId, depth: caller.depth + 1, name, agent: agent?.slug ?? null, level })
         .returning();
       track(w!.id);
-      void send(w!, brief);
+      const run = generateId();
+      void send(w!, brief, run);
       // which pick it was, to look back on: agents that never get used are the thing to watch
       record({ ...who, conversationId, kind: "job", summary: `Handed "${w!.name}" to ${agent?.name ?? "a copy of itself"}`, detail: { job: w!.id, depth: w!.depth, pick: made ? "new agent" : copy ? "myself" : "agent", agent: agent?.slug, brief: brief.slice(0, 4000) } });
-      return { text: `started ${short(w!.id)} "${w!.name}"${agent ? ` with ${agent.name}` : ""}${made ? " (a new agent)" : ""}`, started: [w!.id] };
+      return { text: `started ${short(w!.id)} "${w!.name}"${agent ? ` with ${agent.name}` : ""}${made ? " (a new agent)" : ""}`, started: [runRef(w!.id, run)] };
     }
     case "notify": {
       const text = rest.map((x) => x.trim()).filter((x) => x && x !== "-").join("\n\n");
@@ -649,13 +682,14 @@ export async function jobRoutes(app: FastifyInstance) {
   const owned = (id: string, ctx: Who) => and(eq(jobs.id, id), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId));
 
   // one job, for its line in the chat, polled while it works
-  app.get<{ Params: { id: string } }>("/jobs/:id", { schema: { params } }, async (req, reply) => {
+  // run: the card's prompt (runRef); left out, the job as a whole
+  app.get<{ Params: { id: string }; Querystring: { run?: string } }>("/jobs/:id", { schema: { params } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const w = await db.query.jobs.findFirst({ where: owned(req.params.id, ctx) });
     if (!w) return reply.code(404).send({ error: "Not found" });
     // ponytail: the name from its slug, not AGENT.md (polled every 1.5s); read the file if names drift from slugs
-    return { id: w.id, name: w.name, agent: agentName(w.agent), status: w.status, report: w.report, chatId: w.chatId, actions: await actionsOf(w) } satisfies JobInfo;
+    return { id: w.id, name: w.name, agent: agentName(w.agent), chatId: w.chatId, ...(await runOf(w, req.query.run)) } satisfies JobInfo;
   });
 
   // the jobs the person opened as their own chat, nested in the sidebar under the chat they came from until closed

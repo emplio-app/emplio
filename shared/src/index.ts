@@ -467,6 +467,14 @@ export type AgentInfo = { slug: string; name: string; description: string; skill
 // startedIn: the chat it nests under in the sidebar, through any jobs that started it
 export type JobSummary = Pick<JobInfo, "id" | "name" | "agent" | "status" | "chatId"> & { startedIn: string };
 
+// A hand-off's card, in a command's output: the job and the run its prompt started (`job/run`, the prompt's message
+// id in the job's chat). Each prompt is its own run, so an earlier card stays finished. Older ones: the job alone.
+export const runRef = (job: string, run: string) => `${job}/${run}`;
+export const splitRef = (ref: string) => {
+  const [id, run] = ref.split("/");
+  return { id: id!, run };
+};
+
 export type JobInfo = {
   id: string;
   name: string;
