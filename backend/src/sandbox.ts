@@ -7,7 +7,7 @@ import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
-import { browserFor, newDownloads, signInLink } from "./browser";
+import { browserFor, browserLocal, connectionFor, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -130,6 +130,19 @@ async function nothingUnsaved(box: Box, s: Session) {
   return true;
 }
 
+// One look at the page after each browser command: turned away, or asking for a password (browser.ts). A small page only,
+// so a block notice inside a real page or a CAPTCHA box on a working form doesn't count. Not 401 (signed out) or 429 (slow down).
+export const PAGE_CHECK = String.raw`(() => {
+  const text = document.body ? document.body.innerText : "";
+  const nav = performance.getEntriesByType("navigation")[0];
+  const status = nav ? nav.responseStatus : 0;
+  const wall = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha-delivery.com"], iframe[src*="_Incapsula_Resource"], #px-captcha, #challenge-container, #captcha-container, #infoDiv0');
+  const words = /just a moment|attention required|verify you are human|checking your browser|access denied|pardon our interruption|unusual traffic|request unsuccessful/i.test(document.title + " " + text.slice(0, 2000));
+  const blocked = text.length < 2000 && !!(wall || words || status === 403 || status === 412);
+  const password = [...document.querySelectorAll("input[type=password]")].some((i) => i.offsetParent);
+  return JSON.stringify({ page: location.protocol.startsWith("http") ? location.host : "", blocked, signIn: password && !blocked });
+})()`;
+
 // emplio browser calls|send: what the page asked its server, and repeating it from the signed-in page.
 // Login headers are read from the browser's record here, so they never reach the output or the conversation.
 // ponytail: fetch and XHR only, so old sites that post whole pages aren't listed; they stay on the page itself
@@ -144,6 +157,9 @@ SENT = "/tmp/emplio-sent." + os.environ["BROWSER_SESSION"]
 PLAIN = re.compile(r"[A-Za-z_][\w.-]{0,40}")
 DROP = re.compile(r"^(cookie|user-agent|referer|origin|host|content-length|accept-encoding|connection|sec-.*|:.*)$", re.I)
 LOGIN = re.compile(r"auth|token|csrf|xsrf|session|api-?key", re.I)
+BLOCK = re.compile(r"just a moment|attention required|verify you are human|checking your browser|access denied|pardon our interruption|unusual traffic|captcha", re.I)
+PAGE_CHECK = ${JSON.stringify(PAGE_CHECK)}
+PAID = os.environ.get("BROWSER_PAID") == "1"
 SECRET = re.compile(r"""("?[\w-]*(?:pass|pwd|secret|token|otp|cvv|api_?key|authorization)[\w-]*"?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|[^&\s,}]+)""", re.I)
 
 def ab(*args, stdin=None):
@@ -209,6 +225,14 @@ def row(r, sent, got):
             "sends": shape(sent)[:500] if sent else "", "returns": shape(got)[:500] if got else "", "keys": top(got)}
 def encoded(report):
     return base64.b64encode(json.dumps(report).encode()).decode()
+
+def check():
+    try:
+        if PAID: return
+        page = json.loads(json.loads(ab("eval", "--stdin", stdin=PAGE_CHECK).stdout))
+        if page["blocked"] or page["signIn"]: print("SITECHECK:" + os.environ["EZ_KEY"] + "\t" + encoded(page))
+    except Exception:
+        pass  # only a hint: never spoils the command it follows
 
 def new():
     try:
@@ -291,6 +315,8 @@ def send(args):
             with open(SENT, "a") as f: f.write(mine["requestId"] + "\n")
     except Exception:
         pass
+    # a web page where data should be, saying no
+    if not PAID and out["body"].lstrip()[:1] == "<" and BLOCK.search(out["body"][:3000]): tell_blocked(url)
     if out["status"] >= 400: return fail(method + " " + target + ": " + str(out["status"]) + " " + masked(out["body"])[:300])
     print(str(out["status"]))
     print(masked(out["body"]))
@@ -310,13 +336,23 @@ def tell_sent(url, method, body, reply):
     except Exception:
         pass  # only a check: never spoils the command
 
+def tell_blocked(url):
+    try:
+        f, _ = tempfile.mkstemp(prefix="/tmp/emplio-req." + os.environ["EZ_KEY"] + ".SITECHECK.")
+        os.write(f, encoded({"page": urlsplit(url).netloc, "blocked": True, "signIn": False}).encode())
+        os.close(f)
+    except Exception:
+        pass  # only a hint: never spoils the command
+
 def fail(message):
     print("emplio browser: " + message, file=sys.stderr)
     return 1
 
 args = sys.argv[1:]
 if args[0] == "send": sys.exit(send(args[1:]))
-if args[1:] == ["--new"]: new()
+if args[1:] == ["--new"]:
+    check()
+    new()
 else: sys.exit(calls(args[1:]))
 `;
 
@@ -427,6 +463,8 @@ case "$1" in
       skill) shift; AGENT_BROWSER_SKILLS_DIR="$guides" exec "$ab" skills get core "$@" ;;
       # the server stops this browser itself, after 10 minutes unused; its sign-ins are saved then
       close) echo "The browser stays open for now and closes by itself after 10 minutes unused." ; exit 0 ;;
+      # onto the paid connection in the person's country; the server does the switching
+      local) req BROWSERLOCAL "$(run get url 2>/dev/null)"; exit 0 ;;
       # a saved script: its emplio browser commands inherit the browser, which the words in this command attached.
       # bash -e, so it stops at the first failed step
       run)
@@ -763,6 +801,7 @@ emplio browser send POST /api/expenses @/work/tmp/x.json   # or a body inline, o
 2. A page you've already seen: do all its steps in one command, joined with && so it stops at the first failure, or in a shell loop or Python (subprocess, with the words emplio browser in the command).
 3. One step at a time only where the next step depends on what appears.
 Always:
+- It can start on a connection outside ${name}'s country, and sites that turn it away are moved by themselves. When local prices, times or availability matter, or a site refuses it and nothing says it moved: \`emplio browser local\`, then open the page again.
 - Keep command output (no /dev/null): it's how you see what failed. Tokens never go in files, skills or messages.
 - After saving, check every record on the site's own page against what you meant to enter.
 - Refs go stale when the page changes: snapshot again. A failed click says why (covered, hidden): deal with that, never click by position. Before anything that can't be undone, check you're on the right row.
@@ -1246,7 +1285,7 @@ export function withRequests(output: string, key: string) {
   const body = new Map<string, string>();
   const rest: string[] = [];
   // output cut mid-line (| head -c 300) leaves the trailer's lines stuck to it
-  for (const line of output.replace(new RegExp(`([^\\n])((?:EZREQ|SITECALLS):${key}\\t)`, "g"), "$1\n$2").split("\n")) {
+  for (const line of output.replace(new RegExp(`([^\\n])((?:EZREQ|SITECALLS|SITECHECK):${key}\\t)`, "g"), "$1\n$2").split("\n")) {
     const m = line.startsWith(`EZREQ:${key}\t`) ? line.slice(`EZREQ:${key}\t`.length).split("\t") : null;
     if (m?.length === 2) body.set(m[0]!, m[1]!);
     else rest.push(line);
@@ -1398,6 +1437,14 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const note = await siteCallsFrom(s.workspaceId, line.slice(`SITECALLS:${key}\t`.length), s.sitesShown ?? new Set(), s.channel === "web" && !!s.watched).catch((error) => (console.error("saving site requests failed", error), null));
       if (note) lines.push(`\n${note}`);
     }
+    else if (line.startsWith(`SITECHECK:${key}\t`)) {
+      const note = await pageChecked(s.conversationId, s.workspaceId, line.slice(`SITECHECK:${key}\t`.length)).catch((error) => (console.error("browser page check failed", error), null));
+      if (note) lines.push(`\n${note}`);
+    }
+    else if (line.startsWith(`BROWSERLOCAL:${key}\t`)) {
+      const [url] = Buffer.from(line.slice(`BROWSERLOCAL:${key}\t`.length), "base64").toString().split("\0");
+      lines.push(await browserLocal(s.conversationId, s.workspaceId, url).catch((error) => (console.error("browser switch failed", error), "emplio browser local: that didn't work")));
+    }
     else if (line.startsWith(`SITES:${key}\t`))
       lines.push(await sitesCommand(s.workspaceId, Buffer.from(line.slice(`SITES:${key}\t`.length), "base64").toString().split("\0").slice(0, -1)));
     else if (line.startsWith(`AGENTS:${key}\t`)) {
@@ -1472,7 +1519,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.
@@ -1658,10 +1705,12 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     let env: Record<string, string> = { TZ: await timezoneOf(s.user.id) };
     let browserId: string | undefined;
     if (usesBrowser(command)) {
-      const live = await browserFor(s.conversationId, { workspaceId: s.workspaceId, userId: s.user.id });
+      const owner = { workspaceId: s.workspaceId, userId: s.user.id };
+      const live = await browserFor(s.conversationId, owner);
+      await connectionFor(live, owner, command).catch((error) => console.error("browser connection not chosen:", error));
       browserId = live.id;
       // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one
-      env = { ...env, BROWSER_CDP_URL: live.cdpUrl, BROWSER_SESSION: `chat-${live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH };
+      env = { ...env, BROWSER_CDP_URL: live.cdpUrl, BROWSER_SESSION: `chat-${live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
     }
     used.add(boxKey(s));
     // plain git reaches GitHub through this server, which holds the login (git-proxy.ts)

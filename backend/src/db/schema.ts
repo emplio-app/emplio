@@ -475,6 +475,17 @@ export const siteCalls = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.host, t.method, t.path, t.op] }), index().on(t.workspaceId, t.site, t.seenAt)],
 );
 
+// Sites a business's browsers go to on the paid connection (browser.ts): they turned the free one away, take a sign-in, or Emplio asked.
+export const paidSites = pgTable(
+  "paid_sites",
+  {
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    site: text().notNull(),
+    seenAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.site] })],
+);
+
 // Tasks (tasks.ts): everything to be done in a business, by a person or by the AI (assigneeId null). Who
 // asked is told when one is two days late; people are reminded on their channel once it's due.
 export const tasks = pgTable(

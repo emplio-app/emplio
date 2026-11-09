@@ -43,6 +43,9 @@ export async function startHosted(conversationId: string, owner: Owner): Promise
   return { ...b, liveUrl: liveUrlOf(conversationId, b.timeoutAt) };
 }
 
+// No proxies here: the browser stays on this server's own connection.
+export const useProxy = async (_id: string, _owner: Owner) => false;
+
 export async function listHosted(conversationId: string): Promise<HostedBrowser[]> {
   const found = (await (await runner(`/browsers?${new URLSearchParams({ chat: conversationId })}`)).json()) as Started[];
   return found.map((b) => ({ ...b, liveUrl: liveUrlOf(conversationId, b.timeoutAt) }));
