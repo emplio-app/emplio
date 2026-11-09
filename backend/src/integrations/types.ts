@@ -20,7 +20,7 @@ export type Provider = {
   // A sign-in we finish ourselves (own OAuth): the waiting connection and where to go next, from the signed state
   // the app's page handed back (null: forged or too old); then the login its code is worth, and whose account it is.
   readSignIn?(app: string, state: string): { externalId: string; back: string } | null;
-  finishSignIn?(app: string, code: string, back: string): Promise<{ secret: string; label: string | null }>;
+  finishSignIn?(app: string, code: string, back: string): Promise<{ secret: string; label: string | null; refreshToken?: string; expiresAt?: Date }>;
   // Apps connected with a key the person pastes: checks it works, and returns what to keep (encrypted).
   connectWithKey?(app: string, key: string): Promise<{ secret: string; label?: string }>;
   signInStatus(externalId: string): Promise<Connection["status"]>;

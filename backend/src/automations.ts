@@ -12,7 +12,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Cron } from "croner";
 import { generateId, type UIMessage } from "ai";
 import { and, desc, eq, inArray, isNull, lte, ne } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AUTOMATION_PREFIX, type Automation, type AutomationRun } from "@emplio/shared";
 import { context, type Ctx } from "./auth";
 import { generateReply, lastWords, quiet } from "./chat";
@@ -20,9 +20,10 @@ import { chatLink, heldBack, post } from "./channels";
 import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
-import { automationRuns, automations, conversations, users, workspaceMembers, workspaces } from "./db/schema";
+import { automationRuns, automations, connections, conversations, users, workspaceMembers, workspaces } from "./db/schema";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger } from "./integrations";
+import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
 import { approve } from "./approvals";
 import type { Session } from "./sandbox";
 import { pollConfig, pollOnce } from "./integrations/polls";
@@ -530,6 +531,25 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
   for (const row of rows) if (githubHooks.wanted(row.triggerConfig, payload)) await fire(row, "trigger", data);
 }
 
+// Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
+async function onAppEvents(app: string, id: string, events: WebhookEvent[]) {
+  const { push } = OWN_APPS[app]!;
+  for (const event of events) {
+    if (!event.triggers.length) continue;
+    if (event.id) {
+      if (seen.has(`${app}:${event.id}`)) continue;
+      seen.add(`${app}:${event.id}`);
+      if (seen.size > 10_000) seen.delete(seen.values().next().value!);
+    }
+    const names = event.triggers.map((t) => `${app}.${t}`);
+    const rows = await db
+      .select()
+      .from(automations)
+      .where(and(eq(automations.externalId, id), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
+    for (const row of rows) if (push?.wanted?.(row.triggerConfig, event.data) ?? true) await fire(row, "trigger", event.data);
+  }
+}
+
 // --- the app's routes, and the webhook ---
 
 export async function automationRoutes(app: FastifyInstance) {
@@ -644,6 +664,25 @@ export async function automationRoutes(app: FastifyInstance) {
       void onGithubEvent(githubHooks.watchId(connection, owner, repo), String(req.headers["x-github-event"] ?? ""), JSON.parse(req.body)).catch((error) => req.log.error(error, "handling a GitHub event failed"));
       return { ok: true };
     });
+    // Every other own app with webhooks. What's after the connection (a project, a token) is the app's own (OwnApp.push.receive).
+    const appWebhook = async (req: FastifyRequest<{ Body: string; Params: { app: string; connection: string; "*"?: string } }>, reply: FastifyReply) => {
+      const { app, connection, "*": rest = "" } = req.params;
+      const receive = OWN_APPS[app]?.push?.receive;
+      const row = receive ? await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) }) : null;
+      const key = row && (await freshSecret(row).catch(() => null));
+      if (!receive || !key) return reply.code(401).send({ error: "unknown webhook" });
+      const delivery: Delivery = { body: req.body, headers: req.headers, connection, rest };
+      const got = await receive(delivery, key).catch((error) => (req.log.error(error, `a ${app} webhook failed`), null));
+      if (!got) return reply.code(401).send({ error: "bad signature" });
+      reply.headers(got.headers ?? {});
+      void got
+        .events()
+        .then((events) => onAppEvents(app, [app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), events))
+        .catch((error) => req.log.error(error, `handling a ${app} event failed`));
+      return { ok: true };
+    };
+    hooks.post("/webhooks/app/:app/:connection", appWebhook);
+    hooks.post("/webhooks/app/:app/:connection/*", appWebhook);
   });
 }
 

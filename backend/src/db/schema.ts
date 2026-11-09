@@ -203,6 +203,9 @@ export const connections = pgTable(
     label: text(),
     // a login we hold ourselves (an API key), encrypted (see secrets.ts); null when the provider holds it
     secret: text(),
+    // own OAuth, for apps whose logins run out: how to get a new one (encrypted like `secret`), and when this one ends
+    refreshToken: text(),
+    expiresAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
