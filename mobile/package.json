@@ -9,6 +9,7 @@
   "dependencies": {
     "@capacitor/core": "^7.6.0",
     "@capacitor/ios": "^7.6.0",
+    "@capacitor/push-notifications": "^7",
     "@capacitor/splash-screen": "^7.0.0"
   },
   "devDependencies": {

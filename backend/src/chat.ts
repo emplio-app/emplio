@@ -51,6 +51,7 @@ import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
 import { holdRead, readLater, SILENT } from "./reader";
 import { TASK } from "./tasks";
+import { pushTo } from "./push";
 import { addApp, follow, isReplying, isWatched, notify, send, settle, unwatch, watch } from "./live";
 import { z } from "zod";
 
@@ -1038,7 +1039,10 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       const seen = isWatched(id);
       void store(responseMessage)
         .then(async () => {
-          if (!seen) await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
+          if (seen) return;
+          await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
+          // they left before it finished; background work speaks up through post(), Telegram replies arrive on Telegram
+          if (answer && !automation && !job && via !== "telegram" && !stopper.signal.aborted) void pushTo(ctx.userId, answer, id);
         })
         .catch((error) => log.error(error, "marking reply unread failed"))
         .finally(() => {

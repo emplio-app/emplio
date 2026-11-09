@@ -8,7 +8,7 @@ import { NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useMe } from "@/lib/api";
+import { api, useMe } from "@/lib/api";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -20,6 +20,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [isPending, me, router]);
 
   useFitToScreen();
+  usePhoneNotifications(!!me?.user.name, router.push);
 
   if (!me?.user.name) return null;
 
@@ -37,6 +38,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </TooltipProvider>
     </DraftProvider>
   );
+}
+
+// In the iPhone app, once signed in: ask to notify (iOS only asks once), tell the server where to reach this
+// phone, and open the chat a tapped notification is about. The plugin is missing on app builds without it.
+type PushPlugin = {
+  requestPermissions(): Promise<{ receive: string }>;
+  register(): Promise<void>;
+  addListener(event: string, run: (e: never) => void): { remove(): void } | Promise<{ remove(): void }>;
+};
+function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) {
+  useEffect(() => {
+    const push = (window as { Capacitor?: { Plugins?: { PushNotifications?: PushPlugin } } }).Capacitor?.Plugins?.PushNotifications;
+    if (!signedIn || !push) return;
+    const listening = [
+      push.addListener("registration", (t: { value: string }) => void api("/push/device", { token: t.value }).catch(() => {})),
+      push.addListener("pushNotificationActionPerformed", (a: { notification: { data?: { path?: string } } }) => {
+        if (a.notification.data?.path) open(a.notification.data.path);
+      }),
+    ];
+    void push.requestPermissions().then((p) => (p.receive === "granted" ? push.register() : undefined));
+    return () => void listening.forEach((l) => void Promise.resolve(l).then((h) => h.remove()));
+  }, [signedIn, open]);
 }
 
 // iPhone keyboards cover the page instead of shrinking it, then slide the view up to the field: size the

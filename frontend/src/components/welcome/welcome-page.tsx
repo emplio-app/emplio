@@ -89,7 +89,7 @@ export function WelcomePage() {
   const last = step === STEPS.length - 1;
 
   return (
-    <main className="flex min-h-dvh flex-col bg-muted/30">
+    <main className="flex min-h-dvh flex-col bg-muted/30 pt-[env(safe-area-inset-top)]">
       <header className="flex items-center justify-between px-4 py-4 sm:px-8">
         <Logo />
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => finish.mutate()}>

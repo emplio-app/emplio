@@ -1,3 +1,4 @@
+import { pushRoutes } from "./push";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
@@ -61,6 +62,7 @@ await app.register(cookie);
 await app.register(websocket);
 await app.register(authRoutes);
 await app.register(chatRoutes);
+await app.register(pushRoutes);
 await app.register(browserRoutes);
 await app.register(loginRoutes);
 await app.register(setupRoutes);

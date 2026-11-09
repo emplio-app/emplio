@@ -22,6 +22,7 @@ import { channelLinks, conversations, users, workspaceMembers, workspaces } from
 import { readStored } from "../files";
 import { phoneAppUrl } from "../logins";
 import { notify } from "../live";
+import { pushTo } from "../push";
 import { telegram } from "./telegram";
 
 export type ChannelName = (typeof channelLinks.$inferSelect)["channel"];
@@ -148,6 +149,7 @@ export async function post(workspaceId: string, userId: string, markdown: string
     await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
   }
   notify(userId);
+  void pushTo(userId, markdown, await mainChat(workspaceId, userId));
   return links[0]?.channel ?? null;
 }
 
@@ -168,6 +170,7 @@ export async function heldBack(workspaceId: string) {
 
 // A job's OK on the person's phone, so it doesn't sit unanswered when they aren't in the web app.
 export async function askOnPhone(workspaceId: string, userId: string, card: Approval) {
+  void pushTo(userId, `Needs your OK: ${card.title}`, await mainChat(workspaceId, userId));
   for (const l of await linksHere(workspaceId, userId)) await CHANNELS()[l.channel].approval(l.address, card).catch((error) => console.error(`asking on ${l.channel} failed`, error));
 }
 export async function closeOnPhone(workspaceId: string, userId: string, card: Approval) {

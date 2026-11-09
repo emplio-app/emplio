@@ -105,6 +105,13 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
+// An iPhone that takes notifications, for as long as that sign-in lasts (push.ts).
+export const pushDevices = pgTable("push_devices", {
+  token: text().primaryKey(),
+  sessionHash: text().notNull().references(() => sessions.tokenHash, { onDelete: "cascade" }),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index().on(t.sessionHash)]);
+
 export const conversations = pgTable(
   "conversations",
   {
