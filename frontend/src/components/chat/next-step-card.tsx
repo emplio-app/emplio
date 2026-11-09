@@ -30,7 +30,7 @@ export function NextStepCard({ card, onAnswer, onClose }: { card: NextStep; onAn
   }, [card, onAnswer]);
 
   return (
-    <Card size="sm" className="relative mb-2 gap-2 px-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+    <Card size="sm" className="relative gap-2 px-3 shadow-lg animate-in fade-in duration-200">
       <Button size="icon-xs" variant="ghost" aria-label="Close" onClick={onClose} className="absolute top-2 right-2 text-muted-foreground">
         <XIcon />
       </Button>
