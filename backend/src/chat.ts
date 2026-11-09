@@ -45,7 +45,7 @@ import { slashCommand } from "./skills";
 import { allowedIn } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -489,7 +489,8 @@ const NEXT_STEP_RULES = [
   "question: the one short question, under 15 words, that most moves the work forward, from the AI employee to the person. If the last reply already asks something, ask that.",
   'buttons: 2 or 3 answers to that question, 1 to 3 words each, in the person\'s voice. First the one that moves things forward ("Yes, send it"), then one that declines or waits ("Not yet").',
   "Write in the language of the chat, in plain words a business owner uses. Only offer what the chat points to: no new facts, no work nobody talked about.",
-  `Only write a card when there's a real next step the person can decide. If the work is finished and nothing waits on them, or it was small talk, reply with exactly ${SILENT} and nothing else.`,
+  `Only write a card when there's a real next step the person can decide with a tap. If the work is finished and nothing waits on them, or it was small talk, reply with exactly ${SILENT} and nothing else.`,
+  `A button must be the whole answer. If the question can only be answered by typing something the chat hasn't named (which repo, a name, a number, a date, a link, a file), reply with exactly ${SILENT}: never a button like "Send the repo" that only promises an answer. Options the chat already named can be buttons.`,
 ].join("\n");
 const NEXT_STEP_ASK = `Write the card for the last reply: JSON only, or ${SILENT}.`;
 const HISTORY_LIMIT = 2000;
@@ -518,6 +519,8 @@ export async function nextStep(bill: Bill & { conversationId: string }, peek: bo
   const all = await lastTurns(bill.conversationId);
   const last = all.at(-1);
   if (last?.role !== "assistant") return null;
+  // only once everything is done and Emplio waits on the person: the reply after the agents' reports gets the card
+  if (await stillWorking(bill.conversationId)) return null;
   if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
   // it already put a question or button in the chat that's waiting on them: a second one would compete with it
   if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;

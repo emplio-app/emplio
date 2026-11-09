@@ -112,6 +112,10 @@ const NOTE_REPORT = 1500;
 export const untoldNote = (reports: string[]) =>
   `[The person worked in these threads' chats directly, so you weren't woken. Their latest reports, for you to know; don't mention them unless it matters (\`emplio threads show <id>\` for all of one):\n\n${reports.map((r) => (r.length > NOTE_REPORT ? `${r.slice(0, NOTE_REPORT)}…` : r)).join("\n\n")}\n]`;
 
+// agents still at it for this chat: Emplio isn't waiting on the person yet (chat.ts nextStep)
+export const stillWorking = async (conversationId: string) =>
+  !!(await db.query.jobs.findFirst({ where: and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")), columns: { id: true } }));
+
 export async function untoldReports(conversationId: string) {
   if (!untold.size) return null;
   const rows = await db.select().from(jobs).where(and(eq(jobs.conversationId, conversationId), isNull(jobs.parentId)));
