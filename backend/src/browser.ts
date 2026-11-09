@@ -305,6 +305,7 @@ async function goTo(cdpUrl: string, url: string) {
 const REMEMBERED_MS = 30 * 86_400_000;
 const LONG_LIVED_MS = 7 * 86_400_000;
 const SIGN_IN_COOKIE = /auth|sess|token|login|jwt|sid$/i;
+const ASKED = /\bbrowser["']?[\s,]+["']?local\b/;
 const URLS = /(?:https?:\/\/|\bopen\s+["']?)([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
 
 export const sitesIn = (text: string) => [...new Set([...text.matchAll(URLS)].map((m) => siteOf(m[1]!)))];
@@ -335,8 +336,14 @@ async function goPaid(live: LiveBrowser, owner: Owner) {
 
 // Before a browser command: a site that's known to need it (named in the command) goes on the paid connection first.
 export async function connectionFor(live: LiveBrowser, owner: Owner, text: string) {
-  if (live.paid) return;
   const sites = sitesIn(text);
+  // asked for in this command: done first, so pages the same command opens use it
+  if (ASKED.test(text)) {
+    await Promise.all(sites.map((s) => rememberPaid(owner.workspaceId, s)));
+    await goPaid(live, owner);
+    return;
+  }
+  if (live.paid) return;
   if (!sites.length) return;
   live.signedIn ??= signedInSites((await savedState(owner).catch(() => null))?.cookies ?? []);
   if (sites.some((s) => live.signedIn!.has(s)) || (await anyRemembered(owner.workspaceId, sites))) await goPaid(live, owner);
@@ -361,11 +368,11 @@ export async function pageChecked(conversationId: string, workspaceId: string, e
 export async function browserLocal(conversationId: string, workspaceId: string, url?: string) {
   const live = await openBrowser(conversationId);
   if (!live?.owner) return "emplio browser local: no browser open";
-  if (live.paid) return "Already on the local connection.";
-  const moved = await goPaid(live, live.owner);
-  if (!moved) return "This browser has no other connection to move to.";
+  // usually moved already, before the command (connectionFor); not if the words were inside a script
+  await goPaid(live, live.owner);
+  if (!live.paid) return "This browser has no other connection to move to.";
   if (url && /^https?:/.test(url)) await rememberPaid(workspaceId, siteOf(new URL(url).host));
-  return "Now on a local connection in the person's country. Open the page again to use it.";
+  return "On a local connection in the person's country. Pages already open need opening again to use it.";
 }
 
 // A link on our own address for signing in from a phone (Telegram has no live view beside the chat): it

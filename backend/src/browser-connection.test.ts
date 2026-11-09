@@ -72,10 +72,20 @@ test("a site not used for 30 days is forgotten", async () => {
 test("Emplio can ask for it, and the site is remembered", async () => {
   switches = 0;
   const live = await browser();
-  expect(await browserLocal(live.id, owner.workspaceId, "https://shop.asked.test/prices")).toContain("Now on a local connection");
+  expect(await browserLocal(live.id, owner.workspaceId, "https://shop.asked.test/prices")).toContain("On a local connection");
   expect(switches).toBe(1);
-  expect(await browserLocal(live.id, owner.workspaceId, "https://shop.asked.test/prices")).toContain("Already");
+  expect(await browserLocal(live.id, owner.workspaceId, "https://shop.asked.test/prices")).toContain("On a local connection");
+  expect(switches).toBe(1);
   expect(await db.select().from(paidSites).where(and(eq(paidSites.workspaceId, owner.workspaceId), eq(paidSites.site, "asked.test")))).toHaveLength(1);
+});
+
+test("asked for in a command, it moves before the command runs and remembers the site that command opens", async () => {
+  switches = 0;
+  const live = await browser();
+  await connectionFor(live, owner, "emplio browser local; emplio browser open https://chained.test && emplio browser snapshot");
+  expect(switches).toBe(1);
+  expect(live.paid).toBe(true);
+  expect(await db.select().from(paidSites).where(and(eq(paidSites.workspaceId, owner.workspaceId), eq(paidSites.site, "chained.test")))).toHaveLength(1);
 });
 
 test("a browser service with no proxies stays as it is", async () => {
