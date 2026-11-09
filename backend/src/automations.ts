@@ -532,7 +532,7 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
 }
 
 // Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
-async function onAppEvents(app: string, id: string, events: WebhookEvent[]) {
+async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]) {
   const { push } = OWN_APPS[app]!;
   for (const event of events) {
     if (!event.triggers.length) continue;
@@ -542,6 +542,7 @@ async function onAppEvents(app: string, id: string, events: WebhookEvent[]) {
       if (seen.size > 10_000) seen.delete(seen.values().next().value!);
     }
     const names = event.triggers.map((t) => `${app}.${t}`);
+    const id = event.watch ?? fallback;
     const rows = await db
       .select()
       .from(automations)
@@ -667,10 +668,11 @@ export async function automationRoutes(app: FastifyInstance) {
     // Every other own app with webhooks. What's after the connection (a project, a token) is the app's own (OwnApp.push.receive).
     const appWebhook = async (req: FastifyRequest<{ Body: string; Params: { app: string; connection: string; "*"?: string } }>, reply: FastifyReply) => {
       const { app, connection, "*": rest = "" } = req.params;
-      const receive = OWN_APPS[app]?.push?.receive;
-      const row = receive ? await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) }) : null;
-      const key = row && (await freshSecret(row).catch(() => null));
-      if (!receive || !key) return reply.code(401).send({ error: "unknown webhook" });
+      const push = OWN_APPS[app]?.push;
+      const receive = push?.receive;
+      const row = receive && !push.appWide ? await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) }) : null;
+      const key = push?.appWide ? "" : row && (await freshSecret(row).catch(() => null));
+      if (!receive || key === null || key === undefined) return reply.code(401).send({ error: "unknown webhook" });
       const delivery: Delivery = { body: req.body, headers: req.headers, connection, rest };
       const got = await receive(delivery, key).catch((error) => (req.log.error(error, `a ${app} webhook failed`), null));
       if (!got) return reply.code(401).send({ error: "bad signature" });
@@ -679,7 +681,7 @@ export async function automationRoutes(app: FastifyInstance) {
         .events()
         .then((events) => onAppEvents(app, [app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), events))
         .catch((error) => req.log.error(error, `handling a ${app} event failed`));
-      return { ok: true };
+      return got.reply ?? { ok: true };
     };
     hooks.post("/webhooks/app/:app/:connection", appWebhook);
     hooks.post("/webhooks/app/:app/:connection/*", appWebhook);

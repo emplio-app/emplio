@@ -19,6 +19,10 @@ import { exa } from "./exa";
 import { fireflies } from "./fireflies";
 import { fly } from "./fly";
 import { github } from "./github";
+import { googlecalendar } from "./googlecalendar";
+import { googledocs } from "./googledocs";
+import { googlemeet } from "./googlemeet";
+import { googlesheets } from "./googlesheets";
 import { hostinger } from "./hostinger";
 import { hubspot } from "./hubspot";
 import { indiamart } from "./indiamart";
@@ -28,10 +32,16 @@ import { neon } from "./neon";
 import { plivo } from "./plivo";
 import { razorpay } from "./razorpay";
 import { sarvam } from "./sarvam";
+import { slack } from "./slack";
 import { stripe } from "./stripe";
 import { swipe } from "./swipe";
 import { todoist } from "./todoist";
 import { vercel } from "./vercel";
+import { zoom } from "./zoom";
+import { zoho } from "./zoho";
+import { zoho_books } from "./zoho_books";
+import { zoho_invoice } from "./zoho_invoice";
+import { zoho_mail } from "./zoho_mail";
 
 export type OwnAction = {
   description: string;
@@ -52,20 +62,25 @@ export type WebhookEvent = {
   triggers: string[];
   // what the automation sees, and what its settings are checked against
   data: unknown;
+  // the id automations are stored under, on an app-wide webhook
+  watch?: string;
 };
 export type OwnApp = {
   app: string;
   name: string;
   logo: string;
-  keyField: KeyField;
+  // how it's connected by pasting a key; left out, it's sign-in only and offered only where its OAuth app is set up
+  keyField?: KeyField;
   // throws an AppsError if the key doesn't work; may answer whose account it is, to label the connection
   check(key: string): Promise<string | void>;
   // can also be signed in to on the app's own page (OAuth), where the server has our client id and secret
   oauth?: {
     ready(): boolean;
     authorizeUrl(redirect: string, state: string): string;
-    // the login a finished sign-in's code is worth; a plain string never runs out
-    exchange(code: string, redirect: string): Promise<string | OAuthTokens>;
+    // the login a finished sign-in's code is worth; a plain string never runs out. `callback`: all the app's page sent back (Zoho's data centre)
+    exchange(code: string, redirect: string, callback: Record<string, unknown>): Promise<string | OAuthTokens>;
+    // the app can't be told to always show its consent screen, so a sign-in only finishes in the browser that started it
+    noConsentScreen?: boolean;
     // for apps whose logins run out: the next one. Throws AppsError(…, true) when the person has to sign in again
     refresh?(refreshToken: string): Promise<OAuthTokens>;
   };
@@ -80,15 +95,18 @@ export type OwnApp = {
     start(key: string, connection: string, event: string, config: unknown): Promise<string>;
     // the last automation on that id is gone; apps that can't take a webhook back leave this out
     stop?(key: string, id: string): Promise<void>;
-    // apps served by the shared webhook route. Null: not really from the app (401). `headers` go on the answer
-    // (a handshake); `events` runs after we've answered, so it may call the app.
-    receive?(delivery: Delivery, key: string): Promise<{ headers?: Record<string, string>; events(): Promise<WebhookEvent[]> } | null>;
+    // apps served by the shared webhook route. Null: not really from the app (401). `headers` and `reply` go on the
+    // answer (a handshake); `events` runs after we've answered, so it may call the app.
+    receive?(delivery: Delivery, key: string): Promise<{ headers?: Record<string, string>; reply?: unknown; events(): Promise<WebhookEvent[]> } | null>;
+    // one address for the whole app, set in its developer settings (Slack, Zoom): /webhooks/app/<app>/events. No connection
+    // is looked up, so key is "", and each event says which automations it's for in `watch`.
+    appWide?: boolean;
     // whether this automation's settings want the event (default: yes)
     wanted?(config: unknown, data: unknown): boolean;
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlecalendar, googledocs, googlesheets, googlemeet, slack, zoho_books, zoho_invoice, zoho_mail, zoho, zoom };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
@@ -136,12 +154,15 @@ const split = (action: string) => {
 export const own: Provider = {
   name: "own",
 
-  readyApps: async () => new Set(Object.keys(APPS)),
+  // sign-in-only apps need the server's OAuth app; without it they'd only be a dead button
+  readyApps: async () => new Set(Object.values(APPS).filter((a) => a.keyField || a.oauth?.ready()).map((a) => a.app)),
 
   async getApp(app) {
     const a = APPS[app];
     return a ? { app, name: a.name, description: "", logo: a.logo, keyField: a.keyField, ...(a.oauth?.ready() && { signIn: true }) } : null;
   },
+
+  mustStartHere: (app) => Boolean(APPS[app]?.oauth?.noConsentScreen),
 
   async listActions(app, words) {
     const terms = (words ?? "").toLowerCase().split(/\s+/).filter(Boolean);
@@ -184,9 +205,9 @@ export const own: Provider = {
     return s.app === app && s.e > Date.now() ? { externalId: `${PENDING}${s.n}`, back: s.back } : null;
   },
 
-  async finishSignIn(app, code, back) {
+  async finishSignIn(app, code, back, callback = {}) {
     const a = APPS[app]!;
-    const got = await a.oauth!.exchange(code, callbackUrl(app, back));
+    const got = await a.oauth!.exchange(code, callbackUrl(app, back), callback);
     const t = typeof got === "string" ? { token: got } : got;
     return { secret: t.token, label: (await a.check(t.token)) || null, refreshToken: t.refreshToken, expiresAt: untilExpiry(t) ?? undefined };
   },
@@ -194,6 +215,7 @@ export const own: Provider = {
   async connectWithKey(app, key) {
     const a = APPS[app];
     if (!a) throw new AppsError(`no app called ${app}`);
+    if (!a.keyField) throw new AppsError(`${app} is connected by signing in, not with a key`);
     const trimmed = key.trim();
     if (!trimmed) throw new AppsError(`enter your ${a.keyField.label}`);
     const label = await a.check(trimmed);

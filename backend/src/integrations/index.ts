@@ -8,7 +8,7 @@
 // ponytail: the four gated actions (money out, messages to customers, deletes) aren't enforced here yet, only asked for in the prompt.
 import { and, desc, eq } from "drizzle-orm";
 import { record } from "../activity";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { APP_CATEGORIES, type ActionRun, type AppCategory, type AppInfo, type ConnectCard, type Connection } from "@emplio/shared";
 import { CATALOG, catalogApp } from "./catalog";
 import { context, currentUser, type Ctx } from "../auth";
@@ -614,6 +614,11 @@ button,.b{display:block;box-sizing:border-box;text-align:center;text-decoration:
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
 }
 
+// Marks this browser as the one that started the sign-in. Only we can set a cookie on this address.
+const startCookie = (id: string) => `oauth_${id}=1; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age=900${process.env.WEBHOOK_URL?.startsWith("https") ? "; Secure" : ""}`;
+export const startedHere = (cookies: string | undefined, id: string) => (cookies ?? "").split(/;\s*/).includes(`oauth_${id}=1`);
+const toSignIn = (reply: FastifyReply, started: { connection: Connection; url: string }) => reply.header("set-cookie", startCookie(started.connection.id)).redirect(started.url);
+
 export async function integrationRoutes(app: FastifyInstance) {
   // AppsError is the person's problem (400); anything else is ours (500, logged by Fastify)
   const handle = async <T>(reply: { code(n: number): { send(b: unknown): unknown } }, fn: () => Promise<T>) => {
@@ -711,14 +716,14 @@ export async function integrationRoutes(app: FastifyInstance) {
     if (linked?.keyField && !(linked.signIn && req.query.signin === "1")) return reply.type("text/html").send(await keyPage(req.params.app.toLowerCase(), null, undefined, req.query.t));
     if (link)
       return handle(reply, async () =>
-        reply.redirect((await connect({ workspaceId: link.w, userId: link.u }, req.params.app.toLowerCase(), undefined, true, link.c, process.env.WEBHOOK_URL)).url),
+        toSignIn(reply, await connect({ workspaceId: link.w, userId: link.u }, req.params.app.toLowerCase(), undefined, true, link.c, process.env.WEBHOOK_URL)),
       );
     if (!(await currentUser(req))) return reply.redirect(`${FRONTEND_URL()}/login`);
     const ctx = await context(req, reply);
     if (!ctx) return;
     const chat = /^[0-9a-f-]{36}$/.test(req.query.chat ?? "") ? req.query.chat : undefined;
     const popup = req.query.popup === "1";
-    return handle(reply, async () => reply.redirect((await connect(ctx, req.params.app.toLowerCase(), chat, popup, req.query.connection, returnBase(req))).url));
+    return handle(reply, async () => toSignIn(reply, await connect(ctx, req.params.app.toLowerCase(), chat, popup, req.query.connection, returnBase(req))));
   });
 
   // The key form above, sent: the app checks the key before it's kept, and a wrong one shows the form again
@@ -749,6 +754,8 @@ export async function integrationRoutes(app: FastifyInstance) {
     const s = req.query.state ? provider.readSignIn?.(name, req.query.state) : null;
     const row = s ? await db.query.connections.findFirst({ where: and(eq(connections.app, name), eq(connections.externalId, s.externalId)) }) : null;
     if (!s || !row) return reply.type("text/html").send(await keyPage(name, null, "This sign-in has expired. Connect again from the chat."));
+    // a link someone was sent can't attach their account to the sender's connection
+    if (provider.mustStartHere?.(name) && !startedHere(req.headers.cookie, row.id)) return reply.type("text/html").send(await keyPage(name, null, "This sign-in was started somewhere else. Connect again from the chat."));
     // said no on the app's page: a new connection goes, a working one is left as it was
     if (!req.query.code) {
       if (row.secret) await db.update(connections).set({ externalId: row.id, status: "active", updatedAt: new Date() }).where(eq(connections.id, row.id));
@@ -756,7 +763,7 @@ export async function integrationRoutes(app: FastifyInstance) {
       return reply.redirect(s.back);
     }
     try {
-      const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back);
+      const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back, req.query);
       const others = (await accounts(row, name)).filter((o) => o.id !== row.id);
       const named = row.label ?? uniqueLabel(label ?? appName(name), others);
       await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), refreshToken: refreshToken ? encrypt(refreshToken) : null, expiresAt: expiresAt ?? null, status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
