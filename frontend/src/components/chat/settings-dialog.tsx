@@ -13,6 +13,7 @@ import {
 } from "@emplio/shared";
 import { BrainIcon, CalendarClockIcon, ChevronRightIcon, MessagesSquareIcon, MonitorIcon, SunMoonIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { DangerZone } from "@cloud/client";
 import { SAY_TEXT } from "@/components/chat/attachments";
 import { useDraft } from "@/components/chat/draft";
 import { Fragment, useState } from "react";
@@ -299,6 +300,7 @@ export function SettingsDialog({
             ))}
             <TabsContent value="appearance" className="min-h-0 overflow-y-auto p-4 sm:p-6">
               <Appearance />
+              <DangerZone />
             </TabsContent>
           </Tabs>
         )}
