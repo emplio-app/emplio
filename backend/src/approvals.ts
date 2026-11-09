@@ -30,9 +30,11 @@ const later = new Map<string, Later>();
 
 
 // ponytail: an action's details cached per process; read-only-ness doesn't change between runs
+// Only real answers are kept: a provider having a bad moment comes back as null, and the next look should ask again.
 const details = new Map<string, ReturnType<typeof getAction>>();
 export const detailOf = (action: string) => {
-  if (!details.has(action)) details.set(action, getAction(action).catch(() => (details.delete(action), null)));
+  const forget = () => (details.delete(action), null);
+  if (!details.has(action)) details.set(action, getAction(action).then((d) => d ?? forget()).catch(forget));
   return details.get(action)!;
 };
 
@@ -60,11 +62,12 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   const asks = !!own?.alwaysAsk;
   if (s.settings.approvals === "auto" && !s.automation && !asks) return null;
   const detail = own ?? (await detailOf(action));
-  // no such action: nothing to OK, the run itself says it doesn't exist
-  if (!detail || detail.readOnly) return null;
+  if (detail?.readOnly) return null;
   if (!asks && (await alwaysAllowed(s.workspaceId, s.user.id)).includes(action)) return null;
   // what the automation behind this run lists and was allowed
   if (!asks && s.allowedActions?.includes(action)) return null;
+  // no such action, or the provider couldn't say: unknown is never taken for safe
+  if (!detail) return `error: couldn't check what ${action} does, so it wasn't run and nothing changed. If the name is right (emplio apps actions <app>), try again in a moment.`;
   if (s.thinker)
     return `error: ${action} changes something, and you can't without ${s.user.name}'s "Always allow". Don't do it another way: hand it to the AI employee as a task (emplio tasks add "<what>" --to ai --notes "${action} with <input>"); it gets ${s.user.name}'s OK first.`;
   if (s.automation)
@@ -79,7 +82,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     app: action.split(".")[0]!,
     appName: app?.name ?? action.split(".")[0]!,
     logo: app?.logo,
-    title: detail?.title ?? action,
+    title: detail.title ?? action,
     input,
     expiresAt: new Date(Date.now() + VALID_MS).toISOString(),
     ...(asks && { oneOff: true }),
