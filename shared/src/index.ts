@@ -30,10 +30,11 @@ export type AddMemberRequest = { email: string; name?: string; role?: "admin" | 
 export type UpdateMemberRequest = { role?: "admin" | "member"; reportsTo?: string | null };
 
 // label: which account (the Gmail address, or a name the person gave it); tells several of one app apart
-export type Connection = { id: string; app: string; name: string; label: string; logo?: string; keyField?: KeyField; status: "pending" | "active" | "expired" | "failed"; createdAt: string };
+export type Connection = { id: string; app: string; name: string; label: string; logo?: string; keyField?: KeyField; signIn?: boolean; status: "pending" | "active" | "expired" | "failed"; createdAt: string };
 // keyField: the app is connected by pasting a key (shown as a form), not by signing in on its page
 export type KeyField = { label: string; help: string; placeholder?: string };
-export type AppInfo = { app: string; name: string; description: string; logo?: string; category?: AppCategory; keyField?: KeyField };
+// signIn: besides the key, can be signed in to on the app's own page
+export type AppInfo = { app: string; name: string; description: string; logo?: string; category?: AppCategory; keyField?: KeyField; signIn?: boolean };
 // shown in the chat when the agent asks someone to connect an app; path is our own /connect link on the API
 // Categories offered when browsing apps; providers map these keys to their own.
 export const APP_CATEGORIES = [
@@ -54,7 +55,7 @@ export type AppCategory = (typeof APP_CATEGORIES)[number]["key"];
 // connection: set when it reconnects one account (of several) rather than adding one
 // existing: the person's accounts of the app when it was made, so a card adding another isn't "done" by them
 // mcp: an MCP server's sign-in (path is its page), not an app's
-export type ConnectCard = { app: string; name: string; logo?: string; path: string; keyField?: KeyField; connection?: string; existing?: string[]; mcp?: boolean };
+export type ConnectCard = { app: string; name: string; logo?: string; path: string; keyField?: KeyField; signIn?: boolean; connection?: string; existing?: string[]; mcp?: boolean };
 // A saved password or key (never its value): the AI uses it by name, the server fills it in (backend logins.ts).
 // day-one setup (backend setup.ts): briefed and written down, skipped by the owner, or not yet; at: when done or skipped
 export type SetupStatus = { state: "done" | "skipped" | "not-started"; at: string | null };

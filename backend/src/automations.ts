@@ -26,6 +26,7 @@ import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigg
 import { approve } from "./approvals";
 import type { Session } from "./sandbox";
 import { pollConfig, pollOnce } from "./integrations/polls";
+import * as githubHooks from "./integrations/own/github/triggers";
 import { eventData, triggersFor, watchId, webhookSecret as razorpayWebhookSecret, razorpaySignatureOk } from "./integrations/own/razorpay/webhooks";
 import { ensureWebhook } from "./integrations/composio";
 import { AppsError } from "./integrations/types";
@@ -517,6 +518,18 @@ async function onRazorpayEvent(connection: string, event: { event?: string; payl
   for (const row of rows) await fire(row, "trigger", eventData(event.payload));
 }
 
+// An event from a GitHub repository; the automations watching it on that connection, whose settings want it, run.
+async function onGithubEvent(id: string, event: string, payload: Record<string, any>) {
+  const names = githubHooks.triggersFor(event, payload);
+  if (!names.length) return;
+  const rows = await db
+    .select()
+    .from(automations)
+    .where(and(eq(automations.externalId, id), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
+  const data = githubHooks.eventData(payload);
+  for (const row of rows) if (githubHooks.wanted(row.triggerConfig, payload)) await fire(row, "trigger", data);
+}
+
 // --- the app's routes, and the webhook ---
 
 export async function automationRoutes(app: FastifyInstance) {
@@ -617,6 +630,18 @@ export async function automationRoutes(app: FastifyInstance) {
       if (id) seen.add(id);
       if (seen.size > 10_000) seen.delete(seen.values().next().value!);
       void onRazorpayEvent(connection, JSON.parse(req.body)).catch((error) => req.log.error(error, "handling a Razorpay event failed"));
+      return { ok: true };
+    });
+    // A repository on a connected GitHub account. The same signature as Razorpay's, behind "sha256=".
+    hooks.post<{ Body: string; Params: { connection: string; owner: string; repo: string } }>("/webhooks/github/:connection/:owner/:repo", async (req, reply) => {
+      const { connection, owner, repo } = req.params;
+      const signature = String(req.headers["x-hub-signature-256"] ?? "").replace(/^sha256=/, "");
+      if (!razorpaySignatureOk(req.body, signature, githubHooks.webhookSecret(connection))) return reply.code(401).send({ error: "bad signature" });
+      const id = String(req.headers["x-github-delivery"] ?? "");
+      if (id && seen.has(id)) return { ok: true };
+      if (id) seen.add(id);
+      if (seen.size > 10_000) seen.delete(seen.values().next().value!);
+      void onGithubEvent(githubHooks.watchId(connection, owner, repo), String(req.headers["x-github-event"] ?? ""), JSON.parse(req.body)).catch((error) => req.log.error(error, "handling a GitHub event failed"));
       return { ok: true };
     });
   });

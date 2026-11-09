@@ -13,7 +13,7 @@ export type AppConfig = {
   server?: (path: string, spec: number) => string | undefined;
   out: string;
   // the action's name from the snake_cased operation id (and the call, when ids repeat), before `rename`
-  name?: (id: string, method: string, path: string) => string;
+  name?: (id: string, method: string, path: string, op: Schema) => string;
   rename?: Record<string, string>;
   // non-GETs that only look things up, so they run without asking
   reads?: string[];
@@ -135,7 +135,7 @@ for (const [path, ops] of Object.entries<Schema>(spec.paths)) {
       skipped.push(`${method.toUpperCase()} ${path} (${op.operationId}): deprecated`);
       continue;
     }
-    const id = (config.name ?? ((x: string) => x))(snake(op.operationId), method.toUpperCase(), path);
+    const id = (config.name ?? ((x: string) => x))(snake(op.operationId), method.toUpperCase(), path, op);
     const name = RENAME[id] ?? id;
     const properties: Schema = {};
     const required: string[] = [];

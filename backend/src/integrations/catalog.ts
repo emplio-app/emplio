@@ -65,7 +65,7 @@ export const CATALOG: CatalogApp[] = [
   own("hostinger", "Hostinger", "developer", "Websites, WordPress, VPS servers, domains, DNS and business email on Hostinger"),
   own("neon", "Neon", "developer", "Postgres databases on Neon: run SQL, and manage projects, branches, databases, roles, backups, auth and storage"),
   own("livekit", "LiveKit", "developer", "Live audio/video rooms, recordings and streams, phone calls (SIP), numbers and voice AI agents on LiveKit"),
-  composio("github", "GitHub", "developer", "Repositories, issues and pull requests"),
+  own("github", "GitHub", "developer", "Repositories, issues, pull requests and Actions, and git itself on Emplio's computer"),
 ];
 
 export const catalogApp = (app: string) => CATALOG.find((a) => a.app === app);

@@ -69,7 +69,7 @@ export async function availableApps(): Promise<AppInfo[]> {
   return Promise.all(
     CATALOG.filter((a) => ok.has(a.app)).map(async (a) => {
       const p = await providerApp(a.app);
-      return { app: a.app, name: a.name, description: a.description, category: a.category, logo: p?.logo, keyField: p?.keyField };
+      return { app: a.app, name: a.name, description: a.description, category: a.category, logo: p?.logo, keyField: p?.keyField, signIn: p?.signIn };
     }),
   );
 }
@@ -84,14 +84,16 @@ async function offered(app: string): Promise<AppInfo> {
 
 type Row = typeof connections.$inferSelect;
 const appName = (app: string) => catalogApp(app)?.name ?? app;
+// signed in through the provider an app has since left (GitHub moved off Composio): it has to be connected again
+const moved = (c: Row) => c.provider !== providerFor(c.app).name;
 
 const toConnection = async (c: Row): Promise<Connection> => ({
   id: c.id,
   app: c.app,
   name: appName(c.app),
   label: c.label ?? appName(c.app),
-  ...(await providerApp(c.app).then((p) => ({ logo: p?.logo, keyField: p?.keyField }))),
-  status: c.status,
+  ...(await providerApp(c.app).then((p) => ({ logo: p?.logo, keyField: p?.keyField, signIn: p?.signIn }))),
+  status: moved(c) ? "expired" : c.status,
   createdAt: c.createdAt.toISOString(),
 });
 
@@ -124,8 +126,17 @@ async function findConnection(who: Who, app: string, account?: string) {
     if (!found) throw new AppsError(rows.length ? `no ${app} account "${account}"; connected: ${names}` : `${app} isn't connected`);
     return found;
   }
-  if (rows.length > 1) throw new AppsError(`several ${app} accounts are connected (${names}); say which with --account "<name>"`);
-  return rows[0];
+  const current = rows.filter((r) => !moved(r));
+  const usable = current.length ? current : rows;
+  if (usable.length > 1) throw new AppsError(`several ${app} accounts are connected (${usable.map((r) => `"${labelOf(r)}"`).join(", ")}); say which with --account "<name>"`);
+  return usable[0];
+}
+
+// The logins plain git can use for an app (git-proxy.ts): this person's working accounts, whose login we hold ourselves.
+export async function gitLogins(who: Who, app: string) {
+  return (await accounts(who, app))
+    .filter((r) => r.status === "active" && r.secret && !moved(r))
+    .map((r) => ({ label: labelOf(r), secret: decrypt(r.secret!) }));
 }
 
 // Ask the provider how a sign-in went and store it. Kept as is when the provider can't be reached.
@@ -158,7 +169,7 @@ export async function searchApps(words: string, category?: AppCategory) {
 export async function connectCard(app: string, conversationId?: string, connection?: string): Promise<ConnectCard> {
   const info = await offered(app);
   const query = new URLSearchParams({ ...(conversationId && { chat: conversationId }), ...(connection && { connection }) });
-  return { app, name: info.name, logo: info.logo, keyField: info.keyField, path: `/connect/${app}${query.size ? `?${query}` : ""}`, connection };
+  return { app, name: info.name, logo: info.logo, keyField: info.keyField, signIn: info.signIn, path: `/connect/${app}${query.size ? `?${query}` : ""}`, connection };
 }
 
 export async function listActions(app: string, words?: string) {
@@ -227,7 +238,8 @@ export async function connect(
   // where the sign-in comes back to: this server as the person's device reaches it
   base = API_URL(),
 ): Promise<{ connection: Connection; url: string }> {
-  if ((await offered(app)).keyField) throw new AppsError(`${app} is connected by entering a key in the app`);
+  const info = await offered(app);
+  if (info.keyField && !info.signIn) throw new AppsError(`${app} is connected by entering a key in the app`);
   const provider = providerFor(app);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   const id = existing?.id ?? crypto.randomUUID();
@@ -250,7 +262,7 @@ export async function connect(
 export async function connectWithKey(who: Who, app: string, key: string, connectionId?: string): Promise<Connection> {
   if (!(await offered(app)).keyField) throw new AppsError(`${app} is connected by signing in, not with a key`);
   const provider = providerFor(app);
-  const { secret } = await provider.connectWithKey!(app, key);
+  const { secret, label } = await provider.connectWithKey!(app, key);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   if (existing && existing.provider !== provider.name) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
   const id = existing?.id ?? crypto.randomUUID();
@@ -259,7 +271,7 @@ export async function connectWithKey(who: Who, app: string, key: string, connect
     ? await db.update(connections).set(values).where(eq(connections.id, id)).returning()
     : await db
         .insert(connections)
-        .values({ id, workspaceId: who.workspaceId, userId: who.userId, app, label: uniqueLabel(appName(app), await accounts(who, app)), ...values })
+        .values({ id, workspaceId: who.workspaceId, userId: who.userId, app, label: uniqueLabel(label ?? appName(app), await accounts(who, app)), ...values })
         .returning();
   record({ ...who, kind: "connection", summary: `${existing ? "Replaced the key for" : "Connected"} ${appName(app)} (${row!.label ?? "key"})` });
   return toConnection(row!);
@@ -312,6 +324,8 @@ export async function runAction(
   const app = appOf(action);
   await offered(app);
   let connection = await findConnection(who, app, account);
+  // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
+  if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
   if (connection?.status === "pending") connection = await refresh(connection);
   if (connection && connection.status !== "active")
     throw new AppsError(
@@ -382,6 +396,8 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   if (!detail) throw new AppsError(`no trigger ${trigger}; list them with emplio automations triggers <app>`);
   const app = appOf(trigger);
   let connection = await findConnection(who, app, account);
+  // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
+  if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
   if (connection?.status === "pending") connection = await refresh(connection);
   if (connection?.status !== "active") throw new AppsError(`${app} isn't connected for the person who saved it`);
   const polled = pollTrigger(trigger);
@@ -395,7 +411,7 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   const provider = providerOf(connection);
   // the app tells us itself, at once. If that can't be set up here, a trigger we can poll still works, just later.
   const login = { externalId: connection.externalId, secret: connection.secret ? decrypt(connection.secret) : null };
-  const pushed = await provider.startPush?.(trigger, login).catch((error) => {
+  const pushed = await provider.startPush?.(trigger, login, config).catch((error) => {
     if (!polled) throw error;
     console.warn(`${trigger}: falling back to polling: ${(error as Error).message}`);
     return null;
@@ -488,7 +504,7 @@ export async function appsCommand(
         const target = sub === "reconnect" ? await findConnection(who, name, account) : undefined;
         if (sub === "reconnect" && !target) return `error: ${name} isn't connected; use emplio apps add ${name}.`;
         const card = { ...(await connectCard(name, conversationId, target?.id)), existing: (await accounts(who, name)).map((c) => c.id) };
-        const how = card.keyField ? ` They'll paste their ${card.keyField.label} into it; never ask for the key in chat.` : "";
+        const how = card.keyField ? ` They'll ${card.signIn ? "sign in or " : ""}paste their ${card.keyField.label} into it; never ask for the key in chat.` : "";
         return {
           card,
           text: `A Connect button for ${card.name} now shows in the chat.${how} Ask the person to use it and tell you when they're done (then check with emplio apps list). Don't write a link.`,
@@ -581,20 +597,21 @@ export function fromLink(token: string) {
 
 export const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 // The page a phone link opens for an app connected with a key: the key box, or `done` (a result) instead of it.
-async function keyPage(app: string, error?: string | null, done?: string) {
+// t: the link's token, for the sign-in button of an app that also signs in on its own page.
+async function keyPage(app: string, error?: string | null, done?: string, t?: string) {
   const info = done ? null : await offered(app).catch(() => null);
   const body = done
     ? `<p>${done}</p>`
     : info?.keyField
-      ? `<h1>${info.logo ? `<img src="${esc(new URL(info.logo, FRONTEND_URL()).href)}" alt="">` : ""}Connect ${esc(info.name)}</h1><p class="m">${esc(info.keyField.help)}</p>
+      ? `<h1>${info.logo ? `<img src="${esc(new URL(info.logo, FRONTEND_URL()).href)}" alt="">` : ""}Connect ${esc(info.name)}</h1>${info.signIn && t ? `<a class="b" href="/connect/${esc(app)}?t=${encodeURIComponent(t)}&amp;signin=1">Sign in with ${esc(info.name)}</a><p class="m">Or paste a key instead.</p>` : ""}<p class="m">${esc(info.keyField.help)}</p>
 <form method="post"><label>${esc(info.keyField.label)}<input name="key" type="password" autocomplete="off" required autofocus placeholder="${esc(info.keyField.placeholder ?? "")}"></label>
 ${error ? `<p class="e">${esc(error)}</p>` : ""}<button onclick="this.textContent='Checking…'">Connect</button></form><p class="m">Stored encrypted. Emplio uses it but never sees it.</p>`
       : "<p>This app can't be connected here.</p>";
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Connect</title>
 <style>body{font:15px system-ui;max-width:420px;margin:0 auto;padding:24px 16px;color:#111;background:#fff}h1{font-size:18px;display:flex;gap:10px;align-items:center}h1 img{width:28px;height:28px;object-fit:contain}
 .m{color:#666;font-size:13px}.e{color:#c00}label{display:grid;gap:6px;font-weight:500}input{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px}
-button{font:inherit;margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#111;color:#fff}
-@media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
+button,.b{display:block;box-sizing:border-box;text-align:center;text-decoration:none;font:inherit;margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#111;color:#fff}
+@media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
 }
 
 export async function integrationRoutes(app: FastifyInstance) {
@@ -685,11 +702,13 @@ export async function integrationRoutes(app: FastifyInstance) {
   // A Connect button opened: start the sign-in for whoever is logged in, then off to the provider's page.
   // popup=1: opened in a small window from the app, which closes itself when done
   // connection: reconnect that account; otherwise it adds one
-  app.get<{ Params: { app: string }; Querystring: { chat?: string; popup?: string; connection?: string; t?: string } }>("/connect/:app", async (req, reply) => {
+  app.get<{ Params: { app: string }; Querystring: { chat?: string; popup?: string; connection?: string; t?: string; signin?: string } }>("/connect/:app", async (req, reply) => {
     // a link from a channel: signs in for its person, and ends on a "you can close this" page
     const link = req.query.t ? fromLink(req.query.t) : null;
     if (req.query.t && !link) return reply.type("text/html").send(`<!doctype html><meta charset="utf-8"><p style="font:15px system-ui;padding:24px">This link has expired. Ask for a new one.</p>`);
-    if (link && (await offered(req.params.app.toLowerCase()).catch(() => null))?.keyField) return reply.type("text/html").send(await keyPage(req.params.app.toLowerCase()));
+    const linked = link ? await offered(req.params.app.toLowerCase()).catch(() => null) : null;
+    // an app that takes both: the page offers both, and its button comes back here with signin=1
+    if (linked?.keyField && !(linked.signIn && req.query.signin === "1")) return reply.type("text/html").send(await keyPage(req.params.app.toLowerCase(), null, undefined, req.query.t));
     if (link)
       return handle(reply, async () =>
         reply.redirect((await connect({ workspaceId: link.w, userId: link.u }, req.params.app.toLowerCase(), undefined, true, link.c, process.env.WEBHOOK_URL)).url),
@@ -718,7 +737,34 @@ export async function integrationRoutes(app: FastifyInstance) {
       return reply.type("text/html").send(await keyPage(name, null, `${esc(c.name)} is connected (${esc(c.label)}). Go back to the chat and tell Emplio it's done.`));
     } catch (error) {
       if (!(error instanceof AppsError)) throw error;
-      return reply.type("text/html").send(await keyPage(name, error.message));
+      return reply.type("text/html").send(await keyPage(name, error.message, undefined, req.query.t));
+    }
+  });
+
+  // Back from an app's own sign-in page (own OAuth). The signed state says which waiting connection it's for, and
+  // that connection stops waiting here, so it works once.
+  app.get<{ Params: { app: string }; Querystring: { code?: string; state?: string } }>("/oauth/:app/callback", async (req, reply) => {
+    const name = req.params.app.toLowerCase();
+    const provider = providerFor(name);
+    const s = req.query.state ? provider.readSignIn?.(name, req.query.state) : null;
+    const row = s ? await db.query.connections.findFirst({ where: and(eq(connections.app, name), eq(connections.externalId, s.externalId)) }) : null;
+    if (!s || !row) return reply.type("text/html").send(await keyPage(name, null, "This sign-in has expired. Connect again from the chat."));
+    // said no on the app's page: a new connection goes, a working one is left as it was
+    if (!req.query.code) {
+      if (row.secret) await db.update(connections).set({ externalId: row.id, status: "active", updatedAt: new Date() }).where(eq(connections.id, row.id));
+      else await db.delete(connections).where(eq(connections.id, row.id));
+      return reply.redirect(s.back);
+    }
+    try {
+      const { secret, label } = await provider.finishSignIn!(name, req.query.code, s.back);
+      const others = (await accounts(row, name)).filter((o) => o.id !== row.id);
+      const named = row.label ?? uniqueLabel(label ?? appName(name), others);
+      await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
+      record({ workspaceId: row.workspaceId, userId: row.userId, kind: "connection", summary: `Connected ${appName(name)} (${named})` });
+      return reply.redirect(s.back);
+    } catch (error) {
+      if (!(error instanceof AppsError)) throw error;
+      return reply.type("text/html").send(await keyPage(name, null, esc(error.message)));
     }
   });
 
