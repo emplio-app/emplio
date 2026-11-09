@@ -35,11 +35,20 @@ export type Send = {
   // array query params sent comma separated instead of repeating the key
   csv?: string[];
   headers: [field: string, header: string][];
-  body?: { kind: "fields" | "form"; fields: [field: string, key: string][] } | { kind: "whole" | "file"; field: string };
+  body?: { kind: "fields" | "form" | "urlencoded"; fields: [field: string, key: string][] } | { kind: "whole" | "file"; field: string };
 };
 type Generated = { name: string; group: string; description: string; readOnly: boolean; input: object; send: Send };
 
 const queryValue = (v: unknown) => (Array.isArray(v) ? v.join(",") : typeof v === "object" ? JSON.stringify(v) : String(v));
+
+// a form body with nested values as a[b][0]=c, the way Stripe reads them; an empty object or array clears the field
+function formPairs(key: string, v: unknown): [string, string][] {
+  if (v === undefined) return [];
+  if (v === null) return [[key, ""]];
+  if (Array.isArray(v)) return v.length ? v.flatMap((x, i) => formPairs(`${key}[${i}]`, x)) : [[key, ""]];
+  if (typeof v === "object") return Object.keys(v).length ? Object.entries(v).flatMap(([k, x]) => formPairs(`${key}[${k}]`, x)) : [[key, ""]];
+  return [[key, String(v)]];
+}
 
 const parseLine = (line: string) => {
   try {
@@ -89,6 +98,9 @@ export async function call(api: Api, key: string, send: Send, input: Record<stri
   let body: BodyInit | undefined;
   if (send.body?.kind === "fields") {
     body = JSON.stringify(Object.fromEntries(send.body.fields.flatMap(([f, k]) => (input[f] === undefined ? [] : [[k, input[f]]]))));
+  } else if (send.body?.kind === "urlencoded") {
+    body = new URLSearchParams(send.body.fields.flatMap(([f, k]) => formPairs(k, input[f]))).toString();
+    headers["Content-Type"] = "application/x-www-form-urlencoded";
   } else if (send.body?.kind === "form") {
     // multipart: files as files, objects as JSON, the rest as text; fetch sets the boundary
     const form = new FormData();

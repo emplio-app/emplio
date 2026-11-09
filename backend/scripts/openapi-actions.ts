@@ -25,6 +25,8 @@ export type AppConfig = {
   drop?: Record<string, string[]>;
   // better descriptions for params the spec describes poorly, by name
   params?: Record<string, string>;
+  // anything else to take from the spec, once the actions are written (an app's list of events)
+  after?: (spec: Schema) => Promise<void>;
 };
 
 const app = process.argv[2];
@@ -44,7 +46,7 @@ let spec: Schema = {};
 
 const resolve = (s: Schema): Schema => {
   if (!s?.$ref) return s;
-  const path = (s.$ref as string).replace(/^#\//, "").split("/");
+  const path = (s.$ref as string).replace(/^#\//, "").split("/").map((k) => k.replace(/~1/g, "/").replace(/~0/g, "~"));
   return resolve(path.reduce((o: Schema, k) => o[k], spec));
 };
 
@@ -177,6 +179,17 @@ for (const [path, ops] of Object.entries<Schema>(spec.paths)) {
         if (op.requestBody.required) required.push("body");
         send.body = { kind: "whole", field: "body" };
       }
+    } else if (content["application/x-www-form-urlencoded"]) {
+      const body = clean(content["application/x-www-form-urlencoded"].schema ?? {});
+      const fields: [string, string][] = [];
+      for (const [k, v] of Object.entries<Schema>(body.properties ?? {})) {
+        if (DROP[name]?.includes(k) || DROP["*"]?.includes(k)) continue;
+        const field = k in properties ? `body_${k}` : k;
+        properties[field] = v;
+        fields.push([field, k]);
+        if (op.requestBody.required !== false && body.required?.includes(k)) required.push(field);
+      }
+      send.body = { kind: "urlencoded", fields };
     } else if (content["multipart/form-data"]) {
       const body = resolve(content["multipart/form-data"].schema ?? {});
       const fields: [string, string][] = [];
@@ -219,3 +232,4 @@ for (const n of [...Object.values(RENAME), ...READS, ...SECRETS, ...Object.keys(
 const out = new URL(`../${config.out}`, import.meta.url).pathname;
 await Bun.write(out, JSON.stringify({ generated: new Date().toISOString().slice(0, 10), skipped, actions }));
 console.log(`${actions.length} actions, ${skipped.length} skipped → ${out}`);
+await config.after?.(spec);
