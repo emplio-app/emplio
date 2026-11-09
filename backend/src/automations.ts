@@ -123,7 +123,7 @@ async function build(workspaceId: string, name: string, sha: string, old: Row | 
   if ("error" in parsed) return { ...base, when: "manual", enabled: false, prompt: text ?? "", actions: [], allowed: [], error: parsed.error! } satisfies typeof automations.$inferInsert;
   // what it does: the file's actions:, and any app action its prompt names that sends or changes something, so a
   // file that forgets to list one still gets it asked about rather than refused on every run
-  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt))])];
+  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId))])];
   // what was allowed stays allowed while it's still listed and runs as the same person
   const allowed = old && old.userId === member?.id ? old.allowed.filter((a) => parsed.actions.includes(a)) : [];
   const values: typeof automations.$inferInsert = { ...base, ...parsed, allowed, error: null };
@@ -288,9 +288,9 @@ export async function listAutomations(workspaceId: string): Promise<Automation[]
 }
 
 // The app actions a prompt names (gmail.send_email) that send or change something
-async function changesNamed(prompt: string) {
+async function changesNamed(prompt: string, workspaceId: string) {
   const named = [...new Set(prompt.match(/\b[a-z0-9]+\.[a-z0-9_]+\b/gi) ?? [])].filter((a) => ACTION.test(a) && a.includes("_")).slice(0, 20);
-  const found = await Promise.all(named.map(async (a) => ((await getAction(a).catch(() => null))?.readOnly === false ? [a] : [])));
+  const found = await Promise.all(named.map(async (a) => ((await getAction(a, { workspaceId }).catch(() => null))?.readOnly === false ? [a] : [])));
   return found.flat();
 }
 
@@ -788,12 +788,12 @@ export async function automationsCommand(who: Ctx, args: string[], caughtUp: () 
       }
       case "triggers": {
         if (!name) break;
-        const list = await listTriggers(name.toLowerCase(), args.slice(2).join(" ") || undefined);
+        const list = await listTriggers(name.toLowerCase(), args.slice(2).join(" ") || undefined, who);
         return list.length ? list.map((t) => `${t.action}\t${t.description}`).join("\n") : `No triggers for ${name}. Check the app name with emplio apps search.`;
       }
       case "trigger": {
         if (!name) break;
-        const t = await getTrigger(name.toLowerCase());
+        const t = await getTrigger(name.toLowerCase(), who);
         if (!t) return `error: no trigger ${name}. List them with emplio automations triggers <app>.`;
         const line = (p: (typeof t.input)[number]) => `  ${p.name}${p.required ? " (required)" : ""}: ${p.type}. ${p.description}`;
         return [`${t.action}: ${t.description}`, "Settings (config:):", ...(t.input.length ? t.input.map(line) : ["  none"]), "Each event carries:", ...t.output.map(line)].join("\n");

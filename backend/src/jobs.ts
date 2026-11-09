@@ -361,7 +361,7 @@ async function recorded(w: Row) {
     .from(actionRuns)
     .where(eq(actionRuns.conversationId, w.chatId))
     .orderBy(asc(actionRuns.createdAt));
-  const details = await Promise.all(runs.map((r) => detailOf(r.action)));
+  const details = await Promise.all(runs.map((r) => detailOf(r.action, w)));
   const changes = runs.filter((_, i) => details[i] && !details[i]!.readOnly);
   return recordedLine(changes.slice(-10), await timezoneOf(w.userId));
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { CATALOG } from "./catalog";
-import { availableApps } from "./index";
+import { availableApps, providerFor } from "./index";
 import { own } from "./own";
 
 // sign-in only: not connectable until this server has their client id and secret
@@ -24,4 +24,19 @@ test("a sign-in-only app is offered once its client id and secret are set", asyn
   } finally {
     for (const name of NEEDS) delete process.env[name];
   }
+});
+
+test("an app held back stays on Composio, except for the workspaces testing ours", () => {
+  process.env.KEEP_ON_COMPOSIO = "slack, zoom";
+  process.env.OWN_APP_TESTERS = "tester";
+  try {
+    expect(providerFor("slack").name).toBe("composio");
+    expect(providerFor("slack", { workspaceId: "customer" }).name).toBe("composio");
+    expect(providerFor("slack", { workspaceId: "tester" }).name).toBe("own");
+    expect(providerFor("zoho_mail", { workspaceId: "customer" }).name).toBe("own");
+  } finally {
+    delete process.env.KEEP_ON_COMPOSIO;
+    delete process.env.OWN_APP_TESTERS;
+  }
+  expect(providerFor("slack", { workspaceId: "customer" }).name).toBe("own");
 });
