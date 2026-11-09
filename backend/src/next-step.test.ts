@@ -1,9 +1,16 @@
 import { expect, test } from "bun:test";
-import { echoes } from "./chat";
+import { parseNextStep } from "./chat";
 
-test("a guess that repeats the employee's question is dropped, a real answer isn't", () => {
-  const reply = "Yes, if the server is reachable and we have a login for it. Which server do you need, and what should I do there?";
-  expect(echoes("Which server do you need me to SSH into, and what should I do there?", reply)).toBe(true);
-  expect(echoes("The Hostinger VPS, check disk space", reply)).toBe(false);
-  expect(echoes("yes send it", "Should I send it? yes or no")).toBe(false);
+const card = { summary: "Invoice sent to Acme, payment pending.", question: "Should I remind them on Friday?", buttons: ["Yes, remind them", "Not yet"] };
+
+test("a well-formed card is read, even wrapped in a code fence", () => {
+  expect(parseNextStep(JSON.stringify(card))).toEqual(card);
+  expect(parseNextStep("```json\n" + JSON.stringify(card) + "\n```")).toEqual(card);
+});
+
+test("silence or a broken card shows nothing", () => {
+  expect(parseNextStep("[SILENT]")).toBeNull();
+  expect(parseNextStep('{"summary": "cut off')).toBeNull();
+  expect(parseNextStep(JSON.stringify({ ...card, buttons: ["Only one"] }))).toBeNull();
+  expect(parseNextStep(JSON.stringify({ ...card, question: "" }))).toBeNull();
 });
