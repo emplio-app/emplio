@@ -49,6 +49,7 @@ import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, stillWorkin
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
+import { NEXT_STEP_MODEL, writeNextStep } from "./next-step";
 import { holdRead, readLater, SILENT } from "./reader";
 import { TASK } from "./tasks";
 import { pushTo } from "./push";
@@ -479,37 +480,9 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
 }
 
 // A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
-// to tap. Kept cheap three ways: the small title model, one answer per reply kept here, and a prompt that only
-// grows at its end (fixed instructions, then the chat as it was) so the provider's prompt cache covers everything
-// but the newest turn.
-const NEXT_STEP_RULES = [
-  "After each reply from an AI employee, you write a small card that lets the person move the work forward with one tap.",
-  'Reply with JSON only, no code fence: {"summary": "...", "question": "...", "buttons": ["...", "..."]}',
-  "summary: one plain sentence, under 25 words, on what was just said or done and where things now stand. Use the whole chat, so it's useful even when the last reply is short. Don't copy the reply's wording. Say what isn't done yet if that matters.",
-  "question: the one short question, under 15 words, that most moves the work forward, from the AI employee to the person. If the last reply already asks something, ask that.",
-  'buttons: 2 or 3 answers to that question, 1 to 3 words each, in the person\'s voice. First the one that moves things forward ("Yes, send it"), then one that declines or waits ("Not yet").',
-  "Write in the language of the chat, in plain words a business owner uses. Only offer what the chat points to: no new facts, no work nobody talked about.",
-  `Only write a card when there's a real next step the person can decide with a tap. If the work is finished and nothing waits on them, or it was small talk, reply with exactly ${SILENT} and nothing else.`,
-  `A button must be the whole answer. If the question can only be answered by typing something the chat hasn't named (which repo, a name, a number, a date, a link, a file), reply with exactly ${SILENT}: never a button like "Send the repo" that only promises an answer. Options the chat already named can be buttons.`,
-].join("\n");
-const NEXT_STEP_ASK = `Write the card for the last reply: JSON only, or ${SILENT}.`;
-const HISTORY_LIMIT = 2000;
-const nextStepShape = z.object({
-  summary: z.string().trim().min(1).max(300),
-  question: z.string().trim().min(1).max(200),
-  buttons: z.array(z.string().trim().min(1).max(40)).min(2).max(3),
-});
+// to tap. The writer itself is next-step.ts; here is when a card is wanted, and one answer per reply kept.
 // ponytail: in memory, by the reply it follows; lost on restart, which only means one more cheap call
 const nextSteps = new Map<string, NextStep | null>();
-
-// anything but a well-formed card (including SILENT) is no card
-export function parseNextStep(text: string): NextStep | null {
-  try {
-    return nextStepShape.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
-  } catch {
-    return null;
-  }
-}
 
 async function lastTurns(conversationId: string) {
   return (await loadMessages(conversationId)).filter((m) => m.role === "user" || m.role === "assistant");
@@ -524,24 +497,9 @@ export async function nextStep(bill: Bill & { conversationId: string }, peek: bo
   if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
   // it already put a question or button in the chat that's waiting on them: a second one would compete with it
   if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;
-  // older turns are dropped 40 at a time, not one per reply, so the start of the prompt stays the same
-  const kept = all.slice(all.length <= 80 ? 0 : Math.floor((all.length - 40) / 40) * 40);
-  const history: ModelMessage[] = kept.flatMap((m) => {
-    const text = textOf(m).slice(0, HISTORY_LIMIT);
-    return text ? [{ role: m.role as "user" | "assistant", content: text }] : [];
-  });
-  // a long last reply goes in whole here, at the end, so the chat before it still matches what's cached
-  const reply = textOf(last);
-  const ask = reply.length > HISTORY_LIMIT ? `${NEXT_STEP_ASK}\n\nThe last reply in full:\n${reply}` : NEXT_STEP_ASK;
   try {
-    const { text } = await generateText({
-      model: model({ openrouterKey: "" }, TITLE_MODEL, bill),
-      providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: { effort: "low" } } },
-      system: NEXT_STEP_RULES,
-      messages: [...history, { role: "user", content: ask }],
-      maxOutputTokens: 400,
-    });
-    const card = parseNextStep(text);
+    const turns = all.map((m) => ({ role: m.role as "user" | "assistant", text: textOf(m) }));
+    const { card } = await writeNextStep(turns, model({ openrouterKey: "" }, NEXT_STEP_MODEL, bill));
     nextSteps.set(last.id, card);
     if (nextSteps.size > 2000) nextSteps.delete(nextSteps.keys().next().value!);
     return card;

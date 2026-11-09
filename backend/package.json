@@ -6,10 +6,11 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "find src -name '._*' -delete; bun test",
+    "test": "find src evals -name '._*' -delete; bun test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "eval": "find evals -name '._*' -delete; bt eval --runner bun"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.87",
@@ -31,9 +32,11 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@braintrust/bt": "^0.29.0",
     "@types/bun": "^1.4.3",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2",
+    "braintrust": "^3.43.0",
     "drizzle-kit": "^0.31.11",
     "typescript": "^7.0.2"
   }
