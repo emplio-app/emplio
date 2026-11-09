@@ -22,6 +22,7 @@ import {
   SearchIcon,
   SendIcon,
   SettingsIcon,
+  SparklesIcon,
   Trash2Icon,
   UsersIcon,
   ZapIcon,
@@ -35,6 +36,7 @@ import { ChannelNudge, ChannelsDialog } from "@/components/chat/channels-dialog"
 import { BillingMenuItem, CreditMeter } from "@cloud/client";
 import { SearchResults } from "@/components/chat/chat-search";
 import { IntegrationsDialog } from "@/components/chat/integrations-dialog";
+import { WhatsNewDialog } from "@/components/chat/new-version";
 import { SettingsDialog } from "@/components/chat/settings-dialog";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/logo";
@@ -521,6 +523,7 @@ function UserMenu() {
   const [appsOpen, setAppsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [channelsOpen, setChannelsOpen] = useState(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   // everything on screen belongs to the business that was open
   const reopen = async () => {
@@ -625,6 +628,10 @@ function UserMenu() {
             <SettingsIcon />
             Settings
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setWhatsNewOpen(true)}>
+            <SparklesIcon />
+            What&apos;s new
+          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => logout.mutate()}
             disabled={logout.isPending}
@@ -637,6 +644,7 @@ function UserMenu() {
       <IntegrationsDialog open={appsOpen} onOpenChange={setAppsOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <ChannelsDialog open={channelsOpen} onOpenChange={setChannelsOpen} />
+      <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} />
       <AutomationsDialog
         open={automationsOpen}
         onOpenChange={setAutomationsOpen}

@@ -39,3 +39,21 @@ Everything works without it. The app uses the open parts instead: a Docker compu
 - Keep each one to a single change, with a short description of what it does and why.
 - Add or update a test when you change behaviour.
 - Match the style of the code around you.
+
+## Releasing a new version
+
+Add a section at the top of `CHANGELOG.md`, in the same pull request as the change or on its own:
+
+```md
+## 1.1.0 (2026-11-20)
+
+### What's new
+
+- Written for the people using Emplio, in everyday words.
+
+### For developers
+
+- The technical detail. This part only appears on GitHub.
+```
+
+That heading is the only place the version number lives. Once it's merged, CI publishes the GitHub release and version-tagged images, and once it's running, open screens offer a refresh. CI fails if the format is wrong.

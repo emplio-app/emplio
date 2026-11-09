@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AppSidebar } from "@/components/chat/app-sidebar";
 import { BottomTabs } from "@/components/chat/bottom-tabs";
+import { NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -28,6 +29,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <SidebarProvider className="h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden pt-[env(safe-area-inset-top)]">
+            <NewVersionBar />
             {children}
             <BottomTabs />
           </SidebarInset>
