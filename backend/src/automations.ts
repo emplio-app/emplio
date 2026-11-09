@@ -123,7 +123,7 @@ async function build(workspaceId: string, name: string, sha: string, old: Row | 
   if ("error" in parsed) return { ...base, when: "manual", enabled: false, prompt: text ?? "", actions: [], allowed: [], error: parsed.error! } satisfies typeof automations.$inferInsert;
   // what it does: the file's actions:, and any app action its prompt names that sends or changes something, so a
   // file that forgets to list one still gets it asked about rather than refused on every run
-  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt))])];
+  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId))])];
   // what was allowed stays allowed while it's still listed and runs as the same person
   const allowed = old && old.userId === member?.id ? old.allowed.filter((a) => parsed.actions.includes(a)) : [];
   const values: typeof automations.$inferInsert = { ...base, ...parsed, allowed, error: null };
@@ -288,9 +288,9 @@ export async function listAutomations(workspaceId: string): Promise<Automation[]
 }
 
 // The app actions a prompt names (gmail.send_email) that send or change something
-async function changesNamed(prompt: string) {
+async function changesNamed(prompt: string, workspaceId: string) {
   const named = [...new Set(prompt.match(/\b[a-z0-9]+\.[a-z0-9_]+\b/gi) ?? [])].filter((a) => ACTION.test(a) && a.includes("_")).slice(0, 20);
-  const found = await Promise.all(named.map(async (a) => ((await getAction(a).catch(() => null))?.readOnly === false ? [a] : [])));
+  const found = await Promise.all(named.map(async (a) => ((await getAction(a, { workspaceId }).catch(() => null))?.readOnly === false ? [a] : [])));
   return found.flat();
 }
 
@@ -532,7 +532,7 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
 }
 
 // Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
-async function onAppEvents(app: string, id: string, events: WebhookEvent[]) {
+async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]) {
   const { push } = OWN_APPS[app]!;
   for (const event of events) {
     if (!event.triggers.length) continue;
@@ -542,6 +542,7 @@ async function onAppEvents(app: string, id: string, events: WebhookEvent[]) {
       if (seen.size > 10_000) seen.delete(seen.values().next().value!);
     }
     const names = event.triggers.map((t) => `${app}.${t}`);
+    const id = event.watch ?? fallback;
     const rows = await db
       .select()
       .from(automations)
@@ -667,10 +668,11 @@ export async function automationRoutes(app: FastifyInstance) {
     // Every other own app with webhooks. What's after the connection (a project, a token) is the app's own (OwnApp.push.receive).
     const appWebhook = async (req: FastifyRequest<{ Body: string; Params: { app: string; connection: string; "*"?: string } }>, reply: FastifyReply) => {
       const { app, connection, "*": rest = "" } = req.params;
-      const receive = OWN_APPS[app]?.push?.receive;
-      const row = receive ? await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) }) : null;
-      const key = row && (await freshSecret(row).catch(() => null));
-      if (!receive || !key) return reply.code(401).send({ error: "unknown webhook" });
+      const push = OWN_APPS[app]?.push;
+      const receive = push?.receive;
+      const row = receive && !push.appWide ? await db.query.connections.findFirst({ where: and(eq(connections.app, app), eq(connections.externalId, connection)) }) : null;
+      const key = push?.appWide ? "" : row && (await freshSecret(row).catch(() => null));
+      if (!receive || key === null || key === undefined) return reply.code(401).send({ error: "unknown webhook" });
       const delivery: Delivery = { body: req.body, headers: req.headers, connection, rest };
       const got = await receive(delivery, key).catch((error) => (req.log.error(error, `a ${app} webhook failed`), null));
       if (!got) return reply.code(401).send({ error: "bad signature" });
@@ -679,7 +681,7 @@ export async function automationRoutes(app: FastifyInstance) {
         .events()
         .then((events) => onAppEvents(app, [app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), events))
         .catch((error) => req.log.error(error, `handling a ${app} event failed`));
-      return { ok: true };
+      return got.reply ?? { ok: true };
     };
     hooks.post("/webhooks/app/:app/:connection", appWebhook);
     hooks.post("/webhooks/app/:app/:connection/*", appWebhook);
@@ -786,12 +788,12 @@ export async function automationsCommand(who: Ctx, args: string[], caughtUp: () 
       }
       case "triggers": {
         if (!name) break;
-        const list = await listTriggers(name.toLowerCase(), args.slice(2).join(" ") || undefined);
+        const list = await listTriggers(name.toLowerCase(), args.slice(2).join(" ") || undefined, who);
         return list.length ? list.map((t) => `${t.action}\t${t.description}`).join("\n") : `No triggers for ${name}. Check the app name with emplio apps search.`;
       }
       case "trigger": {
         if (!name) break;
-        const t = await getTrigger(name.toLowerCase());
+        const t = await getTrigger(name.toLowerCase(), who);
         if (!t) return `error: no trigger ${name}. List them with emplio automations triggers <app>.`;
         const line = (p: (typeof t.input)[number]) => `  ${p.name}${p.required ? " (required)" : ""}: ${p.type}. ${p.description}`;
         return [`${t.action}: ${t.description}`, "Settings (config:):", ...(t.input.length ? t.input.map(line) : ["  none"]), "Each event carries:", ...t.output.map(line)].join("\n");

@@ -12,7 +12,7 @@ import { context } from "./auth";
 import { db } from "./db";
 import { conversations, messages, workspaceMembers } from "./db/schema";
 import { postMessage } from "./chat";
-import { connectCard, getAction, runAction } from "./integrations";
+import { connectCard, getAction, providerFor, runAction } from "./integrations";
 import { notify } from "./live";
 import type { Session } from "./sandbox";
 
@@ -32,10 +32,12 @@ const later = new Map<string, Later>();
 // ponytail: an action's details cached per process; read-only-ness doesn't change between runs
 // Only real answers are kept: a provider having a bad moment comes back as null, and the next look should ask again.
 const details = new Map<string, ReturnType<typeof getAction>>();
-export const detailOf = (action: string) => {
-  const forget = () => (details.delete(action), null);
-  if (!details.has(action)) details.set(action, getAction(action).then((d) => d ?? forget()).catch(forget));
-  return details.get(action)!;
+export const detailOf = (action: string, who: { workspaceId: string }) => {
+  // by provider: the same action name can be Composio's for one business and ours for another (KEEP_ON_COMPOSIO)
+  const key = `${providerFor(action.split(".")[0]!, who).name}:${action}`;
+  const forget = () => (details.delete(key), null);
+  if (!details.has(key)) details.set(key, getAction(action, who).then((d) => d ?? forget()).catch(forget));
+  return details.get(key)!;
 };
 
 export async function alwaysAllowed(workspaceId: string, userId: string) {
@@ -67,7 +69,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   // "Just do it" counts only where someone is watching; background runs change things only when "Always allow"ed
   const asks = !!own?.alwaysAsk;
   if (s.settings.approvals === "auto" && !s.automation && !asks) return null;
-  const detail = own ?? (await detailOf(action));
+  const detail = own ?? (await detailOf(action, s));
   if (detail?.readOnly) return null;
   if (!asks && (await alwaysAllowed(s.workspaceId, s.user.id)).includes(action)) return null;
   // what the automation behind this run lists and was allowed
