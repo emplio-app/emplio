@@ -178,7 +178,10 @@ if "--json" in a and "requests" in a: print(json.dumps({"data": {"requests": ${J
 elif "--json" in a and "request" in a:
     i = a[-1]; print(json.dumps({"data": {**next(r for r in ${JSON.stringify(records)} if r["requestId"] == i), **${JSON.stringify(details)}.get(i, {})}}))
 elif "eval" in a:
-    js = sys.stdin.read(); open(${JSON.stringify(join(home, "sent.js"))}, "w").write(js)
+    js = sys.stdin.read()
+    if "innerText" in js:
+        print(json.dumps(json.dumps({"page": "app.test", "blocked": True, "signIn": False}))); sys.exit()
+    open(${JSON.stringify(join(home, "sent.js"))}, "w").write(js)
     status = 422 if "bad" in js else 201
     print(json.dumps(json.dumps({"status": status, "body": '{"id":8,"token":"SECRET3"}'})))
 elif "url" in a: print(${JSON.stringify(page)})
@@ -212,6 +215,8 @@ elif "url" in a: print(${JSON.stringify(page)})
   expect(told.rows[1]).toMatchObject({ host: "app.test", query: "page=", keys: ["data"] });
   expect(JSON.stringify(told)).not.toMatch(/SECRET|hunter2|123/);
   expect((await run(`true`)).out).not.toContain("New calls");
+  // a page that turned the browser away is reported after every command
+  expect(JSON.parse(atob(first.out.split("\n").find((l) => l.startsWith(`SITECHECK:${key}\t`))!.split("\t").at(-1)!))).toEqual({ page: "app.test", blocked: true, signIn: false });
 
   const full = await run(`emplio browser calls POST /api/items`);
   expect(full.out).toContain("Headers sent (values hidden): Authorization");

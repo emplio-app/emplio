@@ -15,6 +15,13 @@
       "when": 1794158518282,
       "tag": "20261108172158_redundant_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794226543423,
+      "tag": "20261109121543_paid_sites",
+      "breakpoints": true
     }
   ]
 }

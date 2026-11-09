@@ -6,12 +6,14 @@
 // that loses logins in practice.
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "./db";
-import { conversations, workspaceMembers } from "./db/schema";
+import { conversations, paidSites, workspaceMembers } from "./db/schema";
 import { cloud } from "./cloud";
 import { decrypt, encrypt } from "./secrets";
+import { siteOf } from "./site-calls";
+import { z } from "zod";
 
 // stopped after this long without a browser command (billed while open); long enough for the
 // user to solve a CAPTCHA or enter a code in the live view after the agent asks
@@ -22,7 +24,7 @@ const REOPEN_MS = 24 * 60 * 60_000;
 export const canReopen = (usedAt: Date | null, now = Date.now()) => !!usedAt && now - usedAt.getTime() < REOPEN_MS;
 
 // owner: whose sign-ins it carries (unknown for one picked up after a restart until a command uses it)
-export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; owner?: Owner };
+export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; owner?: Owner; paid?: boolean; signedIn?: Set<string> };
 const open = new Map<string, Promise<LiveBrowser>>();
 
 // One DevTools session on a tab: send a command, wait for its answer.
@@ -275,7 +277,10 @@ export async function liveView(conversationId: string) {
 export async function reopenBrowser(conversationId: string, owner: Owner, page: string | null) {
   const running = await liveView(conversationId);
   const live = await browserFor(conversationId, owner);
-  if (!running && page) await goTo(live.cdpUrl, decrypt(page)).catch((e) => console.error("browser page not restored:", e));
+  if (!running && page) {
+    await connectionFor(live, owner, decrypt(page)).catch((e) => console.error("browser connection not chosen:", e));
+    await goTo(live.cdpUrl, decrypt(page)).catch((e) => console.error("browser page not restored:", e));
+  }
   return live.liveUrl;
 }
 
@@ -290,6 +295,77 @@ async function goTo(cdpUrl: string, url: string) {
   } finally {
     cdp.close();
   }
+}
+
+// --- which connection the browser goes online on ---------------------------------------------------------
+// It starts on the free one, which sites see as a data centre abroad. The paid one is a home connection in the
+// person's country, billed by the GB, so it's used only when needed: a site turned the browser away, it takes a sign-in
+// (so it always sees one kind of address), or Emplio asked. The switch keeps tabs and sign-ins, and that browser stays
+// on it until it closes. A browser service with no proxies (the open app's Docker one) just stays as it is.
+const REMEMBERED_MS = 30 * 86_400_000;
+const LONG_LIVED_MS = 7 * 86_400_000;
+const SIGN_IN_COOKIE = /auth|sess|token|login|jwt|sid$/i;
+const URLS = /(?:https?:\/\/|\bopen\s+["']?)([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi;
+
+export const sitesIn = (text: string) => [...new Set([...text.matchAll(URLS)].map((m) => siteOf(m[1]!)))];
+
+// ponytail: a guess from cookie names, wrong now and then on sites that keep a long anonymous session; that only costs some paid data
+export const signedInSites = (cookies: Cookie[], now = Date.now()) =>
+  new Set(cookies.filter((c) => c.httpOnly && SIGN_IN_COOKIE.test(c.name) && Number(c.expires) * 1000 > now + LONG_LIVED_MS).map((c) => siteOf(c.domain.replace(/^\./, ""))));
+
+const rememberPaid = (workspaceId: string, site: string) =>
+  db.insert(paidSites).values({ workspaceId, site }).onConflictDoUpdate({ target: [paidSites.workspaceId, paidSites.site], set: { seenAt: sql`now()` } });
+
+// Any of these remembered and still fresh: using one keeps it fresh.
+async function anyRemembered(workspaceId: string, sites: string[]) {
+  const fresh = await db
+    .update(paidSites)
+    .set({ seenAt: sql`now()` })
+    .where(and(eq(paidSites.workspaceId, workspaceId), inArray(paidSites.site, sites), gt(paidSites.seenAt, new Date(Date.now() - REMEMBERED_MS))))
+    .returning({ site: paidSites.site });
+  return fresh.length > 0;
+}
+
+// True only when this call moved it.
+async function goPaid(live: LiveBrowser, owner: Owner) {
+  if (live.paid) return false;
+  live.paid = await cloud.browser.useProxy(live.id, owner).catch((e) => (console.error("browser connection not switched:", e), false));
+  return live.paid;
+}
+
+// Before a browser command: a site that's known to need it (named in the command) goes on the paid connection first.
+export async function connectionFor(live: LiveBrowser, owner: Owner, text: string) {
+  if (live.paid) return;
+  const sites = sitesIn(text);
+  if (!sites.length) return;
+  live.signedIn ??= signedInSites((await savedState(owner).catch(() => null))?.cookies ?? []);
+  if (sites.some((s) => live.signedIn!.has(s)) || (await anyRemembered(owner.workspaceId, sites))) await goPaid(live, owner);
+}
+
+const pageCheck = z.object({ page: z.string().min(1).max(200), blocked: z.boolean(), signIn: z.boolean() });
+
+// What a browser command saw on the page (base64 JSON from inside the computer, so checked). Returns what to add to its output.
+export async function pageChecked(conversationId: string, workspaceId: string, encoded: string) {
+  const got = pageCheck.safeParse(JSON.parse(Buffer.from(encoded, "base64").toString()));
+  if (!got.success || !(got.data.blocked || got.data.signIn)) return null;
+  const live = await openBrowser(conversationId);
+  if (!live?.owner) return null;
+  await rememberPaid(workspaceId, siteOf(got.data.page));
+  const moved = await goPaid(live, live.owner);
+  return moved && got.data.blocked
+    ? `[${got.data.page} turned this browser away, so it has moved to a local connection in the person's country. Open the page again. If it's still refused, the site refuses automated browsers: say so rather than keep trying.]`
+    : null;
+}
+
+// `emplio browser local`: url is the page it's on, remembered for next time.
+export async function browserLocal(conversationId: string, workspaceId: string, url?: string) {
+  const live = await openBrowser(conversationId);
+  if (!live?.owner) return "emplio browser local: no browser open";
+  if (live.paid) return "Already on the local connection.";
+  const moved = await goPaid(live, live.owner);
+  if (!moved) return "This browser has no other connection to move to.";
+  if (url && /^https?:/.test(url)) await rememberPaid(workspaceId, siteOf(new URL(url).host));
+  return "Now on a local connection in the person's country. Open the page again to use it.";
 }
 
 // A link on our own address for signing in from a phone (Telegram has no live view beside the chat): it
