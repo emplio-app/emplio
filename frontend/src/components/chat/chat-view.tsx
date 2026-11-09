@@ -1309,7 +1309,7 @@ function UserMessageActions({
 }) {
   const at = versions.indexOf(current);
   return (
-    <MessageActions className="absolute top-full right-0 gap-0.5 text-muted-foreground [&_button]:size-7 [&_svg]:size-3.5! opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-versions]]:opacity-100">
+    <MessageActions className="absolute top-full right-0 gap-0.5 text-muted-foreground pointer-coarse:static pointer-coarse:self-end has-[[data-versions]]:static has-[[data-versions]]:self-end [&_button]:size-7 [&_svg]:size-3.5! opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-versions]]:opacity-100">
       {text && <CopyButton text={text} />}
       {onEdit && !disabled && (
         <MessageAction tooltip="Edit" onClick={onEdit}>
