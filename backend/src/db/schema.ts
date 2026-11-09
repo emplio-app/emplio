@@ -70,7 +70,7 @@ export const workspaceMembers = pgTable(
     alwaysAllowed: text().array().notNull().default([]),
     // their saved browser logins in this business: a profile at the browser service, made on first use (browser-host.ts)
     browserProfileId: text(),
-    // encrypted copy of that browser's cookies and local storage (browser.ts), so logins survive a provider change
+    // encrypted copy of that browser's cookies, local storage and Indexed DB (browser.ts), so logins survive a provider change
     browserState: text(),
     // their own morning brief (heartbeat.ts; the owner's is the day's first check-in): when the last one ran,
     // and the web chat it goes in when they haven't connected a phone
