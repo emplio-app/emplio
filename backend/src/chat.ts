@@ -63,6 +63,8 @@ export const remindAt = (commands: number) => commands >= LONG_RUN && (commands 
 // In a reply to a person, past this many the server refuses commands until Emplio hands off: reminders alone were
 // ignored (a 15-command report done by hand). Where nobody waits (automations, check-ins, tasks, threads) there's no limit.
 export const MAX_BY_HAND = 8;
+// The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
+export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
 export const notCounted = (command: string) => /\bemplio (hand|threads|plan)\b/.test(command) || isReport(command);
@@ -857,11 +859,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
       "Commands time out after 120s: for anything long-running (servers, watchers, big runs) set background: true instead of using & or nohup yourself.",
     inputSchema: z.object({
-      // defaulted: a model that skips it would otherwise fail the whole reply
-      description: z
-        .string()
-        .default("Running a command")
-        .describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
+      description: commandLabel.describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
       command: z.string().describe("The bash command or script to run"),
       background: z
         .boolean()
