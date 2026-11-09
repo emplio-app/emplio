@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { FROM_EMPLIO, type Approval } from "@emplio/shared";
+import { FROM_EMPLIO, runRef, splitRef, type Approval } from "@emplio/shared";
 import { eq } from "drizzle-orm";
 import { MAX_BY_HAND, notCounted, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { cardsIn, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, threadsNote, tooOld, untoldNote, untoldReports } from "./jobs";
+import { cardsIn, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, tooOld, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -161,4 +161,20 @@ test("a hand-off needs a real pick: nothing starts otherwise, and the list shows
     await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
     await db.delete(users).where(eq(users.id, user!.id));
   }
+});
+
+test("each hand-off card is one run of its job: the prompt it was handed, and what came after", () => {
+  expect(splitRef(runRef("job1", "m2"))).toEqual({ id: "job1", run: "m2" });
+  const said = (id: string, role: string, text: string) => ({ id, role, parts: [{ type: "text", text }] });
+  const msgs = [
+    said("m1", "user", `${FROM_EMPLIO}first brief`),
+    said("a1", "assistant", "first report"),
+    said("m2", "user", `${FROM_EMPLIO}second brief`),
+    said("a2", "assistant", "Question: which client?"),
+  ];
+  // the first run is finished: it ends where the next prompt starts
+  expect(runSpan(msgs, "m1")).toEqual({ msgs: msgs.slice(0, 2), latest: false });
+  expect(runSpan(msgs, "m2")).toEqual({ msgs: msgs.slice(2), latest: true });
+  // a prompt not in the chat yet has no run
+  expect(runSpan(msgs, "m3")).toBeNull();
 });

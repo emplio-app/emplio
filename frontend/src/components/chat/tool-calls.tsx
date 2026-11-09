@@ -1,6 +1,6 @@
 "use client";
 
-import { isReport, type Approval, type AskCard as Ask, type ConnectCard as Card, type PlanStep, type SaveLoginCard, type JobInfo } from "@emplio/shared";
+import { isReport, splitRef, type Approval, type AskCard as Ask, type ConnectCard as Card, type PlanStep, type SaveLoginCard, type JobInfo } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { BotIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, TerminalIcon, XIcon } from "lucide-react";
@@ -40,7 +40,7 @@ type BashPart = {
     asks?: Ask[];
     // app actions it asked the person's OK for (while it waits, the only output so far: preliminary)
     approvals?: Approval[];
-    // threads this command started or carried on (emplio hand); workers: the same, in chats from before the rename
+    // threads this command started or carried on (emplio hand), each as job/run (splitRef); workers: the same, in chats from before the rename
     jobs?: string[];
     workers?: string[];
     // the checklist after this command changed it (emplio plan)
@@ -147,8 +147,8 @@ function Actions({ tools, streaming, live }: { tools: BashPart[]; streaming: boo
       )}
       {/* only the last run that used it: one way back to the panel, not one per run */}
       {usedBrowser && live && <BrowserChip className="self-start" />}
-      {[...new Set(tools.flatMap((p) => p.output?.jobs ?? p.output?.workers ?? []))].map((id) => (
-        <Job key={id} id={id} />
+      {[...new Set(tools.flatMap((p) => p.output?.jobs ?? p.output?.workers ?? []))].map((ref) => (
+        <Job key={ref} {...splitRef(ref)} />
       ))}
       <Results waiting={live} saved={saved} cards={cards} logins={tools.flatMap((p) => p.output?.logins ?? [])} approvals={tools.flatMap((p) => p.output?.approvals ?? [])} asks={tools.flatMap((p) => p.output?.asks ?? [])} />
     </div>
@@ -190,12 +190,13 @@ function Results({
 }
 
 // A job Emplio handed a task to: one line with what it's on now; open, each of its actions and its report to
-// Emplio. Polled while it works (it runs on the server, apart from the reply).
-function Job({ id }: { id: string }) {
+// Emplio. Polled while it works (it runs on the server, apart from the reply). Its card is one run of the job (run:
+// the prompt it was handed), so an earlier one stays finished when the job is given more work.
+function Job({ id, run }: { id: string; run?: string }) {
   const [open, setOpen] = useState(false);
   const { data: w } = useQuery({
-    queryKey: ["job", id],
-    queryFn: () => api<JobInfo>(`/jobs/${id}`),
+    queryKey: ["job", id, run],
+    queryFn: () => api<JobInfo>(`/jobs/${id}${run ? `?run=${encodeURIComponent(run)}` : ""}`),
     refetchInterval: (q) => (!q.state.data || q.state.data.status === "working" ? 1500 : false),
   });
   const actions = w?.actions ?? [];
@@ -255,8 +256,8 @@ function Job({ id }: { id: string }) {
       {/* the jobs it started, under it */}
       {actions.some((a) => (a.jobs ?? a.workers)?.length) && (
         <div className="flex flex-col gap-1.5 border-l pl-3">
-          {[...new Set(actions.flatMap((a) => a.jobs ?? a.workers ?? []))].map((sub) => (
-            <Job key={sub} id={sub} />
+          {[...new Set(actions.flatMap((a) => a.jobs ?? a.workers ?? []))].map((ref) => (
+            <Job key={ref} {...splitRef(ref)} />
           ))}
         </div>
       )}
