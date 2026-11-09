@@ -8,7 +8,7 @@
 // ponytail: the four gated actions (money out, messages to customers, deletes) aren't enforced here yet, only asked for in the prompt.
 import { and, desc, eq } from "drizzle-orm";
 import { record } from "../activity";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { APP_CATEGORIES, type ActionRun, type AppCategory, type AppInfo, type ConnectCard, type Connection } from "@emplio/shared";
 import { CATALOG, catalogApp } from "./catalog";
 import { context, currentUser, type Ctx } from "../auth";
@@ -26,7 +26,13 @@ type Who = Pick<Ctx, "workspaceId" | "userId">;
 
 // which one runs an app is set per app in catalog.ts
 const providers: Record<string, Provider> = { composio, own };
-const providerFor = (app: string) => providers[catalogApp(app)?.provider ?? "composio"] ?? composio;
+type Workspace = Pick<Ctx, "workspaceId">;
+const envList = (name: string) => (process.env[name] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+// KEEP_ON_COMPOSIO: apps still waiting on their maker's review. Everyone stays on Composio with them, except the workspaces
+// in OWN_APP_TESTERS, which get ours (reviewers need it working). Take an app off the list once it's approved.
+// ponytail: delete this with the env vars once the list is empty. Anywhere `who` isn't passed answers as a customer would.
+const heldBack = (app: string, who?: Workspace) => envList("KEEP_ON_COMPOSIO").includes(app) && !(who && envList("OWN_APP_TESTERS").includes(who.workspaceId));
+export const providerFor = (app: string, who?: Workspace) => (heldBack(app, who) ? composio : (providers[catalogApp(app)?.provider ?? "composio"] ?? composio));
 const providerOf = (c: { provider: string }) => providers[c.provider] ?? composio;
 
 const APP = /^[a-z0-9_]+$/;
@@ -53,10 +59,10 @@ const providerApp = (app: string) => {
 };
 
 // Apps with a login set up at their provider, asked at most once a minute.
-let ready: { at: number; apps: Promise<Set<string>> } | null = null;
+let ready: { at: number; apps: Promise<Map<string, Set<string>>> } | null = null;
 const readyApps = () => {
   if (!ready || Date.now() - ready.at > 60_000) {
-    const apps = Promise.all(Object.values(providers).map((p) => p.readyApps())).then((sets) => new Set(sets.flatMap((s) => [...s])));
+    const apps = Promise.all(Object.values(providers).map(async (p) => [p.name, await p.readyApps()] as const)).then((sets) => new Map(sets));
     ready = { at: Date.now(), apps };
     apps.catch(() => (ready = null));
   }
@@ -64,10 +70,10 @@ const readyApps = () => {
 };
 
 // What we offer right now: our catalog, minus apps whose login isn't set up yet.
-export async function availableApps(): Promise<AppInfo[]> {
+export async function availableApps(who?: Workspace): Promise<AppInfo[]> {
   const ok = await readyApps();
   return Promise.all(
-    CATALOG.filter((a) => ok.has(a.app)).map(async (a) => {
+    CATALOG.filter((a) => ok.get(providerFor(a.app, who).name)?.has(a.app)).map(async (a) => {
       const p = await providerApp(a.app);
       return { app: a.app, name: a.name, description: a.description, category: a.category, logo: p?.logo, keyField: p?.keyField, signIn: p?.signIn };
     }),
@@ -75,9 +81,9 @@ export async function availableApps(): Promise<AppInfo[]> {
 }
 
 // The app, if we offer it now; otherwise a reason the agent or person can act on.
-async function offered(app: string): Promise<AppInfo> {
+async function offered(app: string, who?: Workspace): Promise<AppInfo> {
   if (!APP.test(app)) throw new AppsError(`"${app}" isn't an app name`);
-  const found = (await availableApps()).find((a) => a.app === app);
+  const found = (await availableApps(who)).find((a) => a.app === app);
   if (!found) throw new AppsError(`${app} isn't offered; see the apps that are with emplio apps search`);
   return found;
 }
@@ -85,7 +91,7 @@ async function offered(app: string): Promise<AppInfo> {
 type Row = typeof connections.$inferSelect;
 const appName = (app: string) => catalogApp(app)?.name ?? app;
 // signed in through the provider an app has since left (GitHub moved off Composio): it has to be connected again
-const moved = (c: Row) => c.provider !== providerFor(c.app).name;
+const moved = (c: Row) => c.provider !== providerFor(c.app, c).name;
 
 const toConnection = async (c: Row): Promise<Connection> => ({
   id: c.id,
@@ -157,9 +163,9 @@ async function refresh(c: Row) {
 }
 
 // Offered apps matching every word (name, app name, description) and the category, if given.
-export async function searchApps(words: string, category?: AppCategory) {
+export async function searchApps(words: string, category?: AppCategory, who?: Workspace) {
   const terms = words.toLowerCase().split(/\s+/).filter(Boolean);
-  return (await availableApps()).filter(
+  return (await availableApps(who)).filter(
     (a) => (!category || a.category === category) && terms.every((t) => `${a.app} ${a.name} ${a.description}`.toLowerCase().includes(t)),
   );
 }
@@ -167,33 +173,33 @@ export async function searchApps(words: string, category?: AppCategory) {
 // A Connect button for the chat: our own link, which starts the sign-in for whoever opens it
 // (logged in), so nothing provider-made is shown and a stale link never expires.
 // connection: reconnect that account instead of adding another.
-export async function connectCard(app: string, conversationId?: string, connection?: string): Promise<ConnectCard> {
-  const info = await offered(app);
+export async function connectCard(app: string, conversationId?: string, connection?: string, who?: Workspace): Promise<ConnectCard> {
+  const info = await offered(app, who);
   const query = new URLSearchParams({ ...(conversationId && { chat: conversationId }), ...(connection && { connection }) });
   return { app, name: info.name, logo: info.logo, keyField: info.keyField, signIn: info.signIn, path: `/connect/${app}${query.size ? `?${query}` : ""}`, connection };
 }
 
-export async function listActions(app: string, words?: string) {
-  await offered(app);
-  return providerFor(app).listActions(app, words);
+export async function listActions(app: string, words?: string, who?: Workspace) {
+  await offered(app, who);
+  return providerFor(app, who).listActions(app, words);
 }
 
 // real actions near a made-up name (gmail.search_emails → gmail.fetch_emails…): search by its words, then by each word alone
-async function closestActions(action: string) {
+async function closestActions(action: string, who: Workspace) {
   const app = appOf(action);
   const words = action.slice(app.length + 1).split("_").filter((w) => w.length > 2);
   const found = new Set<string>();
   for (const search of [words.join(" "), ...words]) {
-    for (const a of await providerFor(app).listActions(app, search).catch(() => [])) found.add(a.action);
+    for (const a of await providerFor(app, who).listActions(app, search).catch(() => [])) found.add(a.action);
     if (found.size >= 5) break;
   }
   return [...found].slice(0, 5);
 }
 
-export async function getAction(action: string) {
+export async function getAction(action: string, who?: Workspace) {
   if (!ACTION.test(action)) throw new AppsError(`"${action}" isn't an action name (they look like gmail.send_email)`);
-  await offered(appOf(action));
-  return providerFor(appOf(action)).getAction(action);
+  await offered(appOf(action), who);
+  return providerFor(appOf(action), who).getAction(action);
 }
 
 // This person's connections; sign-ins still pending are checked on the way.
@@ -239,9 +245,9 @@ export async function connect(
   // where the sign-in comes back to: this server as the person's device reaches it
   base = API_URL(),
 ): Promise<{ connection: Connection; url: string }> {
-  const info = await offered(app);
+  const info = await offered(app, who);
   if (info.keyField && !info.signIn) throw new AppsError(`${app} is connected by entering a key in the app`);
-  const provider = providerFor(app);
+  const provider = providerFor(app, who);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   const id = existing?.id ?? crypto.randomUUID();
   const back = new URL(`/connections/${id}/done`, base);
@@ -261,8 +267,8 @@ export async function connect(
 // provider checks the key works, then it's stored encrypted. The key never goes to the agent; only the
 // web app sends it here.
 export async function connectWithKey(who: Who, app: string, key: string, connectionId?: string): Promise<Connection> {
-  if (!(await offered(app)).keyField) throw new AppsError(`${app} is connected by signing in, not with a key`);
-  const provider = providerFor(app);
+  if (!(await offered(app, who)).keyField) throw new AppsError(`${app} is connected by signing in, not with a key`);
+  const provider = providerFor(app, who);
   const { secret, label } = await provider.connectWithKey!(app, key);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   if (existing && existing.provider !== provider.name) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
@@ -323,7 +329,7 @@ export async function runAction(
 ) {
   if (!ACTION.test(action)) throw new AppsError(`"${action}" isn't an action name (they look like gmail.send_email)`);
   const app = appOf(action);
-  await offered(app);
+  await offered(app, who);
   let connection = await findConnection(who, app, account);
   // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
   if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
@@ -336,7 +342,7 @@ export async function runAction(
   const sent = await attachFiles(input, readFile);
   const started = Date.now();
   // no connection: fine for apps that need no sign-in; the provider says so otherwise
-  const provider = connection ? providerOf(connection) : providerFor(app);
+  const provider = connection ? providerOf(connection) : providerFor(app, who);
   const run = await (connection ? loginOf(connection) : Promise.resolve(null)).then((login) => provider.run(action, sent, login, owner(who))).then(
     (output) => ({ ok: true as const, output }),
     (error: unknown) => ({ ok: false as const, error }),
@@ -368,31 +374,33 @@ export async function runAction(
   if (run.error instanceof AppsError && run.error.message === "not connected") throw new AppsError(`${app} isn't connected`);
   // a guessed action name: point at the real ones instead of leaving the agent to guess again
   if (message && /^Tool \S+ not found/.test(message)) {
-    const close = await closestActions(action);
+    const close = await closestActions(action, who);
     if (close.length) throw new AppsError(`there's no ${action}. Closest: ${close.join(", ")}`);
   }
   throw run.error;
 }
 
 // Triggers: events that start an automation. Same names and checks as actions.
-export async function listTriggers(app: string, words?: string) {
-  await offered(app);
+// Polled triggers are written against our own actions, so an app held back on Composio has none.
+const pollsRun = (app: string, who?: Workspace) => providerFor(app, who).name === "own";
+export async function listTriggers(app: string, words?: string, who?: Workspace) {
+  await offered(app, who);
   const terms = (words ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-  const ours = listPolls(app).filter((t) => terms.every((w) => `${t.action} ${t.description}`.toLowerCase().includes(w)));
-  return [...ours, ...((await providerFor(app).listTriggers?.(app, words)) ?? [])];
+  const ours = (pollsRun(app, who) ? listPolls(app) : []).filter((t) => terms.every((w) => `${t.action} ${t.description}`.toLowerCase().includes(w)));
+  return [...ours, ...((await providerFor(app, who).listTriggers?.(app, words)) ?? [])];
 }
 
-export async function getTrigger(trigger: string) {
+export async function getTrigger(trigger: string, who?: Workspace) {
   if (!ACTION.test(trigger)) throw new AppsError(`"${trigger}" isn't a trigger name (they look like gmail.new_gmail_message)`);
-  await offered(appOf(trigger));
-  return pollDetail(trigger) ?? (await providerFor(appOf(trigger)).getTrigger?.(trigger)) ?? null;
+  await offered(appOf(trigger), who);
+  return (pollsRun(appOf(trigger), who) ? pollDetail(trigger) : null) ?? (await providerFor(appOf(trigger), who).getTrigger?.(trigger)) ?? null;
 }
 
 // Start watching for a trigger's event on this person's login. Its events come back to our webhook with
 // the returned externalId.
 // account: which of the person's accounts of the app, when they have several.
 export async function startTrigger(who: Who, trigger: string, config: unknown, account?: string) {
-  const detail = await getTrigger(trigger);
+  const detail = await getTrigger(trigger, who);
   if (!detail) throw new AppsError(`no trigger ${trigger}; list them with emplio automations triggers <app>`);
   const app = appOf(trigger);
   let connection = await findConnection(who, app, account);
@@ -400,7 +408,7 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
   if (connection?.status === "pending") connection = await refresh(connection);
   if (connection?.status !== "active") throw new AppsError(`${app} isn't connected for the person who saved it`);
-  const polled = pollTrigger(trigger);
+  const polled = pollsRun(appOf(trigger), who) ? pollTrigger(trigger) : undefined;
   if (polled) {
     try {
       pollConfig(trigger, config);
@@ -494,7 +502,7 @@ export async function appsCommand(
         return list.map((c) => `${c.app}\t"${c.label}"\t${label[c.status]}\tsince ${c.createdAt.slice(0, 10)}`).join("\n");
       }
       case "search": {
-        const apps = await searchApps([first, ...rest].join(" "));
+        const apps = await searchApps([first, ...rest].join(" "), undefined, who);
         return apps.length ? apps.map((a) => `${a.app}\t${a.name}: ${a.description}`).join("\n") : "No app matches.";
       }
       case "add":
@@ -503,7 +511,7 @@ export async function appsCommand(
         // reconnect: that account (the only one, or --account); add: another account
         const target = sub === "reconnect" ? await findConnection(who, name, account) : undefined;
         if (sub === "reconnect" && !target) return `error: ${name} isn't connected; use emplio apps add ${name}.`;
-        const card = { ...(await connectCard(name, conversationId, target?.id)), existing: (await accounts(who, name)).map((c) => c.id) };
+        const card = { ...(await connectCard(name, conversationId, target?.id, who)), existing: (await accounts(who, name)).map((c) => c.id) };
         const how = card.keyField ? ` They'll ${card.signIn ? "sign in or " : ""}paste their ${card.keyField.label} into it; never ask for the key in chat.` : "";
         return {
           card,
@@ -524,14 +532,14 @@ export async function appsCommand(
         return `Disconnected ${name}${account ? ` "${account}"` : ""}.`;
       case "actions": {
         if (!name) break;
-        const actions = await listActions(name, rest.join(" ") || undefined);
+        const actions = await listActions(name, rest.join(" ") || undefined, who);
         return actions.length
           ? actions.map((a) => `${a.action}\t${a.description}`).join("\n")
           : `No actions found for ${name}. Check the app name with emplio apps search.`;
       }
       case "info": {
         if (!name) break;
-        const a = await getAction(name);
+        const a = await getAction(name, who);
         if (!a) return `error: no action ${name}. List them with emplio apps actions <app>.`;
         const input = a.input.map((p) => `  ${p.name}${p.required ? " (required)" : ""}: ${p.type}. ${p.description}`);
         return [`${a.action}: ${a.description}`, "Input:", ...(input.length ? input : ["  none"])].join("\n");
@@ -614,6 +622,11 @@ button,.b{display:block;box-sizing:border-box;text-align:center;text-decoration:
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
 }
 
+// Marks this browser as the one that started the sign-in. Only we can set a cookie on this address.
+const startCookie = (id: string) => `oauth_${id}=1; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age=900${process.env.WEBHOOK_URL?.startsWith("https") ? "; Secure" : ""}`;
+export const startedHere = (cookies: string | undefined, id: string) => (cookies ?? "").split(/;\s*/).includes(`oauth_${id}=1`);
+const toSignIn = (reply: FastifyReply, started: { connection: Connection; url: string }) => reply.header("set-cookie", startCookie(started.connection.id)).redirect(started.url);
+
 export async function integrationRoutes(app: FastifyInstance) {
   // AppsError is the person's problem (400); anything else is ours (500, logged by Fastify)
   const handle = async <T>(reply: { code(n: number): { send(b: unknown): unknown } }, fn: () => Promise<T>) => {
@@ -626,19 +639,22 @@ export async function integrationRoutes(app: FastifyInstance) {
   };
 
   app.get<{ Querystring: { search?: string; category?: string } }>("/apps", async (req, reply) => {
-    if (!(await context(req, reply))) return;
+    const ctx = await context(req, reply);
+    if (!ctx) return;
     const category = APP_CATEGORIES.find((c) => c.key === req.query.category)?.key;
-    return handle(reply, () => searchApps(req.query.search ?? "", category));
+    return handle(reply, () => searchApps(req.query.search ?? "", category, ctx));
   });
 
   app.get<{ Params: { app: string }; Querystring: { search?: string } }>("/apps/:app/actions", async (req, reply) => {
-    if (!(await context(req, reply))) return;
-    return handle(reply, () => listActions(req.params.app, req.query.search));
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    return handle(reply, () => listActions(req.params.app, req.query.search, ctx));
   });
 
   app.get<{ Params: { action: string } }>("/actions/:action", async (req, reply) => {
-    if (!(await context(req, reply))) return;
-    return handle(reply, async () => (await getAction(req.params.action)) ?? reply.code(404).send({ error: "Not found" }));
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    return handle(reply, async () => (await getAction(req.params.action, ctx)) ?? reply.code(404).send({ error: "Not found" }));
   });
 
   app.post<{ Params: { action: string }; Body: { input?: unknown } }>("/actions/:action/run", async (req, reply) => {
@@ -711,14 +727,14 @@ export async function integrationRoutes(app: FastifyInstance) {
     if (linked?.keyField && !(linked.signIn && req.query.signin === "1")) return reply.type("text/html").send(await keyPage(req.params.app.toLowerCase(), null, undefined, req.query.t));
     if (link)
       return handle(reply, async () =>
-        reply.redirect((await connect({ workspaceId: link.w, userId: link.u }, req.params.app.toLowerCase(), undefined, true, link.c, process.env.WEBHOOK_URL)).url),
+        toSignIn(reply, await connect({ workspaceId: link.w, userId: link.u }, req.params.app.toLowerCase(), undefined, true, link.c, process.env.WEBHOOK_URL)),
       );
     if (!(await currentUser(req))) return reply.redirect(`${FRONTEND_URL()}/login`);
     const ctx = await context(req, reply);
     if (!ctx) return;
     const chat = /^[0-9a-f-]{36}$/.test(req.query.chat ?? "") ? req.query.chat : undefined;
     const popup = req.query.popup === "1";
-    return handle(reply, async () => reply.redirect((await connect(ctx, req.params.app.toLowerCase(), chat, popup, req.query.connection, returnBase(req))).url));
+    return handle(reply, async () => toSignIn(reply, await connect(ctx, req.params.app.toLowerCase(), chat, popup, req.query.connection, returnBase(req))));
   });
 
   // The key form above, sent: the app checks the key before it's kept, and a wrong one shows the form again
@@ -745,10 +761,12 @@ export async function integrationRoutes(app: FastifyInstance) {
   // that connection stops waiting here, so it works once.
   app.get<{ Params: { app: string }; Querystring: { code?: string; state?: string } }>("/oauth/:app/callback", async (req, reply) => {
     const name = req.params.app.toLowerCase();
-    const provider = providerFor(name);
+    const provider = own;
     const s = req.query.state ? provider.readSignIn?.(name, req.query.state) : null;
     const row = s ? await db.query.connections.findFirst({ where: and(eq(connections.app, name), eq(connections.externalId, s.externalId)) }) : null;
     if (!s || !row) return reply.type("text/html").send(await keyPage(name, null, "This sign-in has expired. Connect again from the chat."));
+    // a link someone was sent can't attach their account to the sender's connection
+    if (provider.mustStartHere?.(name) && !startedHere(req.headers.cookie, row.id)) return reply.type("text/html").send(await keyPage(name, null, "This sign-in was started somewhere else. Connect again from the chat."));
     // said no on the app's page: a new connection goes, a working one is left as it was
     if (!req.query.code) {
       if (row.secret) await db.update(connections).set({ externalId: row.id, status: "active", updatedAt: new Date() }).where(eq(connections.id, row.id));
@@ -756,7 +774,7 @@ export async function integrationRoutes(app: FastifyInstance) {
       return reply.redirect(s.back);
     }
     try {
-      const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back);
+      const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back, req.query);
       const others = (await accounts(row, name)).filter((o) => o.id !== row.id);
       const named = row.label ?? uniqueLabel(label ?? appName(name), others);
       await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), refreshToken: refreshToken ? encrypt(refreshToken) : null, expiresAt: expiresAt ?? null, status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));

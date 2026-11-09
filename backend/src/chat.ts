@@ -19,7 +19,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type ConversationSummary, type UpdateConversationRequest } from "@emplio/shared";
+import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -478,57 +478,79 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
   }
 }
 
-// The message they'd most likely send next in a web chat, shown greyed in their chat box after each reply
-// (Tab or a tap takes it). Kept cheap three ways: the small title model, one answer per reply kept here, and
-// a prompt that only grows at its end (fixed instructions, then the chat as it was) so the provider's prompt
-// cache covers everything but the newest turn.
-const SUGGEST_RULES = [
-  "You predict the next message the user will send in this chat with their AI employee, so they can send it with one tap.",
-  "Write it as the user, in their voice and language, short (under 15 words), as they'd type it: a natural follow-up, a yes/go-ahead to what was offered, or the next step of the work.",
-  "If the AI employee just asked the user something, predict the user's answer to it (e.g. it asked \"Which server?\" → \"The Hostinger VPS, check disk space\"). Never repeat or reword the AI employee's own question or words.",
-  `Only predict what the conversation clearly points to. If nothing obvious comes next (the work is done, it was small talk), reply with exactly ${SILENT} and nothing else.`,
-  "Reply with the message only: no quotes, no explanation.",
+// A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
+// to tap. Kept cheap three ways: the small title model, one answer per reply kept here, and a prompt that only
+// grows at its end (fixed instructions, then the chat as it was) so the provider's prompt cache covers everything
+// but the newest turn.
+const NEXT_STEP_RULES = [
+  "After each reply from an AI employee, you write a small card that lets the person move the work forward with one tap.",
+  'Reply with JSON only, no code fence: {"summary": "...", "question": "...", "buttons": ["...", "..."]}',
+  "summary: one plain sentence, under 25 words, on what was just said or done and where things now stand. Use the whole chat, so it's useful even when the last reply is short. Don't copy the reply's wording. Say what isn't done yet if that matters.",
+  "question: the one short question, under 15 words, that most moves the work forward, from the AI employee to the person. If the last reply already asks something, ask that.",
+  'buttons: 2 or 3 answers to that question, 1 to 3 words each, in the person\'s voice. First the one that moves things forward ("Yes, send it"), then one that declines or waits ("Not yet").',
+  "Write in the language of the chat, in plain words a business owner uses. Only offer what the chat points to: no new facts, no work nobody talked about.",
+  `Only write a card when there's a real next step the person can decide. If the work is finished and nothing waits on them, or it was small talk, reply with exactly ${SILENT} and nothing else.`,
 ].join("\n");
-const SUGGEST_ASK = `What will I most likely send next? Reply with only that message, or ${SILENT}.`;
+const NEXT_STEP_ASK = `Write the card for the last reply: JSON only, or ${SILENT}.`;
+const HISTORY_LIMIT = 2000;
+const nextStepShape = z.object({
+  summary: z.string().trim().min(1).max(300),
+  question: z.string().trim().min(1).max(200),
+  buttons: z.array(z.string().trim().min(1).max(40)).min(2).max(3),
+});
 // ponytail: in memory, by the reply it follows; lost on restart, which only means one more cheap call
-const suggestions = new Map<string, string>();
+const nextSteps = new Map<string, NextStep | null>();
 
-const words = (t: string) => new Set(t.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
-export function echoes(guess: string, reply: string) {
-  const g = words(guess), r = words(reply);
-  // ponytail: short go-aheads ("yes", "send it") share words with any offer, so only longer guesses count
-  return g.size >= 4 && [...g].filter((w) => r.has(w)).length / g.size >= 0.7;
+// anything but a well-formed card (including SILENT) is no card
+export function parseNextStep(text: string): NextStep | null {
+  try {
+    return nextStepShape.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
+  } catch {
+    return null;
+  }
 }
 
-export async function suggestNext(bill: Bill & { conversationId: string }, peek: boolean) {
-  const { conversationId } = bill;
-  const all = (await loadMessages(conversationId)).filter((m) => m.role === "user" || m.role === "assistant");
+async function lastTurns(conversationId: string) {
+  return (await loadMessages(conversationId)).filter((m) => m.role === "user" || m.role === "assistant");
+}
+
+export async function nextStep(bill: Bill & { conversationId: string }, peek: boolean) {
+  const all = await lastTurns(bill.conversationId);
   const last = all.at(-1);
-  if (last?.role !== "assistant") return "";
-  if (suggestions.has(last.id) || peek) return suggestions.get(last.id) ?? "";
+  if (last?.role !== "assistant") return null;
+  if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
+  // it already put a question or button in the chat that's waiting on them: a second one would compete with it
+  if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;
   // older turns are dropped 40 at a time, not one per reply, so the start of the prompt stays the same
   const kept = all.slice(all.length <= 80 ? 0 : Math.floor((all.length - 40) / 40) * 40);
   const history: ModelMessage[] = kept.flatMap((m) => {
-    const text = textOf(m).slice(0, 2000);
+    const text = textOf(m).slice(0, HISTORY_LIMIT);
     return text ? [{ role: m.role as "user" | "assistant", content: text }] : [];
   });
+  // a long last reply goes in whole here, at the end, so the chat before it still matches what's cached
+  const reply = textOf(last);
+  const ask = reply.length > HISTORY_LIMIT ? `${NEXT_STEP_ASK}\n\nThe last reply in full:\n${reply}` : NEXT_STEP_ASK;
   try {
     const { text } = await generateText({
       model: model({ openrouterKey: "" }, TITLE_MODEL, bill),
       providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: { effort: "low" } } },
-      system: SUGGEST_RULES,
-      messages: [...history, { role: "user", content: SUGGEST_ASK }],
-      maxOutputTokens: 200,
+      system: NEXT_STEP_RULES,
+      messages: [...history, { role: "user", content: ask }],
+      maxOutputTokens: 400,
     });
-    const said = text.trim().replace(/^["']|["']$/g, "").split("\n")[0]!.slice(0, 200);
-    // small models sometimes echo the employee's own question back; a guess mostly made of its words isn't the user's
-    const next = said.includes(SILENT) || echoes(said, textOf(last)) ? "" : said;
-    suggestions.set(last.id, next);
-    if (suggestions.size > 2000) suggestions.delete(suggestions.keys().next().value!);
-    return next;
+    const card = parseNextStep(text);
+    nextSteps.set(last.id, card);
+    if (nextSteps.size > 2000) nextSteps.delete(nextSteps.keys().next().value!);
+    return card;
   } catch {
-    return "";
+    return null;
   }
+}
+
+// closed by the person: it stays closed when they come back to this chat
+export async function closeNextStep(conversationId: string) {
+  const last = (await lastTurns(conversationId)).at(-1);
+  if (last?.role === "assistant") nextSteps.set(last.id, null);
 }
 
 type Log = { error(obj: unknown, msg: string): void };
@@ -1152,14 +1174,22 @@ export async function chatRoutes(app: FastifyInstance) {
   });
 
   // ?peek=1 (opening a chat): only one already made, never a new call
-  app.get<{ Params: { id: string }; Querystring: { peek?: string } }>("/conversations/:id/suggestion", async (req, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { peek?: string } }>("/conversations/:id/next-step", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const conversation = await findConversation(req.params.id, ctx);
     if (!conversation) return reply.code(404).send({ error: "Not found" });
-    // channel chats are answered on the phone, where there's no chat box to put it in
-    if (conversation.channel !== "web" || running.has(req.params.id)) return { text: "" };
-    return { text: await suggestNext({ workspaceId: ctx.workspaceId, userId: ctx.userId, conversationId: req.params.id }, !!req.query.peek) };
+    // channel chats are answered on the phone, where there's no room for a card
+    if (conversation.channel !== "web" || running.has(req.params.id)) return { card: null };
+    return { card: await nextStep({ workspaceId: ctx.workspaceId, userId: ctx.userId, conversationId: req.params.id }, !!req.query.peek) };
+  });
+
+  app.delete<{ Params: { id: string } }>("/conversations/:id/next-step", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    if (!(await findConversation(req.params.id, ctx))) return reply.code(404).send({ error: "Not found" });
+    await closeNextStep(req.params.id);
+    return { ok: true };
   });
 
   // a queued message: the running reply ends at its next finished command so it can go in (steering, above).

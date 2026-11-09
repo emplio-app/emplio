@@ -76,6 +76,8 @@ export type SaveLoginCard = { name: string; kind: LoginKind; site: string; field
 // multi: any number of answers may be picked (sent as one line, "Gmail, Slack")
 // text: what they need to read to answer (a draft, a list), shown above the question
 export type AskCard = { id: string; question: string; options: string[]; multi?: boolean; text?: string };
+// The closable card after a reply: where things stand, the question that moves the work on, answers to tap
+export type NextStep = { summary: string; question: string; buttons: string[] };
 export const DEFAULT_LOGIN_FIELDS = ["Email or username", "Password"];
 // a field typed in hidden (password, PIN, security answer), and never shown back
 export const isSecretField = (label: string) => /pass|pin\b|secret|security|answer|passcode|mpin/i.test(label);
