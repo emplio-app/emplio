@@ -210,6 +210,9 @@ export const connections = pgTable(
     label: text(),
     // a login we hold ourselves (an API key), encrypted (see secrets.ts); null when the provider holds it
     secret: text(),
+    // own OAuth, for apps whose logins run out: how to get a new one (encrypted like `secret`), and when this one ends
+    refreshToken: text(),
+    expiresAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -477,6 +480,17 @@ export const siteCalls = pgTable(
     seenAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.workspaceId, t.host, t.method, t.path, t.op] }), index().on(t.workspaceId, t.site, t.seenAt)],
+);
+
+// Sites a business's browsers go to on the paid connection (browser.ts): they turned the free one away, take a sign-in, or Emplio asked.
+export const paidSites = pgTable(
+  "paid_sites",
+  {
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    site: text().notNull(),
+    seenAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.site] })],
 );
 
 // Tasks (tasks.ts): everything to be done in a business, by a person or by the AI (assigneeId null). Who

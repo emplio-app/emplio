@@ -1,6 +1,6 @@
 {
-  "id": "4b791783-e738-435f-8f81-e485807778d5",
-  "prevId": "b3a8e405-7e09-40c9-bba5-ca194cc56647",
+  "id": "365bdc1a-f64d-4ade-8116-066f1775c76b",
+  "prevId": "1c61c8ff-c47b-40ec-9297-03c4b4dc7e79",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -989,6 +989,18 @@
         "secret": {
           "name": "secret",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -2499,6 +2511,60 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.paid_sites": {
+      "name": "paid_sites",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "site": {
+          "name": "site",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seen_at": {
+          "name": "seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "paid_sites_workspace_id_workspaces_id_fk": {
+          "name": "paid_sites_workspace_id_workspaces_id_fk",
+          "tableFrom": "paid_sites",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "paid_sites_workspace_id_site_pk": {
+          "name": "paid_sites_workspace_id_site_pk",
+          "columns": [
+            "workspace_id",
+            "site"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

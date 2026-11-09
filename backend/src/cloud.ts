@@ -14,7 +14,7 @@ export const cloud = {
   computer: computer as Pick<typeof computer, "COMPUTER_USD_PER_SECOND" | "findBoxes" | "wakeBox" | "createBox" | "previewNote">,
   browser: browserHost as Pick<
     typeof browserHost,
-    "RESTORE_SIGN_INS" | "BROWSER_KIND" | "startHosted" | "listHosted" | "stopHosted" | "hostedDownloads" | "browserHostRoutes"
+    "RESTORE_SIGN_INS" | "BROWSER_KIND" | "startHosted" | "useProxy" | "listHosted" | "stopHosted" | "hostedDownloads" | "browserHostRoutes"
   >,
   storage: storage as typeof storage,
   credit: {

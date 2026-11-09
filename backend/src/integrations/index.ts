@@ -15,7 +15,7 @@ import { context, currentUser, type Ctx } from "../auth";
 import { db } from "../db";
 import { actionRuns, connections } from "../db/schema";
 import { composio } from "./composio";
-import { own } from "./own";
+import { freshSecret, own } from "./own";
 import { listPolls, pollConfig, pollDetail, pollTrigger } from "./polls";
 import { decrypt, encrypt } from "../secrets";
 import { basename } from "node:path";
@@ -134,10 +134,11 @@ async function findConnection(who: Who, app: string, account?: string) {
 
 // The logins plain git can use for an app (git-proxy.ts): this person's working accounts, whose login we hold ourselves.
 export async function gitLogins(who: Who, app: string) {
-  return (await accounts(who, app))
-    .filter((r) => r.status === "active" && r.secret && !moved(r))
-    .map((r) => ({ label: labelOf(r), secret: decrypt(r.secret!) }));
+  const rows = (await accounts(who, app)).filter((r) => r.status === "active" && r.secret && !moved(r));
+  return Promise.all(rows.map(async (r) => ({ label: labelOf(r), secret: (await freshSecret(r))! })));
 }
+
+const loginOf = async (c: Row) => ({ externalId: c.externalId, secret: await freshSecret(c) });
 
 // Ask the provider how a sign-in went and store it. Kept as is when the provider can't be reached.
 // Once it's signed in, it gets its label: the account's name (an email address) or the app's name.
@@ -266,7 +267,7 @@ export async function connectWithKey(who: Who, app: string, key: string, connect
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   if (existing && existing.provider !== provider.name) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
   const id = existing?.id ?? crypto.randomUUID();
-  const values = { provider: provider.name, externalId: id, secret: encrypt(secret), status: "active" as const, updatedAt: new Date() };
+  const values = { provider: provider.name, externalId: id, secret: encrypt(secret), refreshToken: null, expiresAt: null, status: "active" as const, updatedAt: new Date() };
   const [row] = existing
     ? await db.update(connections).set(values).where(eq(connections.id, id)).returning()
     : await db
@@ -336,8 +337,7 @@ export async function runAction(
   const started = Date.now();
   // no connection: fine for apps that need no sign-in; the provider says so otherwise
   const provider = connection ? providerOf(connection) : providerFor(app);
-  const login = connection ? { externalId: connection.externalId, secret: connection.secret ? decrypt(connection.secret) : null } : null;
-  const run = await provider.run(action, sent, login, owner(who)).then(
+  const run = await (connection ? loginOf(connection) : Promise.resolve(null)).then((login) => provider.run(action, sent, login, owner(who))).then(
     (output) => ({ ok: true as const, output }),
     (error: unknown) => ({ ok: false as const, error }),
   );
@@ -410,7 +410,7 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   }
   const provider = providerOf(connection);
   // the app tells us itself, at once. If that can't be set up here, a trigger we can poll still works, just later.
-  const login = { externalId: connection.externalId, secret: connection.secret ? decrypt(connection.secret) : null };
+  const login = await loginOf(connection);
   const pushed = await provider.startPush?.(trigger, login, config).catch((error) => {
     if (!polled) throw error;
     console.warn(`${trigger}: falling back to polling: ${(error as Error).message}`);
@@ -756,10 +756,10 @@ export async function integrationRoutes(app: FastifyInstance) {
       return reply.redirect(s.back);
     }
     try {
-      const { secret, label } = await provider.finishSignIn!(name, req.query.code, s.back);
+      const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back);
       const others = (await accounts(row, name)).filter((o) => o.id !== row.id);
       const named = row.label ?? uniqueLabel(label ?? appName(name), others);
-      await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
+      await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), refreshToken: refreshToken ? encrypt(refreshToken) : null, expiresAt: expiresAt ?? null, status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
       record({ workspaceId: row.workspaceId, userId: row.userId, kind: "connection", summary: `Connected ${appName(name)} (${named})` });
       return reply.redirect(s.back);
     } catch (error) {
