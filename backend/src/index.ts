@@ -33,6 +33,7 @@ import { startTasks, taskRoutes } from "./tasks";
 import { importRoutes } from "./imports";
 import { madeRoutes } from "./made";
 import { chargeSleptBoxes } from "./sandbox";
+import { releases, version } from "./changelog";
 
 // Emplio Cloud's own parts, when this checkout has the private cloud/ folder (cloud.ts)
 if (await loadCloud()) console.log("Emplio Cloud parts loaded");
@@ -85,7 +86,9 @@ await app.register(cloud.browser.browserHostRoutes);
 await app.register(cloud.storage.storageRoutes);
 for (const routes of cloud.routes) await app.register(routes);
 
-app.get("/health", async (): Promise<HealthResponse> => ({ ok: true }));
+// open screens compare version with the one they first saw, and offer a refresh when it changes
+app.get("/health", async (): Promise<HealthResponse> => ({ ok: true, version }));
+app.get("/changelog", async () => releases);
 
 await app.listen({ port: Number(process.env.PORT ?? 4000), host: "0.0.0.0" });
 await startAutomations();

@@ -1,4 +1,6 @@
-export type HealthResponse = { ok: boolean };
+export type HealthResponse = { ok: boolean; version: string };
+// GET /changelog: one version's "What's new" (backend changelog.ts), newest first
+export type Release = { version: string; date: string; changes: string[] };
 
 export type User = { id: string; email: string; name: string | null };
 export type Workspace = { id: string; name: string; role: "owner" | "admin" | "member" };

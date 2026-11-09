@@ -32,6 +32,7 @@ export async function api<T>(
 export const meQueryKey = ["me"];
 export const conversationsQueryKey = ["conversations"];
 export const tasksQueryKey = ["tasks"];
+export const versionQueryKey = ["version"];
 
 // Every task this person may see (owner and admins: all), for the Tasks page and the sidebar's count.
 export function useTasks() {
@@ -107,7 +108,11 @@ export function useLiveEvents() {
     const connect = () => {
       socket = new WebSocket(`${API_URL.replace(/^http/, "ws")}/events`);
       // anything missed while disconnected
-      socket.onopen = refresh;
+      socket.onopen = () => {
+        refresh();
+        // the connection also drops when a new version goes live
+        void queryClient.invalidateQueries({ queryKey: versionQueryKey });
+      };
       socket.onmessage = refresh;
       socket.onclose = () => {
         if (!closed) retry = setTimeout(connect, 3000);
