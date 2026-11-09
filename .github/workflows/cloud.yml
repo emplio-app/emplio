@@ -1,7 +1,9 @@
 name: Emplio Cloud
-# Tells Emplio Cloud's own repo about a push here: `production` deploys emplio.app, any other branch runs its checks.
-# Those run and log there. Only in this repo, and only once its token is set: forks and pull requests skip this.
-on: push
+# Going live: a push to `production` here deploys emplio.app and runs Emplio Cloud's private checks.
+# Those run and log in its own repo. Only in this repo, and only once its token is set: forks skip this.
+on:
+  push:
+    branches: [production]
 jobs:
   tell:
     if: github.repository == 'emplio-app/emplio'
@@ -10,11 +12,11 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.CLOUD_TOKEN }}
           REPO: ${{ secrets.CLOUD_REPO }}
-          BRANCH: ${{ github.ref_name }}
         run: |
           if [ -z "$GH_TOKEN" ] || [ -z "$REPO" ]; then echo "Not set up"; exit 0; fi
-          if [ "$BRANCH" = production ]; then workflow=deploy.yml; else workflow=ci.yml; fi
-          # on the branch there named like this one, else main
-          gh workflow run "$workflow" -R "$REPO" --ref "$BRANCH" -f ref="$GITHUB_SHA" 2>/dev/null ||
-            gh workflow run "$workflow" -R "$REPO" --ref main -f ref="$GITHUB_SHA"
+          for workflow in deploy.yml ci.yml; do
+            # on its production branch if it has one, else main
+            gh workflow run "$workflow" -R "$REPO" --ref production -f ref="$GITHUB_SHA" 2>/dev/null ||
+              gh workflow run "$workflow" -R "$REPO" --ref main -f ref="$GITHUB_SHA"
+          done
           echo "Sent"
