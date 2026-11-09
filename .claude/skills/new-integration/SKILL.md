@@ -98,8 +98,40 @@ by itself (GitHub: `prompt=select_account`).
 - OAuth only, no keys: `keyField` is required today. Make it optional through `OwnApp`, `getApp` and `connect()`.
 - Document both variables in `.env.example` and `docs/self-host/configuration.mdx`.
 
-**Registering the OAuth app** happens in the user's real Chrome (Claude in Chrome), signed in as them. Name `Emplio`,
-homepage `https://emplio.app`, callback `https://api.emplio.app/oauth/<app>/callback`. Stop at the client secret.
+**Registering the OAuth app** is part of building the integration. Do it in the user's real Chrome (Claude in Chrome),
+signed in as them, not the built-in browser, in a new tab. Close the tab when finished.
+
+1. Open the app's developer settings and create an OAuth app. If it needs a paid plan, a partner application or a
+   company review, stop and tell the user what it asks for.
+2. Fill it in:
+
+   | Field | Value |
+   | --- | --- |
+   | Name | `Emplio` |
+   | Homepage | `https://emplio.app` |
+   | Description, if asked | What Emplio does in the app, in one plain line |
+   | Callback / redirect URL | `https://api.emplio.app/oauth/<app>/callback`, exactly |
+   | Scopes, if set here | The same list as `authorizeUrl` |
+   | Expiring tokens | Off, if the app allows it |
+   | Wildcard redirects, device flow | Off |
+
+3. **Upload the logo.** Use `frontend/public/icons/icon-512.png`, the square Emplio mark. Find the page's file input and
+   use `file_upload` on it. Clicking the upload button opens a file picker the tools can't reach. Finish any crop step,
+   press save, then reload the page and look at the logo to confirm it stuck. People see this on the consent screen,
+   so it isn't optional.
+4. Register it and read the **client ID**, which is public. Zoom in or read it from the page, since `l`, `I`, `0` and
+   `O` look alike in a screenshot.
+5. **Stop at the client secret.** Never click generate. Keep the tab open and tell the user to generate it, then give
+   them the command under Secrets, filled in, to run themselves.
+6. Check it arrived by name and length. The server reads it when it starts, so restart the API if the code is already
+   live. Until then, the Connect dialog just offers the key alone.
+
+Before calling OAuth done, check what the app demands before strangers can sign in: Google and Microsoft review
+sensitive scopes, Slack and others have a "public distribution" switch, and some keep new apps in a test mode that only
+listed users can pass. Turn on what's a switch. Tell the user about anything that takes a review.
+
+A self-hosted server needs its own OAuth app, because the callback is built from that server's public address. Keep the
+callback's shape in the self-host docs, and never commit our client ID.
 
 ## 4. Triggers
 
@@ -152,8 +184,20 @@ starts only the right triggers; filters; a bad signature gets 401 through the re
 Noise on our SSD: `._*.test.ts` files report errors, and tests that need Postgres fail without a local database. Compare
 against the same run without your changes. A `mock.module` lasts for the whole test run, so spread the real module into it.
 
-**Live**, when a test login exists: connect it, run one read and one write, register one webhook and fire a real event.
-Never against production data or a real chat. Say plainly in the final message what was not tried live.
+**Live**, once it's deployed, on the real site in the user's Chrome. Use a throwaway resource you create for the test
+(a private repository, a test board), never the user's real data, and a new chat:
+
+1. Before connecting, ask Emplio for something that needs the app. The Connect card should appear by itself.
+2. Open the card. Both "Sign in with <App>" and the key box should show, with the logo.
+3. Click sign in. It opens a separate window the tools can't see, and the permission is the user's to grant, so ask them
+   to approve it there. Then confirm the card turned to Connected with the right account name.
+4. Run one read and one write with that sign-in. A write should show its Allow card. Allow once, never "Always allow".
+5. Trigger: have Emplio save an automation with a filter-free prompt ("tell me the title"), then cause a real event.
+   Confirm the app's delivery log shows 200, the message arrives in the main chat, and the run is in the history.
+6. Remove the automation and confirm the webhook is gone from the app.
+7. Clean up. Ask before permanently deleting the throwaway resource.
+
+Say plainly in the final message what was not tried live.
 
 **`COVERAGE.md`** next to the code: the source and date, what was left out and why, sign-in methods, adjustments by hand,
 triggers, and actions by group with `*` on those that ask first. `own/exa/COVERAGE.md` is the format.

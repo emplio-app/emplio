@@ -1,0 +1,26 @@
+name: Ask for an app
+description: An app you'd like Emplio to connect to
+title: "Connect: "
+labels: ["integration"]
+body:
+  - type: markdown
+    attributes:
+      value: Check the [open requests](https://github.com/emplio-app/emplio/issues?q=is%3Aissue+label%3Aintegration) first. If your app is there, add a 👍 to it. That's how we decide what to build next.
+  - type: input
+    id: app
+    attributes:
+      label: Which app?
+      placeholder: Shopify
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: What should Emplio do with it?
+      placeholder: When a new order comes in, check the stock and message the customer on WhatsApp.
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link to the app's website (if it's not well known)
