@@ -35,6 +35,10 @@ cd backend && bun scripts/openapi-actions.ts <app>
 
 It writes `own/<app>/actions.json`, which `own/openapi.ts` runs. See `own/neon/` for a complete one.
 
+### Sign-in with OAuth and webhook triggers
+
+An app can also take a sign-in on its own page: add `oauth` to its `OwnApp`, and the Connect dialog offers both. For events the app sends the moment they happen, add `push`, a route in `automations.ts`, and the triggers. `own/github/` has all of it. If you use Claude Code, the `new-integration` skill in `.claude/skills/` builds a whole app from its name.
+
 ### COVERAGE.md
 
 Each in-house app folder has a `COVERAGE.md`: where its actions came from, what was left out and why, how it signs in, and its actions by group, with `*` on those that ask first.

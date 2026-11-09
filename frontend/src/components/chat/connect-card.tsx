@@ -20,7 +20,7 @@ export const useConnections = (enabled = true) =>
   useQuery({ queryKey: connectionsQueryKey, queryFn: () => api<Connection[]>("/connections"), enabled });
 
 // connection: reconnect that account; without it, another account is added
-type Target = { app: string; name?: string; logo?: string; keyField?: KeyField; path?: string; connection?: string };
+type Target = { app: string; name?: string; logo?: string; keyField?: KeyField; signIn?: boolean; path?: string; connection?: string };
 
 // Connect an app. Most sign in in a small window over this one, through our own /connect link; the window
 // closes itself when done and this one refreshes once it's back in focus (popups blocked: the whole page
@@ -30,11 +30,7 @@ export function useConnect() {
   const queryClient = useQueryClient();
   const [connecting, setConnecting] = useState<string | null>(null);
   const [asking, setAsking] = useState<Target | null>(null);
-  const connect = ({ app, keyField, connection, path = `/connect/${app}${connection ? `?connection=${connection}` : ""}`, ...rest }: Target) => {
-    if (keyField) {
-      setAsking({ app, keyField, connection, ...rest });
-      return;
-    }
+  const signIn = ({ app, connection, path = `/connect/${app}${connection ? `?connection=${connection}` : ""}` }: Target) => {
     const url = new URL(API_URL + path);
     url.searchParams.set("popup", "1");
     const left = window.screenX + (window.outerWidth - 520) / 2;
@@ -59,13 +55,23 @@ export function useConnect() {
       300,
     );
   };
-  const keyDialog = asking && <KeyDialog target={asking} onClose={() => setAsking(null)} />;
+  const connect = (target: Target) => (target.keyField ? setAsking(target) : signIn(target));
+  const keyDialog = asking && (
+    <KeyDialog
+      target={asking}
+      onSignIn={() => {
+        signIn(asking);
+        setAsking(null);
+      }}
+      onClose={() => setAsking(null)}
+    />
+  );
   return { connect, connecting, keyDialog };
 }
 
-// The form for an app connected with a key. The key goes straight to our server, which checks it with the
-// app and keeps it encrypted; the AI employee never sees it.
-function KeyDialog({ target, onClose }: { target: Target; onClose: () => void }) {
+// The form for an app connected with a key, and the sign-in button of one that takes both. The key goes straight
+// to our server, which checks it with the app and keeps it encrypted; the AI employee never sees it.
+function KeyDialog({ target, onSignIn, onClose }: { target: Target; onSignIn: () => void; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [key, setKey] = useState("");
   const save = useMutation({
@@ -84,8 +90,16 @@ function KeyDialog({ target, onClose }: { target: Target; onClose: () => void })
             <AppLogo src={target.logo} className="size-9" />
             <DialogTitle>Connect {target.name ?? target.app}</DialogTitle>
           </div>
-          <DialogDescription>{field.help}</DialogDescription>
+          <DialogDescription>{target.signIn ? `Sign in with ${target.name ?? target.app}, or paste a key instead.` : field.help}</DialogDescription>
         </DialogHeader>
+        {target.signIn && (
+          <>
+            <Button type="button" className="w-full" onClick={onSignIn}>
+              Sign in with {target.name ?? target.app}
+            </Button>
+            <p className="text-xs text-muted-foreground">{field.help}</p>
+          </>
+        )}
         <form
           className="grid gap-3"
           onSubmit={(e) => {
@@ -189,7 +203,7 @@ export function ConnectCard({ card }: { card: Card }) {
             ? `Ready to use · ${done.label}`
             : card.existing?.length && !card.connection
               ? "Connect another account"
-              : card.keyField
+              : card.keyField && !card.signIn
                 ? `Add your ${card.keyField.label} so I can use it`
                 : "Sign in so I can use it for you"}
         </div>

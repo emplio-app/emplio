@@ -8,6 +8,7 @@ import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } fr
 import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
 import { browserFor, newDownloads, signInLink } from "./browser";
+import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
 import { http, loginsCommand } from "./logins";
@@ -711,7 +712,8 @@ Apps: ${name}'s own accounts (Gmail, Calendar, Drive, Slack, Notion and more) th
 - Files: put \`{"file": "/work/tmp/report.xlsx"}\` where an action takes a file. Files an action returns land in /work/tmp/apps/files/, shown as \`{"file": "<path>"}\`, ready to attach.
 - Bringing someone into an email (cc, "send it to the team") doesn't carry an earlier email's attachments: forward it (gmail.forward_message keeps them) or attach them, and say which files went.
 - To message a teammate on their phone yourself (a report, alert, reminder): \`emplio channels send <email> <message>\`; replies come back to you there.
-- emplio commands run after the rest of the command, so one command can't feed an emplio result onward: use its output (big ones saved under /work/tmp/apps/) in the next command.
+- emplio commands run after the rest of the command, so one command can't feed an emplio result onward, and a script or loop can't use them (\`out=$(emplio apps run ...)\` gets nothing back, however long the requests then take): use its output (big ones saved under /work/tmp/apps/) in the next command.
+- Git: plain \`git\` works with GitHub (clone, pull, push), on the GitHub account connected in apps; never ask for a token or put one in a URL. For a whole repository or many files, clone it; don't fetch files one by one through actions. Not connected, and the repository is private: a Connect button shows by itself. ${bg ? "A push needs \"Always allow\" for github.git_push." : `A push may fail the first time and show ${name} an Allow card (the result says so): once allowed, run the same push again.`} A big clone: \`background: true\`.
 - ${bg ? `Actions that send, change or delete run here only if ${name} has said "Always allow" to them; the result tells you if not.` : `Actions that send, change or delete may show ${name} an Allow / Deny card and wait: that's their OK, so don't also ask in words. One such action per command, so the card is clear.`} Ask ${name} first before messaging anyone outside the business, moving money or deleting things.
 - Never ask anyone to paste a password or key in chat (apps get theirs through Connect; the rest through logins, below). If one is pasted, don't repeat it; ask them to save it properly and change it if it matters.
 
@@ -1662,6 +1664,9 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       env = { ...env, BROWSER_CDP_URL: live.cdpUrl, BROWSER_SESSION: `chat-${live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH };
     }
     used.add(boxKey(s));
+    // plain git reaches GitHub through this server, which holds the login (git-proxy.ts)
+    const git = gitForCommand(s);
+    if (git) env = { ...env, ...git.env };
 
     if (background) {
       // detached in its own process group; the agent checks and stops it with plain bash
@@ -1684,7 +1689,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       return { box, browserId, result };
     }
     commandStarted(boxKey(s));
-    return { box, browserId, env };
+    return { box, browserId, env, git };
   });
   if (!ran) return { stopped: true };
   const { box, browserId } = ran;
@@ -1704,11 +1709,13 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         output: `${done.result}\n\nThe computer froze (most likely out of memory: too much running at once) and has been replaced by a fresh one for your next command. Company files are safe as of the last save; anything only in /work/tmp or not yet saved is gone. Run heavy commands (installs, builds) one at a time.`,
       };
     }
-    const emplio = await runEz(box, s, withRequests(done.result ?? "", key), key, job);
-    result = { exitCode: done.exitCode, output:[await clip(box, s, emplio.output), emplio.skill].filter(Boolean).join("\n"), jobCalls: emplio.jobCalls, key };
+    const printed = ran.git ? (done.result ?? "").replaceAll(ran.git.proxy, "https://") : (done.result ?? "");
+    const emplio = await runEz(box, s, withRequests(printed, key), key, job);
+    const git = ran.git ? await gitAfter(ran.git.token, s) : { notes: [], cards: [] };
+    result = { exitCode: done.exitCode, output:[await clip(box, s, emplio.output), emplio.skill, ...git.notes].filter(Boolean).join("\n"), jobCalls: emplio.jobCalls, key };
     if (emplio.viewed) result.viewed = emplio.viewed;
     // Connect buttons the chat shows under the reply
-    if (emplio.connect.length) result.connect = emplio.connect;
+    if (emplio.connect.length || git.cards.length) result.connect = [...emplio.connect, ...git.cards];
     // "Save login" buttons (emplio logins ask)
     if (emplio.logins.length) result.logins = emplio.logins;
     // questions with answers to tap (emplio ask)

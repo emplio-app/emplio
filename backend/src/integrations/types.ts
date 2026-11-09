@@ -17,8 +17,12 @@ export type Provider = {
   // Apps signed in on the provider's page. `owner` is a stable id for the person, for providers
   // that group sign-ins by user.
   startSignIn(app: string, owner: string, returnUrl: string): Promise<{ externalId: string; url: string }>;
+  // A sign-in we finish ourselves (own OAuth): the waiting connection and where to go next, from the signed state
+  // the app's page handed back (null: forged or too old); then the login its code is worth, and whose account it is.
+  readSignIn?(app: string, state: string): { externalId: string; back: string } | null;
+  finishSignIn?(app: string, code: string, back: string): Promise<{ secret: string; label: string | null }>;
   // Apps connected with a key the person pastes: checks it works, and returns what to keep (encrypted).
-  connectWithKey?(app: string, key: string): Promise<{ secret: string }>;
+  connectWithKey?(app: string, key: string): Promise<{ secret: string; label?: string }>;
   signInStatus(externalId: string): Promise<Connection["status"]>;
   // which account a sign-in is (an email address), to label the connection; null when it can't tell
   accountName?(externalId: string): Promise<string | null>;
@@ -34,7 +38,7 @@ export type Provider = {
   startTrigger?(trigger: string, config: unknown, login: { externalId: string }, owner: string): Promise<string>;
   stopTrigger?(externalId: string): Promise<void>;
   // An app that tells us about this event itself, set up on this login: the id events arrive under. Null: it doesn't.
-  startPush?(trigger: string, login: { externalId: string; secret: string | null }): Promise<string | null>;
+  startPush?(trigger: string, login: { externalId: string; secret: string | null }, config?: unknown): Promise<string | null>;
 };
 
 // A file attached to an action: {"file": "<path>"} in its input becomes one of these. Each provider hands it

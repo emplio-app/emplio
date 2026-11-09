@@ -46,6 +46,12 @@ export async function alwaysAllowed(workspaceId: string, userId: string) {
   return row?.alwaysAllowed ?? [];
 }
 
+// Whether an action that changes something would need asking, without asking (a git push held up by a command's time limit)
+export async function mustAsk(s: Session, action: string) {
+  if (s.settings.approvals === "auto" && !s.automation) return false;
+  return !(s.allowedActions?.includes(action) || (await alwaysAllowed(s.workspaceId, s.user.id)).includes(action));
+}
+
 const setAllowed = (workspaceId: string, userId: string, value: ReturnType<typeof sql>) =>
   db
     .update(workspaceMembers)
