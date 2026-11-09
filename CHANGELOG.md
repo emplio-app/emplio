@@ -7,14 +7,13 @@ The newest version is at the top, and its heading is where Emplio's version numb
 ### What's new
 
 - After a reply, a small card sums up where things stand and asks what to do next. Tap an answer, or press Cmd+Enter (Ctrl+Enter on Windows) for the first one. Close it if you don't need it.
-- The iPhone app can notify you when a reply is ready, when work reports back, and when something needs your OK.
-- Stripe, Todoist, Asana, ClickUp, Notion, Airtable, HubSpot and Calendly now connect with a key you paste in.
+- Stripe, Asana, ClickUp, Airtable, HubSpot and Calendly now connect with a key you paste in.
 - Emplio's browser costs less to run: it starts on a regular connection and moves to a local one only when a site needs it.
 
 ### For developers
 
 - The next-step card replaces the greyed-out message guess: `GET` and `DELETE /conversations/:id/next-step` replace `GET /conversations/:id/suggestion`.
-- Eight apps moved off Composio, with a shared webhook route and OAuth refresh tokens (#16).
+- Eight apps moved off Composio, with a shared webhook route and OAuth refresh tokens. Notion and Todoist stay on Composio on Emplio Cloud for now (#16).
 - Sign-in integrations for Slack, Zoom, Google Calendar, Docs, Sheets, Meet and Zoho. Set `KEEP_ON_COMPOSIO` to keep an app on Composio, and `OWN_APP_TESTERS` to try ours on chosen workspaces (#19).
 - Browsers start with no proxy and switch when a site blocks them or needs a sign-in; `emplio browser local` asks for it directly (#17).
 - iPhone notifications go straight through Apple, off unless `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_KEY` are set (#20).
