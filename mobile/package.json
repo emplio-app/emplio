@@ -1,0 +1,17 @@
+{
+  "name": "emplio-mobile",
+  "private": true,
+  "scripts": {
+    "dev": "CAP_SERVER_URL=http://localhost:3000 cap sync ios",
+    "sync": "cap sync ios",
+    "open": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.6.0",
+    "@capacitor/ios": "^7.6.0",
+    "@capacitor/splash-screen": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.0"
+  }
+}
