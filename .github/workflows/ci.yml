@@ -1,6 +1,41 @@
 name: CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+# a newer push replaces the run still going for the same branch or pull request
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  # Decides what this run needs beyond the quick tests. A job skipped by its `if` still counts as passed for a required check.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      install: ${{ steps.plan.outputs.install }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          install=true
+          if [ "$EVENT" = pull_request ]; then
+            # HEAD is the pull request merged into its target, so this is exactly what it changes
+            git diff --name-only HEAD^1 HEAD |
+              grep -qE '^(docker/|runner/|docker-compose\.yml$|install\.sh|setup\.sh$|\.env\.example$|\.dockerignore$|bun\.lock$|(.*/)?package\.json$|frontend/next\.config|backend/src/(computer|browser)|\.github/workflows/ci\.yml$)' ||
+              install=false
+          elif [ "$EVENT" = push ]; then
+            # a version not yet released is published; a failed publish is retried by the next push
+            version="$(grep -m1 -oP '^## \K\d+\.\d+\.\d+' CHANGELOG.md)"
+            if gh release view "v$version" >/dev/null 2>&1; then install=false; else echo "version=$version" >> "$GITHUB_OUTPUT"; fi
+          fi
+          echo "install=$install" >> "$GITHUB_OUTPUT"
   check:
     runs-on: ubuntu-latest
     services:
@@ -38,6 +73,8 @@ jobs:
       - run: bun test runner
   # the real thing: build every image and run it the way an install does, with none of the test settings above
   docker:
+    needs: plan
+    if: needs.plan.outputs.install == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,8 +84,8 @@ jobs:
       - run: bash docker/smoke.sh
   # Only what passed the checks above is published. Installs download these instead of building.
   images:
-    needs: [check, docker]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [plan, check, docker]
+    if: needs.plan.outputs.version
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,14 +95,6 @@ jobs:
         image: [app, runner, computer, browser]
     steps:
       - uses: actions/checkout@v4
-      # a version number names one build forever, so only a version not yet released gets the tag
-      - id: version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IMAGE: ghcr.io/${{ github.repository }}-${{ matrix.image }}
-        run: |
-          version="$(grep -m1 -oP '^## \K\d+\.\d+\.\d+' CHANGELOG.md)"
-          gh release view "v$version" >/dev/null 2>&1 || echo "tag=$IMAGE:$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -81,11 +110,11 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}-${{ matrix.image }}:latest
-            ${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository }}-${{ matrix.image }}:${{ needs.plan.outputs.version }}
   # A new version at the top of CHANGELOG.md becomes a GitHub release, its whole section the notes.
   release:
-    needs: images
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [plan, images]
+    if: needs.plan.outputs.version
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,8 +122,7 @@ jobs:
       - uses: actions/checkout@v4
       - env:
           GH_TOKEN: ${{ github.token }}
+          version: ${{ needs.plan.outputs.version }}
         run: |
-          version="$(grep -m1 -oP '^## \K\d+\.\d+\.\d+' CHANGELOG.md)"
-          gh release view "v$version" >/dev/null 2>&1 && exit 0
           awk '/^## /{n++} n==1 && !/^## /' CHANGELOG.md > notes.md
           gh release create "v$version" --title "$version" --notes-file notes.md --target "$GITHUB_SHA"
