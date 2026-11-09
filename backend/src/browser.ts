@@ -5,6 +5,7 @@
 // ponytail: one person's two chats browsing at once each save on stop, last one wins; a lock per profile if
 // that loses logins in practice.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "./db";
@@ -51,28 +52,53 @@ export async function devtools(cdpUrl: string) {
 }
 
 // --- a copy of the sign-ins in our own database ---------------------------------------------------------
-// So that sign-ins don't depend on who runs the browser, each stop also keeps the browser's cookies and the local storage of the sites open in it, encrypted
+// So that sign-ins don't depend on who runs the browser, each stop also keeps the browser's cookies and the local storage and Indexed DB of the sites open in it, encrypted
 // on the person's membership (`browser_state`). restoreState puts them into any Chromium-type browser.
-// ponytail: cookies and local storage only (what a browser profile mostly holds); not IndexedDB or session storage.
+// Not session storage: a browser drops that with the tab anyway.
 type Cookie = Record<string, unknown> & { name: string; value: string; domain: string };
-export type BrowserState = { cookies: Cookie[]; storage: Record<string, Record<string, string>>; savedAt: string };
+export type BrowserState = { cookies: Cookie[]; storage: Record<string, Record<string, string>>; indexedDb?: Record<string, unknown[]>; savedAt: string };
 
-async function readState(cdpUrl: string) {
+const INDEXED_DB = readFileSync(new URL("./browser-indexeddb.js", import.meta.url), "utf8");
+const indexedDbJob = (job: { limit: number } | { dbs: unknown[] }) => `(${INDEXED_DB})(${JSON.stringify(job)})`;
+// ponytail: small on purpose, the membership row this sits on is loaded by everyday queries. Sign-in tokens fit; a site's
+// whole offline copy doesn't and is skipped. Give it its own table if sites that need more show up.
+const INDEXED_DB_SITE_LIMIT = 300_000;
+const INDEXED_DB_SITES = 5;
+
+// A page that hangs mustn't cost the sign-ins already read, or hold up the browser starting.
+const within5s = <T>(work: Promise<T>) => Promise.race([work, Bun.sleep(5000).then(() => undefined)]).catch(() => undefined);
+
+// The sites read just now replace what was kept for them, emptied ones included; the newest few stay.
+export const keepIndexedDb = (before: Record<string, unknown[]> = {}, now: Record<string, unknown[]> = {}) =>
+  Object.fromEntries(
+    [...Object.entries(before).filter(([origin]) => !now[origin]), ...Object.entries(now)].filter(([, dbs]) => dbs.length).slice(-INDEXED_DB_SITES),
+  );
+
+export async function readState(cdpUrl: string) {
   const cdp = await devtools(cdpUrl);
   try {
     const { cookies } = await cdp.send("Storage.getCookies");
     const storage: BrowserState["storage"] = {};
     // the tab in front, for the Live browser button to come back to
     let page: string | undefined;
+    const sites = new Map<string, string>();
     const { targetInfos } = await cdp.send("Target.getTargets");
     for (const t of (targetInfos as { targetId: string; type: string; url: string }[]).filter((t) => t.type === "page" && /^https?:/.test(t.url))) {
       const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: t.targetId, flatten: true });
       const r = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify([location.origin, {...localStorage}, document.visibilityState])", returnByValue: true }, sessionId);
       const [origin, items, visibility] = JSON.parse(r.result.value) as [string, Record<string, string>, string];
       if (Object.keys(items).length) storage[origin] = items;
+      sites.set(origin, sessionId);
       if (visibility === "visible" || !page) page = t.url;
     }
-    return { cookies: cookies as Cookie[], storage, page };
+    const indexedDb: Record<string, unknown[]> = {};
+    await Promise.all(
+      [...sites].map(async ([origin, sessionId]) => {
+        const r = await within5s(cdp.send("Runtime.evaluate", { expression: indexedDbJob({ limit: INDEXED_DB_SITE_LIMIT }), awaitPromise: true, returnByValue: true }, sessionId));
+        if (r?.result?.value) indexedDb[origin] = JSON.parse(r.result.value);
+      }),
+    );
+    return { cookies: cookies as Cookie[], storage, indexedDb, page };
   } finally {
     cdp.close();
   }
@@ -85,11 +111,11 @@ export async function savedState(owner: Owner): Promise<BrowserState | null> {
   return m?.browserState ? JSON.parse(decrypt(m.browserState)) : null;
 }
 
-// Cookies are the whole jar (the profile loads them all); local storage adds to what was kept for other sites.
+// Cookies are the whole jar (the profile loads them all); local storage and Indexed DB add to what was kept for other sites.
 async function saveState(owner: Owner, cdpUrl: string) {
   const now = await readState(cdpUrl);
   const before = await savedState(owner);
-  const state: BrowserState = { cookies: now.cookies, storage: { ...before?.storage, ...now.storage }, savedAt: new Date().toISOString() };
+  const state: BrowserState = { cookies: now.cookies, storage: { ...before?.storage, ...now.storage }, indexedDb: keepIndexedDb(before?.indexedDb, now.indexedDb), savedAt: new Date().toISOString() };
   await db.update(workspaceMembers).set({ browserState: encrypt(JSON.stringify(state)) }).where(memberWhere(owner));
   return now.page;
 }
@@ -101,7 +127,7 @@ const markUsed = (conversationId: string, page?: string) =>
     .where(eq(conversations.id, conversationId))
     .catch((e) => console.error("browser use not noted:", e));
 
-// Put a kept state into a fresh browser: cookies, then each site's local storage.
+// Put a kept state into a fresh browser: cookies, then each site's local storage and Indexed DB.
 export async function restoreState(cdpUrl: string, state: BrowserState) {
   const cdp = await devtools(cdpUrl);
   try {
@@ -110,12 +136,15 @@ export async function restoreState(cdpUrl: string, state: BrowserState) {
     const tab = (targetInfos as { targetId: string; type: string }[]).find((t) => t.type === "page");
     if (!tab) return;
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: tab.targetId, flatten: true });
-    const run = async (expression: string) => (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result?.value;
-    // local storage can only be written from a page of that site: open a tiny one (robots.txt) on each
-    for (const [origin, items] of Object.entries(state.storage)) {
+    const run = async (expression: string) => (await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId)).result?.value;
+    // these can only be written from a page of that site: open a tiny one (robots.txt) on each
+    for (const origin of new Set([...Object.keys(state.storage), ...Object.keys(state.indexedDb ?? {})])) {
       await cdp.send("Page.navigate", { url: `${origin}/robots.txt` }, sessionId);
       for (let i = 0; i < 20 && (await run("location.origin").catch(() => null)) !== origin; i++) await Bun.sleep(250);
-      await run(`(() => { for (const [k, v] of Object.entries(${JSON.stringify(items)})) localStorage.setItem(k, v); })()`).catch(() => {});
+      const items = state.storage[origin];
+      if (items) await run(`(() => { for (const [k, v] of Object.entries(${JSON.stringify(items)})) localStorage.setItem(k, v); })()`).catch(() => {});
+      const dbs = state.indexedDb?.[origin];
+      if (dbs) await within5s(run(indexedDbJob({ dbs })));
     }
     await cdp.send("Page.navigate", { url: "about:blank" }, sessionId);
   } finally {
@@ -162,8 +191,12 @@ export type Owner = { workspaceId: string; userId: string };
 
 const start = async (conversationId: string, owner: Owner) => {
   const live = toLive(await cloud.browser.startHosted(conversationId, owner));
-  const saved = cloud.browser.RESTORE_SIGN_INS ? await savedState(owner).catch(() => null) : null;
-  if (saved) await restoreState(live.cdpUrl, saved).catch((e) => console.error("browser state not restored:", e));
+  const saved = await savedState(owner).catch(() => null);
+  // A browser service's own profile brings back cookies and local storage. Its docs don't promise Indexed DB, so that
+  // always goes through, and only databases the browser doesn't already have get written.
+  const toRestore = saved && (cloud.browser.RESTORE_SIGN_INS ? saved : { ...saved, cookies: [], storage: {} });
+  if (toRestore && (toRestore.cookies.length || Object.keys(toRestore.storage).length || Object.keys(toRestore.indexedDb ?? {}).length))
+    await restoreState(live.cdpUrl, toRestore).catch((e) => console.error("browser state not restored:", e));
   return live;
 };
 
