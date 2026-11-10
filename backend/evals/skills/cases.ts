@@ -57,7 +57,8 @@ export const cases = (): Case[] => [
       person("no thats wrong. amazon cuts their fee and 1% TCS before paying. you have to add those back from the fee columns and then match. always do it that way"),
     ],
     world: [
-      ["^\\s*ls\\b", "match.py  read.py"],
+      ["^\\s*ls\\b", "match.py  orders.csv  read.py"],
+      ["^\\s*(cat|head|sed|wc)\\b.*orders", "order_id,amount\\n4301,2134.40\\n4302,3619.81\\n… 116 more rows"],
       ["payout-oct\\.csv", "order_id,amount,fee,tcs\\n4301,1840.00,276.00,18.40\\n4302,3120.50,468.10,31.21"],
       ["^\\s*(cat|head|sed|wc)\\b.*\\.py", "import csv\\n# match.py: matches each payout's amount to the order's amount in the orders sheet\\norders = {r['order_id']: float(r['amount']) for r in csv.DictReader(open('/work/tmp/amazon/orders.csv'))}\\nrows = list(csv.DictReader(open('/work/in/payout-oct.csv')))\\nok = sum(1 for r in rows if abs(orders[r['order_id']] - float(r['amount'])) < 0.01)\\nprint(f'{ok} matched, {len(rows) - ok} do not match (amounts differ)')"],
       ["python3", "After adding back fee and TCS: 118 of 118 payouts match the orders sheet."],

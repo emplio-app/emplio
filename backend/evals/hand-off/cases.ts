@@ -75,6 +75,27 @@ const MAIL: [string, string][] = [
   ],
 ];
 
+// the web, for the research cases: a search names places to look, and each page holds only its own part
+const SUPPLIERS = ["Shree Textiles", "Laxmi Fab", "Gopal Furnishing Fabrics", "Ambika Weaves", "Surat Curtain House", "Mahavir Synthetics"];
+const SURAT: [string, string][] = [
+  ...SUPPLIERS.map((name, i): [string, string] => [`(read|curl|browser)\\b.*${name.split(" ")[0]!.toLowerCase()}`, `${name}, Ring Road, Surat. Blackout curtain fabric from ₹${92 + i * 7} a metre, sheer from ₹${48 + i * 3}. Minimum order ${150 + i * 50} metres. Phone 0261-555-01${40 + i}. Delivery and credit terms: on request.`]),
+  ["web (search|answer|similar)", `Curtain fabric suppliers in Surat:\n${SUPPLIERS.map((name, i) => `${i + 1}. ${name}: curtain and upholstery fabric, wholesale (https://${name.split(" ")[0]!.toLowerCase()}.example)`).join("\n")}\nPrices and minimum order are on each supplier's own page.`],
+];
+const SCIENCE: [string, string][] = [
+  ["(read|curl|browser)\\b.*sciencebuddies", "Ideas by class: 1. Potato battery (potatoes, copper and zinc strips, wire, LED). 2. Water filter from sand and charcoal. 3. Balloon-powered car. Each idea has its own page with materials; costs aren't given."],
+  ["(read|curl|browser)\\b.*(kidsproject|ncert|schoolfair)", "Twelve ideas listed by name only (volcano, periscope, rain gauge, solar oven…); steps and materials are on each idea's page. No costs."],
+  ["web (search|answer|similar)", "1. Science Buddies: project ideas by class (https://sciencebuddies.example/ideas)\n2. Kids Project Hub: 12 easy science fair projects (https://kidsproject.example/fair)\n3. NCERT activity ideas for classes 6 to 8 (https://ncert.example/activities)\n4. School Fair Winners 2025 (https://schoolfair.example/winners)\nMaterial prices in India aren't on these pages: check a stationery or science-kit seller for each."],
+];
+const SHOPS: [string, string][] = [
+  ["fabindia", "Fabindia, home page: 'Festive Edit' banner; 64 new arrivals in Home & Living, each on its own page; offers differ by category (bed linen, cushions, curtains, tableware): open each category for its offer."],
+  ["home\\s?centre", "Home Centre, home page: 'Diwali Sale' banner; new arrivals 80+ items across 6 categories; offers listed per category page and a separate bank-offers page."],
+  ["urban\\s?ladder", "Urban Ladder, home page: 'Festival of Lights' sale; offers by category (furnishings, decor, lighting), coupon codes on the offers page."],
+];
+const SIGN_IN: [string, string][] = [
+  ["logins", "(no saved login for indiamart)"],
+  ["browser|page\\.txt", "seller.indiamart.com, sign-in page: [1] textbox 'Mobile number or email'  [2] button 'Send OTP'  [3] link 'Sign in with password'"],
+];
+
 // a function, not a list: the app's files load in a loop of their own, and their words aren't ready until they have
 export const cases = (): Case[] => [
   // ── quick: itself ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -122,6 +143,7 @@ export const cases = (): Case[] => [
     category: "together",
     source: "written",
     chat: [person("log in to our indiamart seller account, i'll give you the otp when it comes")],
+    world: SIGN_IN,
     expect: { hand: false },
   },
   {
@@ -138,6 +160,7 @@ export const cases = (): Case[] => [
     category: "long",
     source: "written",
     chat: [person("find me five curtain fabric suppliers in surat, compare prices and minimum order and put it in a sheet")],
+    world: SURAT,
     expect: { hand: true },
   },
   {
@@ -176,6 +199,7 @@ export const cases = (): Case[] => [
     category: "long",
     source: "written",
     chat: [person("fabindia, home centre aur urban ladder ki websites dekh ke batao kaun kya offer de raha hai diwali pe")],
+    world: SHOPS,
     expect: { hand: true },
   },
 
@@ -240,7 +264,8 @@ export const cases = (): Case[] => [
     category: "pick",
     source: "written",
     business: { agents: AGENTS, threads: THREADS },
-    chat: [person("every week i want fabindia's and home centre's instagram checked: what they posted, what got most likes. do this week's now")],
+    chat: [person("every week i want fabindia's and home centre's websites checked: what's new in home furnishing and at what price. do this week's now")],
+    world: SHOPS,
     expect: { hand: true, picks: ["new"] },
   },
   {
@@ -249,6 +274,7 @@ export const cases = (): Case[] => [
     source: "written",
     business: { agents: AGENTS, threads: THREADS },
     chat: [person("my daughter's school wants a list of 10 good science project ideas with materials and cost for each, can you research properly")],
+    world: SCIENCE,
     expect: { hand: true, picks: ["myself"] },
   },
   {
