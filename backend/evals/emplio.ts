@@ -112,7 +112,7 @@ const one = (c: string): string => {
   if (/\bemplio history show\b/.test(c)) return "(nothing in it beyond what you already have)";
   if (/\bemplio apps list\b/.test(c)) return "gmail (connected)\ngooglesheets (connected)\nzoho_books (connected)\nwhatsapp (connected)";
   if (/\bemplio apps actions\b/.test(c))
-    return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\nzoho_books.get_order  One order by number\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row";
+    return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\nzoho_books.get_order  One order by number\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row\ngooglesheets.update_values  Change cells in a range\ngooglesheets.delete_rows  Delete rows by number";
   if (/\bemplio apps info\b/.test(c)) return 'input: {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "status": "unpaid|paid|all", "q": "search words"}';
   if (/\bemplio apps run \S*get_order/.test(c)) return '{"number":"4410","customer":"Anita Desai","items":[{"name":"Bedsheet king ivory","qty":2}],"address":"12 Baner Rd, Pune"}';
   if (/\bemplio apps run\b/.test(c)) return "[]";

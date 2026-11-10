@@ -24,7 +24,8 @@ export type Case = {
   // what this business's commands answer, first match wins: [words in the command (a regular expression), the result]
   world?: [string, string][];
   // picks: any of these is right; left out, any pick is
-  expect: { hand: boolean; picks?: Pick[] };
+  // script: one script over all the items is as right as handing off ("Code" in the rules)
+  expect: { hand: boolean; picks?: Pick[]; script?: boolean };
 };
 
 const INVOICES = JSON.stringify([
@@ -66,6 +67,8 @@ const fiveIn = (left: string): ModelMessage[] => [
 // the stock clean-up's files, and a month of mail: enough to see how much work there is
 const STOCK: [string, string][] = [
   ["stock\\.json", '[["Item","Qty","Updated"],["Cushion cover 16in teal",40,"2026-09-02"],["Bedsheet king ivory",12,"2026-10-11"],\n… 1,410 more rows'],
+  ["googlesheets\\.get_values", "Saved 1,412 rows to /work/tmp/apps/stock.json"],
+  ["googlesheets\\.(update|delete)", '{"ok":true}'],
   ["dupes\\.py|show\\.py", "236 duplicate rows across 97 items; show.py <n> prints the rows of the nth one"],
 ];
 const MAIL: [string, string][] = [
@@ -119,6 +122,8 @@ export const cases = (): Case[] => [
       emplio("Found 5 curtain fabric suppliers in Surat; Shree Textiles is cheapest at ₹92 a metre. The comparison sheet is ready."),
       person("how many suppliers did you find in surat"),
     ],
+    // what it found is where it left it, so checking doesn't turn up empty
+    world: [["emplio (search|history|activity|files)|\\bls\\b", "Files: Surat curtain fabric suppliers.xlsx (10 Nov, 11:20 am): 5 suppliers compared; cheapest Shree Textiles, ₹92 a metre"]],
     expect: { hand: false },
   },
 
@@ -210,7 +215,7 @@ export const cases = (): Case[] => [
     source: "written",
     chat: [person("clean up the duplicates in the stock sheet: check each one, keep the row with the latest date and add the quantities into it"), ...fiveIn(longRunNote(4, false))],
     world: STOCK,
-    expect: { hand: true },
+    expect: { hand: true, script: true },
   },
   {
     name: "four commands in, one left",

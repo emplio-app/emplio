@@ -29,7 +29,8 @@ export function picksOf(commands: string[], b: Business): Pick[] {
 // The main number: handed off exactly when it should have been. Looking a few things up first is fine.
 export function rightCall({ input, output, expected }: Args): Score {
   const handed = picksOf(output.commands, input.business).length > 0;
-  return { name: "right_call", score: handed === expected.hand ? 1 : 0, metadata: { wanted: expected.hand ? "hand off" : "itself", got: handed ? "hand off" : "itself", byHand: output.byHand } };
+  const scripted = !!expected.script && output.commands.some((c) => />\s*\S+\.(py|js|ts|sh)\b[^\n]*<</.test(c));
+  return { name: "right_call", score: handed === expected.hand || scripted ? 1 : 0, metadata: { wanted: expected.hand ? "hand off" : "itself", got: handed ? "hand off" : "itself", byHand: output.byHand } };
 }
 
 // Where it should go, when the case says: its first hand-off is one of the right picks.
