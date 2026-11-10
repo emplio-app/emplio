@@ -9,7 +9,7 @@ Input: a behaviour of Emplio that a model decides. Output: one PR with its cases
 score, and the instructions changed until the score holds.
 
 Everything lives in `backend/evals/`, one folder per behaviour; `backend/evals/next-step-card/` is the worked example
-to copy. Results go to Braintrust (org and project from `.bt/config.json`); the cases stay in the repo so anyone can
+to copy for a single model call, `backend/evals/hand-off/` for a choice Emplio makes while working. Results go to Braintrust (org and project from `.bt/config.json`); the cases stay in the repo so anyone can
 run them and they're reviewed like code.
 
 ## 1. Pick one decision, and make it callable
@@ -91,8 +91,8 @@ difference from the last one. In order of preference:
    rewrite it so it's clearly one thing.
 
 After the score stops moving, add five to ten cases you haven't run yet, across the categories. If they pass, the
-rules generalise; if they don't, the rules were fitted to the old cases. Finish with the same run twice: done is the
-main mark at 100% both times, or a written reason for each case that isn't.
+rules generalise; if they don't, the rules were fitted to the old cases. Done is the main mark at 90 to 95% or more. Don't keep rewriting instructions for the last one or two slips unless
+the fix is tiny and sure: say what's left instead.
 
 Each rule in the instructions has its check in the markers. Change one, change the other, in the same PR.
 
@@ -101,6 +101,34 @@ Each rule in the instructions has its check in the markers. Change one, change t
 One PR: the callable code, the eval folder, the changed instructions. In its description: the main mark before and
 after, how many cases and tries, the experiment names, and what is still weak (which cases are written, not real).
 Add the behaviour to the tree in `backend/evals/README.md`.
+
+## Behaviours where Emplio runs commands
+
+The card is one model call. Most of what Emplio decides shows in the commands it runs: handing off, reading a skill,
+saving one, filing a fact. `backend/evals/emplio.ts` is the harness for those; `hand-off/`, `skills/` and
+`background-round/` are the examples to copy.
+
+- **The app's own instructions, for a made-up business.** `reply()` builds the prompt with the app's functions
+  (`emplioPrompt`, `agentRules`, `sandboxPrompt`, the note on each message) and offers the same bash tool. When the
+  wording you need is built inline in the app, move it into an exported function there and call it from both: a pure
+  move, no words changed.
+- **Nothing is run.** Each command gets a stand-in result and the markers read the commands: `emplio hand <pick>`,
+  `emplio skills use <name>`, a write to `skills/<name>/SKILL.md`. Mark by code; no judge was needed.
+- **The stand-in computer is the weak point, not Emplio.** Emplio looks around before it decides, and when its
+  commands come back with nonsense it notices and stops ("my tools returned placeholder text"). The first runs of
+  three evals scored 60 to 80% for this reason alone. Before believing a failure, read what it wrote: if it's
+  confused by a result, fix the result. `pretend()` answers the everyday commands like a shell would; a case whose
+  job has to finish gives its own results in `world`.
+- **Replay the server too.** A choice the server steers (the reminder at 4 commands, the stop at 8) is replayed with
+  the app's own `remindAt`, `longRunNote` and `TOO_MANY`, so the eval sees what Emplio would really be told.
+- **Cases must be clear.** "Build a small page" is one file: quick, not long. A preference about every customer
+  message is a business rule. When Emplio's answer is defensible, the case is wrong.
+- **Load the app when a case runs, not at the top of the eval file.** The app's files wait on things as they load,
+  and the runner then fails with "Cannot access ... before initialization". `import type` at the top, `await
+  import()` inside `data` and `task`, and one shared promise when the task uses the import straight away
+  (`reader/reader.eval.ts`).
+- Change instructions only when the same kind of case fails for a reason that is Emplio's. The four evals after the
+  card needed no change to any instructions.
 
 ## What the card taught us
 

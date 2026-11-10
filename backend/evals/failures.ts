@@ -19,7 +19,7 @@ if (!marks.length) {
   process.exit(0);
 }
 
-type Row = { root_span_id: string; metadata: { name: string; category: string }; output: { said: string } };
+type Row = { root_span_id: string; metadata: { name: string; category: string }; output: { said?: string; text?: string; commands?: string[] } };
 const roots = [...new Set(marks.map((m) => m.root_span_id))];
 const rows: Row[] = [];
 // big fields come back at most 100 rows a query
@@ -32,7 +32,7 @@ for (const m of marks) {
   if (!row) continue;
   const lost = Object.keys(m.scores).join(", ");
   const key = `${row.metadata.category} · ${row.metadata.name}`;
-  byCase.set(key, [...(byCase.get(key) ?? []), `  ✗ ${lost}  ${JSON.stringify(m.metadata ?? {})}\n    wrote: ${row.output.said.replace(/\s+/g, " ").slice(0, 400)}`]);
+  byCase.set(key, [...(byCase.get(key) ?? []), `  ✗ ${lost}  ${JSON.stringify(m.metadata ?? {})}\n    wrote: ${(row.output.said ?? [row.output.text, ...(row.output.commands ?? []).map((c) => `$ ${c}`)].filter(Boolean).join(" | ")).replace(/\s+/g, " ").slice(0, 500)}`]);
 }
 for (const [key, lines] of [...byCase].sort()) console.log(`\n${key}\n${lines.join("\n")}`);
 console.log(`\n${marks.length} failed marks in ${byCase.size} cases`);

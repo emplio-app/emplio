@@ -59,17 +59,10 @@ const DEFAULT_JOURNAL = `# Background agent's journal
 const MAX_NOTES = 150;
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}\n… (cut: read the file for the rest)` : s);
 
-// What every round of the background agent starts from, before the round's own instructions.
-async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, last: Date | null, tz: string) {
-  await ensureRepo(w.id, "restricted", "Finance, HR and owner notes");
-  let [goals, journal] = await Promise.all([readFile(w.id, "company", "goals.md"), readFile(w.id, "restricted", "journal.md")]);
-  if (goals === null) await createFile(w.id, "company", "goals.md", (goals = DEFAULT_GOALS), "Add the goals file");
-  if (journal === null) await createFile(w.id, "restricted", "journal.md", (journal = DEFAULT_JOURNAL), "Start the background agent's journal");
-  const notes = await notesWithNames(w.id, last ? [gt(chatNotes.createdAt, last)] : [], MAX_NOTES, tz);
-  const more = (notes[0]?.total ?? 0) - notes.length;
-  const today = day(new Date(), tz);
-  return `## You, in the background
-This is a round of your background work. You are the business's background agent: you keep ${w.name} moving toward its goals, and you improve yourself. The AI employee in everyone's chats is you, so every fact, preference and skill you save makes every later chat better.
+// The words of thinkerBrief, from pieces already read; the evals (backend/evals/background-round) use it too.
+export const backgroundBrief = (p: { name: string; chat: string; today: string; goals: string; journal: string; notes: string }) =>
+  `## You, in the background
+This is a round of your background work. You are the business's background agent: you keep ${p.name} moving toward its goals, and you improve yourself. The AI employee in everyone's chats is you, so every fact, preference and skill you save makes every later chat better.
 You see everything: everyone's chats (\`emplio history list|search|show\` reads anyone's), the readers' notes on them (below; older ones: \`emplio notes\`), activity, tasks, all files including restricted/, the database and the apps.
 
 What you change yourself, the business's own setup:
@@ -80,20 +73,38 @@ What you change yourself, the business's own setup:
 - Your journal, restricted/journal.md (below): keep it short; drop what's settled.
 What you don't do yourself: outside work (emailing or messaging customers or suppliers, changing data in apps, paying, deleting). Hand it to the AI employee as a task (\`emplio tasks add "<what>" --to ai --due <when> --notes "<how>"\`) or to the person it belongs to.
 Automations: only suggest them, never create one: to the person whose work it is, saying what would run and when (staff can't set them up: tell the owner too). Only for work done by hand again and again, and never the same suggestion twice (your journal).
-Messaging: the team only, never customers: \`emplio channels send <email> "<message>"\`. Only when something needs that person; everything you have for them in one message; at most 3 a day per person (\`emplio activity "channels send" --since ${today} --chat ${chatId.slice(0, 8)}\`). Not on a channel: a task for them instead.
-Learning from yourself: every suggestion, change or nudge goes in your journal's "Tried" with date and who. Each round, check the open ones (their tasks, \`emplio activity\`, their answer with \`emplio history search\`) and write how each turned out: accepted, ignored, undone, done. Do more of what worked and less of what didn't. Your own past rounds: \`emplio activity --chat ${chatId.slice(0, 8)}\`.
+Messaging: the team only, never customers: \`emplio channels send <email> "<message>"\`. Only when something needs that person; everything you have for them in one message; at most 3 a day per person (\`emplio activity "channels send" --since ${p.today} --chat ${p.chat}\`). Not on a channel: a task for them instead.
+Learning from yourself: every suggestion, change or nudge goes in your journal's "Tried" with date and who. Each round, check the open ones (their tasks, \`emplio activity\`, their answer with \`emplio history search\`) and write how each turned out: accepted, ignored, undone, done. Do more of what worked and less of what didn't. Your own past rounds: \`emplio activity --chat ${p.chat}\`.
 
 ## Goals (company/goals.md)
-${clip(goals.trim(), 8000)}${goals.trim() === DEFAULT_GOALS.trim() ? "\n(Not set yet: ask the owner for the business's goals in your next brief, once.)" : ""}
+${clip(p.goals.trim(), 8000)}${p.goals.trim() === DEFAULT_GOALS.trim() ? "\n(Not set yet: ask the owner for the business's goals in your next brief, once.)" : ""}
 
 ## Your journal (restricted/journal.md)
-${clip(journal.trim(), 8000)}
+${clip(p.journal.trim(), 8000)}
 
 ## New in people's chats since your last round
-${notes.length ? `${more > 0 ? `(${more} earlier ones: \`emplio notes --since ${last ? day(last, tz) : today}\`)\n\n` : ""}${notes.map((n) => n.line).join("\n\n")}` : "(nothing)"}
+${p.notes}
 Act on these as above. A note isn't enough? Read the chat: \`emplio history show <chat>\`.
 
 `;
+
+// What every round of the background agent starts from, before the round's own instructions.
+async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, last: Date | null, tz: string) {
+  await ensureRepo(w.id, "restricted", "Finance, HR and owner notes");
+  let [goals, journal] = await Promise.all([readFile(w.id, "company", "goals.md"), readFile(w.id, "restricted", "journal.md")]);
+  if (goals === null) await createFile(w.id, "company", "goals.md", (goals = DEFAULT_GOALS), "Add the goals file");
+  if (journal === null) await createFile(w.id, "restricted", "journal.md", (journal = DEFAULT_JOURNAL), "Start the background agent's journal");
+  const notes = await notesWithNames(w.id, last ? [gt(chatNotes.createdAt, last)] : [], MAX_NOTES, tz);
+  const more = (notes[0]?.total ?? 0) - notes.length;
+  const today = day(new Date(), tz);
+  return backgroundBrief({
+    name: w.name,
+    chat: chatId.slice(0, 8),
+    today,
+    goals,
+    journal,
+    notes: notes.length ? `${more > 0 ? `(${more} earlier ones: \`emplio notes --since ${last ? day(last, tz) : today}\`)\n\n` : ""}${notes.map((n) => n.line).join("\n\n")}` : "(nothing)",
+  });
 }
 
 const DEFAULT_CHECKLIST = `# Check-ins
@@ -120,7 +131,7 @@ For anything to come back to later, add a task for yourself with a due date (\`e
 const NOTES = `0. First the readers' notes below ("New in people's chats"): for each line, do what it calls for, the way "You, in the background" says. A fact: company/knowledge/. A preference or something about a teammate: \`emplio person\`. A way of doing a job: the skill. A promise with no task: a task. Something the AI couldn't do or work done by hand again and again: fix the skill, or suggest an automation. Check first that it isn't already saved. Write each change and suggestion in your journal's "Tried".`;
 const JOURNAL = `Before you answer, update your journal (restricted/journal.md): "Open matters" as they stand now, and how each open "Tried" turned out.`;
 
-const instructions = (kind: Kind, last: Date | null, tasks: string, tz: string) =>
+export const instructions = (kind: Kind, last: Date | null, tasks: string, tz: string) =>
   kind === "brief"
     ? `${BRIEF_PREFIX}Morning brief. Nobody asked for this; the owner reads it first thing.
 ${NOTES}

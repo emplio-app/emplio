@@ -65,6 +65,9 @@ export const remindAt = (commands: number) => commands >= LONG_RUN && (commands 
 // In a reply to a person, past this many the server refuses commands until Emplio hands off: reminders alone were
 // ignored (a 15-command report done by hand). Where nobody waits (automations, check-ins, tasks, threads) there's no limit.
 export const MAX_BY_HAND = 8;
+// The reminder a reply done by hand gets at 4 commands, then every 15 (longRun, below)
+export const longRunNote = (nth: number, automation: boolean) =>
+  `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
@@ -310,7 +313,7 @@ export async function foldIdleChats() {
 
 // What the main chat is. Never changes, so it stays in the provider's cache; the person's other chats lately
 // (otherChats) change, so they go in the context notes on their messages (contextNote).
-const mainChatNote = (ctx: Ctx) =>
+export const mainChatNote = (ctx: Pick<Ctx, "userName">) =>
   [
     `## This is ${ctx.userName}'s main chat with you`,
     "The same conversation in the web app and on their phone (Telegram). What you did on your own (check-ins, tasks, automations) is posted here, with a link to where it was done: open that chat (`emplio history show <chat>`) when they ask about it.",
@@ -410,6 +413,31 @@ const closeToolCalls = (message: UIMessage): UIMessage => ({
   ),
 });
 
+// The bash tool as the model sees it (the evals offer the same one, without running anything)
+export const BASH_DESCRIPTION =
+  "Run a bash command in this chat's own Linux computer (python, node, curl), starting in /work. " +
+  "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
+  "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
+  "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +
+  "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
+  "Commands time out after 120s: for anything long-running (servers, watchers, big runs) set background: true instead of using & or nohup yourself.";
+export const bashInput = z.object({
+  description: commandLabel.describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
+  command: z.string().describe("The bash command or script to run"),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run detached for long runs or servers. Returns at once with a pid and a log file; " +
+        "check later with tail on the log, stop with kill -- -<pid>.",
+    ),
+  step: z
+    .number()
+    .int()
+    .optional()
+    .describe("When there's a checklist (emplio plan): the number of the step this command works on. The person's checklist moves to it, ticking off the one before."),
+});
+
 // Who Emplio is in this chat and how it talks: the top of its prompt (jobs share it, jobs.ts).
 export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">, automation?: string): string[] {
   const who = `${ctx.userName} (${ctx.role})`;
@@ -448,6 +476,41 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
     "If Emplio itself breaks while you work (a command or app action that errors or misbehaves when it shouldn't, a wrong result from your own tools; not the business's own problem, a person's mistake or a site that's simply down), report it as a command on its own, then carry on (or tell them plainly you couldn't); the report is for whoever runs Emplio, not the person, so there's no need to bring it up: `emplio report \"<one line: what's broken>\" <<'EOF'`, then what you were doing, the exact command, the error and what you expected, then EOF. If the computer itself is down, the server has already reported that.",
   ];
 }
+
+// Emplio's shared instructions as one text, from pieces already read. The evals (backend/evals/emplio.ts) build
+// theirs with this too, so they check the wording the app sends.
+export const emplioPrompt = (p: { rules: string[]; computer: string; team: string[]; connected: string; business: string; userName: string; personal: string; skills: string[]; visual?: boolean }) =>
+  [
+    ...p.rules,
+    "",
+    p.computer,
+    "",
+    MANAGER_PROMPT,
+    "",
+    "## Team",
+    ...p.team,
+    "",
+    "## Connected now (emplio apps list for details)",
+    p.connected,
+    "",
+    "## This business's standing instructions (company/AGENT.md)",
+    p.business,
+    "",
+    `## About ${p.userName} (me/profile.md and me/preferences.md)`,
+    p.personal,
+    "",
+    "## Skills (read the matching SKILL.md before you start)",
+    ...p.skills,
+    "",
+    // the generated OpenUI prompt demands UI for every reply; this overrides it (it comes later)
+    ...(p.visual
+      ? [
+          "Override of the openui-lang instructions above: reply in plain Markdown by default.",
+          "Only answer in openui-lang (starting with `root = Card(...)`) when the request clearly benefits from visual UI, such as comparisons, data, charts, step-by-step plans, forms or choices to click.",
+          "Greetings, quick answers, explanations, writing and drafting stay plain Markdown. Never mix the two in one reply.",
+        ]
+      : []),
+  ].join("\n");
 
 const textOf = (message: UIMessage) =>
   message.parts.map((p) => (p.type === "text" ? p.text : "")).join(" ").trim();
@@ -722,50 +785,30 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       role: "system",
       // its own cache mark too, so jobs (same prompt, their own messages) read it from the cache
       providerOptions: { openrouter: { cacheControl: cache } },
-      content: [
-        ...agentRules(ctx, automation),
-        "",
-        sandboxPrompt(session),
-        "",
-        MANAGER_PROMPT,
-        "",
-        "## Team",
-        ...(await listTeam(ctx.workspaceId)).map((m) => `- ${m.name ?? "(name not set)"} <${m.email}>, ${m.role}`),
-        "",
-        "## Connected now (emplio apps list for details)",
-        await connectedNow(ctx).catch(() => "(unavailable right now; emplio apps list)"),
-        "",
-        "## This business's standing instructions (company/AGENT.md)",
+      content: emplioPrompt({
+        rules: agentRules(ctx, automation),
+        computer: sandboxPrompt(session),
+        team: (await listTeam(ctx.workspaceId)).map((m) => `- ${m.name ?? "(name not set)"} <${m.email}>, ${m.role}`),
+        connected: await connectedNow(ctx).catch(() => "(unavailable right now; emplio apps list)"),
         // ponytail: read from Gitea on every message; cache per workspace if it shows up in latency
-        await businessInstructions(session).catch((error) => {
+        business: await businessInstructions(session).catch((error) => {
           log.error(error, "reading AGENT.md failed");
           return "(unavailable right now)";
         }),
-        "",
-        `## About ${ctx.userName} (me/profile.md and me/preferences.md)`,
-        await personalFiles(session).catch((error) => {
+        userName: ctx.userName,
+        personal: await personalFiles(session).catch((error) => {
           log.error(error, "reading profile failed");
           return "(unavailable right now)";
         }),
-        "",
-        "## Skills (read the matching SKILL.md before you start)",
-        ...(await skillsList(session).then(
+        skills: await skillsList(session).then(
           (list) => (list.length ? list : ["(none yet)"]),
           (error) => {
             log.error(error, "listing skills failed");
             return ["(unavailable right now; look in company/skills/ and me/skills/)"];
           },
-        )),
-        "",
-        // the generated OpenUI prompt demands UI for every reply; this overrides it (it comes later)
-        ...(visual
-          ? [
-              "Override of the openui-lang instructions above: reply in plain Markdown by default.",
-              "Only answer in openui-lang (starting with `root = Card(...)`) when the request clearly benefits from visual UI, such as comparisons, data, charts, step-by-step plans, forms or choices to click.",
-              "Greetings, quick answers, explanations, writing and drafting stay plain Markdown. Never mix the two in one reply.",
-            ]
-          : []),
-      ].join("\n"),
+        ),
+        visual,
+      }),
     },
   ];
   prompts.delete(id);
@@ -830,34 +873,13 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       return null;
     }
     if (!nth || !remindAt(nth)) return null;
-    return `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
+    return longRunNote(nth, !!automation);
   };
   // Emplio's bash, and its threads' (jobs.ts): `emplio hand` acts for whoever runs it
   // `guard`: this run's check for commands that keep failing (stuck.ts)
   const makeBash = (caller: Caller, guard: FailureGuard = failureGuard()) => tool({
-    description:
-      "Run a bash command in this chat's own Linux computer (python, node, curl), starting in /work. " +
-      "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
-      "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
-      "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +
-      "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
-      "Commands time out after 120s: for anything long-running (servers, watchers, big runs) set background: true instead of using & or nohup yourself.",
-    inputSchema: z.object({
-      description: commandLabel.describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
-      command: z.string().describe("The bash command or script to run"),
-      background: z
-        .boolean()
-        .optional()
-        .describe(
-          "Run detached for long runs or servers. Returns at once with a pid and a log file; " +
-            "check later with tail on the log, stop with kill -- -<pid>.",
-        ),
-      step: z
-        .number()
-        .int()
-        .optional()
-        .describe("When there's a checklist (emplio plan): the number of the step this command works on. The person's checklist moves to it, ticking off the one before."),
-    }),
+    description: BASH_DESCRIPTION,
+    inputSchema: bashInput,
     // A generator so a command waiting on the person's OK for an app action (approvals.ts) can show the
     // card while it waits: each yield before the last is an in-progress output the chat draws.
     async *execute({ description, command, background, step }, { abortSignal }) {
