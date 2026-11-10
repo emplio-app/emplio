@@ -23,7 +23,7 @@ async function decide({ business, chat, world }: Input): Promise<Output> {
       if (/\bemplio (hand|ask)\b/.test(command)) return null;
       const nth = notCounted(command) ? 0 : ++byHand;
       if (nth > MAX_BY_HAND) return TOO_MANY;
-      const result = world.find(([words]) => new RegExp(words).test(command))?.[1] ?? pretend(command);
+      const result = pretend(command, world);
       return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
     },
     12,
@@ -39,5 +39,5 @@ Eval<Input, Output, Case["expect"]>("Emplio", {
   scores: scorers,
   trialCount: 3,
   maxConcurrency: 6,
-  metadata: { behaviour: "hand-off", model: process.env.EVAL_MODEL || MODEL_SETS.default.chatModel },
+  metadata: { behaviour: "hand-off", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });

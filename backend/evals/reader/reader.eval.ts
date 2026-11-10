@@ -7,7 +7,7 @@ import { Eval } from "braintrust";
 import { cases, type Case } from "./cases";
 import { scorers } from "./scorers";
 
-const model = process.env.EVAL_MODEL || MODEL_SETS.default.summaryModel;
+const model = process.env.EVAL_MODEL || MODEL_SETS.save.summaryModel;
 // The app's files are loaded when first needed, not at the top (hand-off/hand-off.eval.ts says why), and once:
 // cases that start together must all wait for the same load, or the late ones get it half-ready.
 let app: Promise<typeof import("../../src/reader")> | undefined;

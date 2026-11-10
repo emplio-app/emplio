@@ -7,8 +7,12 @@ import type { Case, Does } from "./cases";
 type Args = { input: unknown; output: Said; expected: Case["expect"] };
 type Score = { name: string; score: number | null; metadata?: Record<string, unknown> };
 
-// a write (>, >>, tee, a heredoc) in a command that names the place; `cd company && cat >> knowledge/x.md` counts
-const wrote = (c: string, place: RegExp) => place.test(c) && /(>|\btee\b|<<)/.test(c) && !/^\s*(cat|ls|grep|head)\s[^>|]*$/.test(c);
+// a write whose target is in the place: `> …knowledge/x.md`, `cd …knowledge… && cat > x.md`, `sed -i … knowledge/x.md`.
+// Naming the place inside a note written elsewhere (the journal) doesn't count.
+const wrote = (c: string, place: RegExp) => {
+  const at = place.source;
+  return new RegExp(`(>>?|\\btee\\b(\\s+-a)?)\\s*["']?\\S*(${at})|\\bcd\\s+\\S*(${at})[^\\n]*(>|\\btee\\b)|\\b(sed|perl) -p?i[^\\n]*(${at})`).test(c);
+};
 // what the round did with the notes
 export const didOf = (commands: string[]): Does[] => [
   ...(savedOf(commands).length ? (["skill"] as const) : []),
@@ -24,7 +28,9 @@ export function rightCall({ output, expected }: Args): Score {
   const did = didOf(output.commands);
   const missing = expected.does.filter((d) => !did.includes(d));
   const extra = expected.does.length ? [] : did.filter((d) => d !== "task");
-  return { name: "right_call", score: missing.length || extra.length ? 0 : 1, metadata: { missing, extra, did } };
+  // a changed fact: the old one is marked replaced, or edited where it stands, not left beside the new one
+  const stale = !!expected.replaces && !output.commands.some((c) => wrote(c, /knowledge\//) && /replaced|\b(sed|perl) -p?i/i.test(c));
+  return { name: "right_call", score: missing.length || extra.length || stale ? 0 : 1, metadata: { missing, extra, stale, did } };
 }
 
 // It never does outside work itself (emailing or messaging customers, changing data in apps): that becomes a task.

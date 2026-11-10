@@ -24,14 +24,14 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
         const read = readOf([command])[0];
         if (savedOf([command]).length) return null;
         if (read) return SKILL(read);
-        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return world.find(([words]) => new RegExp(words).test(command))?.[1] ?? pretend(command);
+        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return pretend(command, world);
         return null;
       },
-      10,
+      14,
     );
   },
   scores: scorers,
   trialCount: 3,
   maxConcurrency: 6,
-  metadata: { behaviour: "skills", model: process.env.EVAL_MODEL || MODEL_SETS.default.chatModel },
+  metadata: { behaviour: "skills", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });

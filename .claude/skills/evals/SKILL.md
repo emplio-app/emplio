@@ -91,7 +91,7 @@ difference from the last one. In order of preference:
    rewrite it so it's clearly one thing.
 
 After the score stops moving, add five to ten cases you haven't run yet, across the categories. If they pass, the
-rules generalise; if they don't, the rules were fitted to the old cases. Done is the main mark at 90 to 95% or more. Don't keep rewriting instructions for the last one or two slips unless
+rules generalise; if they don't, the rules were fitted to the old cases. Done is the main mark at 95% or more, on the Save money models (Haiku), which the evals use by default: what holds on the cheapest holds on the dearer ones (`EVAL_MODEL` tries another). Don't keep rewriting instructions for the last one or two slips unless
 the fix is tiny and sure: say what's left instead.
 
 Each rule in the instructions has its check in the markers. Change one, change the other, in the same PR.

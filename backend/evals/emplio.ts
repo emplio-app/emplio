@@ -1,5 +1,5 @@
 // Emplio as the evals run it: the app's own instructions (src/chat.ts emplioPrompt, agentRules; src/sandbox.ts;
-// src/jobs.ts) for a made-up business, the same bash tool, and the model the Default quality uses. Commands aren't
+// src/jobs.ts) for a made-up business, the same bash tool, and the models of the Save money quality (Haiku): what works on the cheapest holds on the dearer ones. Commands aren't
 // run: each gets a stand-in result, and the eval looks at which commands Emplio chose.
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { MODEL_SETS } from "@emplio/shared";
@@ -22,8 +22,8 @@ export type Business = {
   threads?: string[];
 };
 
-export const CHAT_MODEL = process.env.EVAL_MODEL || MODEL_SETS.default.chatModel;
-export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.default.backgroundModel;
+export const CHAT_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.chatModel;
+export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgroundModel;
 
 // round: a background round (the owner's check-in), which nobody watches, on the cheaper model
 const system = (b: Business, round: boolean) => [
@@ -81,7 +81,27 @@ const FILES: [RegExp, string][] = [
   [/AGENT\.md/, "We sell curtains, cushions and bed linen from one shop in Pune and online."],
   [/(profile|preferences)\.md/, "Runs the shop. Prefers short answers. Hindi or English."],
   // the script two cases talk about (skills, background-round): it has to be there for a skill to be made of it
-  [/slip\/make\.py/, "#!/usr/bin/env python3\n# usage: make.py <order number>\n# reads the order from Zoho Books and writes /work/out/packing-slip-<number>.pdf"],
+  [
+    /slip\/make\.py/,
+    `#!/usr/bin/env python3
+# usage: make.py <order number>
+# reads the order from Zoho Books and writes /work/out/packing-slip-<number>.pdf
+import json, subprocess, sys
+from fpdf import FPDF
+
+number = sys.argv[1]
+order = json.loads(subprocess.check_output(["emplio", "apps", "run", "zoho_books.get_order", json.dumps({"number": number})]))
+pdf = FPDF()
+pdf.add_page()
+pdf.set_font("Helvetica", size=14)
+pdf.cell(0, 10, f"Packing slip: order {number}", new_x="LMARGIN", new_y="NEXT")
+pdf.cell(0, 8, order["customer"], new_x="LMARGIN", new_y="NEXT")
+pdf.multi_cell(0, 8, order["address"])
+for item in order["items"]:
+    pdf.cell(0, 8, f'{item["qty"]} x {item["name"]}', new_x="LMARGIN", new_y="NEXT")
+pdf.output(f"/work/out/packing-slip-{number}.pdf")
+print(f"Saved /work/out/packing-slip-{number}.pdf")`,
+  ],
 ];
 const one = (c: string): string => {
   if (/<<|(^|[^2&])>\s*\S/.test(c) || /^\s*(cd|mkdir|cp|mv|touch|chmod|export|set)\b/.test(c)) return "";
@@ -92,11 +112,17 @@ const one = (c: string): string => {
   if (/\bemplio history show\b/.test(c)) return "(nothing in it beyond what you already have)";
   if (/\bemplio apps list\b/.test(c)) return "gmail (connected)\ngooglesheets (connected)\nzoho_books (connected)\nwhatsapp (connected)";
   if (/\bemplio apps actions\b/.test(c))
-    return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row";
+    return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\nzoho_books.get_order  One order by number\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row";
   if (/\bemplio apps info\b/.test(c)) return 'input: {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD", "status": "unpaid|paid|all", "q": "search words"}';
+  if (/\bemplio apps run \S*get_order/.test(c)) return '{"number":"4410","customer":"Anita Desai","items":[{"name":"Bedsheet king ivory","qty":2}],"address":"12 Baner Rd, Pune"}';
   if (/\bemplio apps run\b/.test(c)) return "[]";
+  // the web answers, but never in one go: results to open, pages to read, as it is for real
+  if (/\bemplio web (search|similar)\b/.test(c)) return "10 results. The first 3:\n1. A directory page listing many sellers, each with its own page (https://www.indiamart.example/list)\n2. A buyer's guide comparing a few options, prices not shown (https://www.guide.example/compare)\n3. A seller's own site: prices on request (https://www.seller.example)\nOpen a page with `emplio web read <url>` for its details.";
+  if (/\bemplio web answer\b/.test(c)) return "Sources disagree and most give no current figures; the details are on each one's own page. Read the pages for exact numbers.";
+  if (/\bemplio web read\b/.test(c)) return "(about 2,100 words) A long page: names and descriptions, a contact form, and some figures in a table further down. No single summary of what you're after.";
   if (/\bemplio browser skill\b/.test(c)) return "open <url>, snapshot, find <words>, click <ref>, fill <ref> <text>, requests. Read a page with snapshot before acting on it.";
   if (/\bemplio browser\b/.test(c)) return "Page opened: 48 links, 12 buttons. Snapshot saved to /work/tmp/browser/page.txt";
+  if (/tmp\/browser\/page\.txt/.test(c)) return "[1] link Home  [2] link Shop  [3] textbox Search  [4] link Offers  [5] link Account  … 43 more links, 12 buttons; the page's own content starts below the menu";
   if (/\bemplio tasks add\b/.test(c)) return "Task added.";
   if (/\bemplio tasks\b/.test(c)) return "(no tasks)";
   if (/\bemplio person\b/.test(c)) return "Saved.";
@@ -109,10 +135,12 @@ const one = (c: string): string => {
   if (/^\s*(grep|find)\b/.test(c)) return "";
   return "";
 };
-export const pretend = (command: string): string =>
-  // a heredoc is one write, whatever is in it
+// world: what this business's commands answer, first match wins: [words in the command (a regular expression), the result]
+export type World = [string, string][];
+export const pretend = (command: string, world: World = []): string =>
+  // a heredoc is one write, whatever is in it; a chain answers part by part, each from the world first
   (/<</.test(command) ? [command] : command.split(/\s*(?:;|&&|\n)\s*/))
-    .map((part) => one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
+    .map((part) => world.find(([words]) => new RegExp(words).test(part))?.[1] ?? one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
     .filter(Boolean)
     .join("\n") || "(no output)";
 

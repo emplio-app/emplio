@@ -57,8 +57,10 @@ export const cases = (): Case[] => [
       person("no thats wrong. amazon cuts their fee and 1% TCS before paying. you have to add those back from the fee columns and then match. always do it that way"),
     ],
     world: [
-      ["^\\s*(cd [^;&]+[;&]+\\s*)?(ls|head|cat|sed)\\b", "read.py  match.py\norder_id,amount,fee,tcs\n4301,1840.00,276.00,18.40\n4302,3120.50,468.10,31.21"],
-      ["python3|match", "After adding back fee and TCS: 118 of 118 payouts match the orders sheet."],
+      ["^\\s*ls\\b", "match.py  read.py"],
+      ["payout-oct\\.csv", "order_id,amount,fee,tcs\\n4301,1840.00,276.00,18.40\\n4302,3120.50,468.10,31.21"],
+      ["^\\s*(cat|head|sed|wc)\\b.*\\.py", "import csv\\n# match.py: matches each payout's amount to the order's amount in the orders sheet\\norders = {r['order_id']: float(r['amount']) for r in csv.DictReader(open('/work/tmp/amazon/orders.csv'))}\\nrows = list(csv.DictReader(open('/work/in/payout-oct.csv')))\\nok = sum(1 for r in rows if abs(orders[r['order_id']] - float(r['amount'])) < 0.01)\\nprint(f'{ok} matched, {len(rows) - ok} do not match (amounts differ)')"],
+      ["python3", "After adding back fee and TCS: 118 of 118 payouts match the orders sheet."],
     ],
     expect: { save: true },
   },
@@ -76,7 +78,7 @@ export const cases = (): Case[] => [
     world: [
       ["get_order", '{"number":"4417","customer":"Rohan Mehta","items":[{"name":"Cushion cover 16in teal","qty":4}],"address":"7 Aundh Rd, Pune"}'],
       ["make\\.py \\d|python3 \\S*make", "Saved /work/out/packing-slip-4417.pdf"],
-      ["^\\s*(cd [^;&]+[;&]+\\s*)?(ls|head|cat|sed)\\b", "make.py\n# usage: make.py <order number>: reads the order from Zoho and writes /work/out/packing-slip-<number>.pdf"],
+      ["^\\s*ls\\b.*out", "packing-slip-4410.pdf  packing-slip-4417.pdf"],
     ],
     expect: { save: true },
   },

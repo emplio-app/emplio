@@ -7,7 +7,9 @@
 // - skill: a way that was worked out or repeated, and no skill saved in the chat. This is the catch-up for it.
 // - knowledge, preference, task: the same for facts, preferences and promises.
 // - nothing: no notes. Saving things anyway is noise.
-export type Category = "skill" | "knowledge" | "preference" | "task" | "nothing";
+// - tidy: what's saved stays true and said once (the start of "dreaming": https://platform.claude.com/docs/en/managed-agents/dreams).
+//   A fact already saved isn't saved again; a fact that changed marks the old one replaced.
+export type Category = "skill" | "knowledge" | "preference" | "task" | "nothing" | "tidy";
 export type Does = "skill" | "knowledge" | "preference" | "task";
 
 export type Case = {
@@ -16,9 +18,15 @@ export type Case = {
   source: "real" | "written";
   // the readers' notes, as the round gets them (src/reader.ts noteLine)
   notes: string;
+  // what's already saved, as this business's commands answer: [words in the command (a regular expression), the result]
+  world?: [string, string][];
+  // replaces: the knowledge write must also mark the old fact replaced (or edit it in place)
   // everything in `does` must be done; for "nothing", none of the four may be
-  expect: { does: Does[] };
+  expect: { does: Does[]; replaces?: boolean };
 };
+
+// reads only (a search, a look in knowledge/), never the write itself
+const saved = (line: string): [string, string][] => [["emplio search|\\b(grep|cat|ls|head|find)\\b[^>]*knowledge", line]];
 
 const note = (title: string, text: string) => `[10 Nov, 4:10 pm] Meera, chat 3f9a12bc "${title}":\n${text}`;
 
@@ -70,6 +78,22 @@ export const cases: Case[] = [
       note("Shop timing", "Fact: shop closed on Sundays from 15 Nov."),
     ].join("\n\n"),
     expect: { does: ["skill", "preference", "knowledge"] },
+  },
+  {
+    name: "a fact that's already saved",
+    category: "tidy",
+    source: "written",
+    notes: note("Fillers", "Fact: cushion fillers come from Shree Foam, ₹92 a kg, 30 days' credit."),
+    world: saved("company/knowledge/suppliers/shree-foam.md:3: 2026-11-08, Meera: cushion fillers come from Shree Foam, ₹92 a kg, 30 days' credit"),
+    expect: { does: [] },
+  },
+  {
+    name: "a fact that changed",
+    category: "tidy",
+    source: "written",
+    notes: note("Shop timing", "Fact: shop timing changes to 10:30 to 8:30, closed Sundays, from 15 Nov."),
+    world: saved("company/knowledge/topics/shop.md:2: 2026-08-02, Meera: shop timing is 10 to 8, open all seven days"),
+    expect: { does: ["knowledge"], replaces: true },
   },
   { name: "no notes", category: "nothing", source: "written", notes: "(nothing)", expect: { does: [] } },
 ];

@@ -36,10 +36,16 @@ const INVOICES = JSON.stringify([
 ]);
 // the books answer with real-looking rows, so a look-up can finish and a report has something to chew on
 const BOOKS: [string, string][] = [
-  ["/work/tmp/apps|invoices\\.json|items\\.json", "61 invoices in October, total 7,84,300. Unpaid: 14, worth 2,96,450 (largest: Hotel Sai Residency 84,200; Blue Lotus Cafe 31,750). 310 items; 41 sold fewer than 5 in October."],
+  // the saved files hold rows, not answers: a report still has to be worked out of them, as in the app
+  ["items\\.json", '[{"name":"Bedsheet king ivory","stock":40,"sold_october":3},{"name":"Cushion cover 16in teal","stock":120,"sold_october":64},\n… 308 more rows'],
+  ["/work/tmp/apps|invoices\\.json", `${INVOICES.slice(0, -1)},\n… 56 more rows`],
   ["apps (run|info) .*invoice", `${INVOICES}\n(5 of 61 shown; the rest: /work/tmp/apps/invoices.json)`],
   ["apps run .*item", '[{"name":"Bedsheet king ivory","stock":40,"sold_october":3},{"name":"Cushion cover 16in teal","stock":120,"sold_october":64}]\n(2 of 310 shown; the rest: /work/tmp/apps/items.json)'],
 ];
+
+// the shop's best sellers with our prices, so a price check has something to check
+const TOP = ["Bedsheet king ivory", "Bedsheet queen grey", "Cushion cover 16in teal", "Cushion cover 18in mustard", "Curtain 7ft grey blackout", "Curtain 7ft sheer white", "Curtain 9ft beige blackout", "Pillow cover pair white", "Duvet cover king navy", "Table runner jute", "Bath towel set of 2", "Quilt single floral", "Bolster cover pair", "Door mat coir", "Dohar double blue", "Bedsheet single kids print", "Cushion filler 16in", "Curtain tieback pair", "Diwan set 5 piece", "Comforter double grey"];
+const ITEMS: [string, string][] = [["apps (run|info) .*item", JSON.stringify(TOP.map((name, i) => ({ name, price: 450 + i * 130, sold_october: 96 - i * 4 })))]];
 
 const AGENTS = ["- Supplier Finder (agents/supplier-finder, light): Finds and compares suppliers for a product", "- Invoice Chaser (agents/invoice-chaser, light): Chases unpaid invoices by email and WhatsApp"];
 const THREADS = [
@@ -55,6 +61,18 @@ const fiveIn = (left: string): ModelMessage[] => [
   ...ran("Checking the first duplicate", "python3 /work/tmp/stock/show.py 0", "Cushion cover 16in teal: rows 14, 388, 902"),
   ...ran("Checking the second duplicate", "python3 /work/tmp/stock/show.py 1", "Bedsheet king ivory: rows 22, 23"),
   ...ran("Checking the third duplicate", "python3 /work/tmp/stock/show.py 2", `Curtain 7ft grey blackout: rows 31, 640\n\n${left}`),
+];
+
+// the stock clean-up's files, and a month of mail: enough to see how much work there is
+const STOCK: [string, string][] = [
+  ["stock\\.json", '[["Item","Qty","Updated"],["Cushion cover 16in teal",40,"2026-09-02"],["Bedsheet king ivory",12,"2026-10-11"],\n… 1,410 more rows'],
+  ["dupes\\.py|show\\.py", "236 duplicate rows across 97 items; show.py <n> prints the rows of the nth one"],
+];
+const MAIL: [string, string][] = [
+  [
+    "apps run gmail",
+    '212 emails. The first 5:\n{"id":"m1","from":"anita@example.com","subject":"Wrong colour delivered","date":"2026-10-03"}\n{"id":"m2","from":"orders@delhivery.example","subject":"Pickup scheduled","date":"2026-10-03"}\n{"id":"m3","from":"accounts@sairesidency.example","subject":"Re: Invoice 203","date":"2026-10-04"}\n{"id":"m4","from":"rohan.mehta@example.com","subject":"Cushion covers torn at the seam","date":"2026-10-05"}\n{"id":"m5","from":"newsletter@textileweekly.example","subject":"October trends","date":"2026-10-05"}\n(207 more: the next page with {"page": 2}; one mail in full with gmail.get_message)',
+  ],
 ];
 
 // a function, not a list: the app's files load in a loop of their own, and their words aren't ready until they have
@@ -127,6 +145,7 @@ export const cases = (): Case[] => [
     category: "long",
     source: "written",
     chat: [person("go through all of last month's emails and list every customer complaint with what we replied")],
+    world: MAIL,
     expect: { hand: true },
   },
   {
@@ -134,6 +153,7 @@ export const cases = (): Case[] => [
     category: "long",
     source: "written",
     chat: [person("check the price of our top 20 products on amazon and flipkart and tell me where we're costlier")],
+    world: ITEMS,
     expect: { hand: true },
   },
   {
@@ -165,6 +185,7 @@ export const cases = (): Case[] => [
     category: "midway",
     source: "written",
     chat: [person("clean up the duplicates in the stock sheet: check each one, keep the row with the latest date and add the quantities into it"), ...fiveIn(longRunNote(4, false))],
+    world: STOCK,
     expect: { hand: true },
   },
   {
@@ -234,8 +255,8 @@ export const cases = (): Case[] => [
     name: "no agents yet",
     category: "pick",
     source: "written",
-    chat: [person("chase all the unpaid invoices from october, email each customer with their amount and due date")],
-    world: BOOKS,
+    chat: [person("chase all the unpaid invoices from october: read what we last wrote to each customer, then email each one with their amount and due date")],
+    world: [...BOOKS, ...MAIL],
     expect: { hand: true, picks: ["new"] },
   },
 ];

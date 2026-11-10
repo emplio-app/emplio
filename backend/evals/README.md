@@ -39,7 +39,7 @@ bun run eval evals/reader                      # the cheapest one, to try things
 bun evals/failures.ts <experiment name>        # what failed, and what the model wrote
 ```
 
-A full run of everything costs about $3: the chat ones run the chat's own model with its whole instructions.
+Everything runs on the Save money models (Haiku) unless `EVAL_MODEL` says otherwise: what holds on the cheapest holds on the dearer ones. The card keeps its own small model, as in the app.
 
 Results go to [Braintrust](https://www.braintrust.dev) (free plan is enough), where two runs can be compared
 case by case. Once: `bt login --oauth`, then `bt init` in the repo and pick your project. `.bt/` stays out of git.
