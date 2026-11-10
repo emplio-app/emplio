@@ -486,17 +486,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     const part = (type: string) => (message.parts.find((p) => p.type === type) as { data?: unknown } | undefined)?.data;
     setMessages(messages.slice(0, i));
     forked.current = true;
-    dispatch({ text, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
+    // a tapped answer left as it was keeps the question that goes with it, which the edit box doesn't show
+    const sent = text === userFacingText(textOf(message)) ? textOf(message) : text;
+    dispatch({ text: sent, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
   };
 
   // The closable card after each reply, made by a small model (backend chat.ts nextStep). Opening a chat only
   // shows one already made.
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  // How much of the chat the card floats over. Kept until the next send, so closing it or typing moves nothing.
+  const [cardRoom, setCardRoom] = useState(0);
   const nextStepAfter = useRef(status);
   useEffect(() => {
     const wasBusy = nextStepAfter.current === "submitted" || nextStepAfter.current === "streaming";
     nextStepAfter.current = status;
-    if (status === "submitted" || status === "streaming") return setNextStep(null);
+    if (status === "submitted" || status === "streaming") {
+      setCardRoom(0);
+      return setNextStep(null);
+    }
     if (isNew && !wasBusy) return;
     if (status !== "ready" || (wasBusy && queue.length)) return;
     let current = true;
@@ -678,11 +685,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         .catch(() => (loadingOlder.current = false));
     }
   };
+  // The card floats over the chat, so the message area keeps its size. Only when it would cover the end of the
+  // reply does the chat move, once and by just enough.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const last = document.getElementById(`m-${messages.at(-1)?.id}`);
+    if (!cardRoom || !el || !last) return;
+    const bottom = el.getBoundingClientRect().bottom;
+    const end = last.getBoundingClientRect().bottom;
+    // past the bottom edge: they've scrolled up to read something else
+    if (end <= bottom && end > bottom - cardRoom) el.scrollBy({ top: end - bottom + cardRoom, behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the card arrives
+  }, [cardRoom]);
+
   const checkBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setAtBottom(gap < 80);
+    setAtBottom(gap < 80 + cardRoom);
     // after a send the reply fills in below the prompt instead (pinLatest)
     stuck.current = !pinLatest && gap < 2;
     // two screens ahead, so a pause in scrolling has them ready before the top is reached
@@ -819,7 +839,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         )}
         {message.role === "user" && editing !== message.id && (
           <UserMessageActions
-            text={text}
+            text={userFacingText(text)}
             versions={(message.metadata as Versions | undefined)?.versions ?? []}
             current={message.id}
             // a Telegram thread is answered there, so it isn't edited here either
@@ -827,7 +847,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             onEdit={
               text && !fromEmplio
                 ? () => {
-                    setEditText(text);
+                    setEditText(userFacingText(text));
                     setEditing(message.id);
                   }
                 : undefined
@@ -1114,7 +1134,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                       box?.setSelectionRange(box.value.length, box.value.length);
                     }}
                   />
-                  <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
+                  <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8" style={cardRoom ? { paddingBottom: cardRoom + 32 } : undefined}>
                     {list}
                   </div>
                 </div>
@@ -1124,13 +1144,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     variant="secondary"
                     aria-label="Scroll to bottom"
                     onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })}
+                    style={cardRoom ? { bottom: cardRoom + 16 } : undefined}
                     className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border shadow-lg"
                   >
                     <ArrowDownIcon className="size-4" />
                   </Button>
                 )}
               </div>
-              <div className="mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pb-3">
+              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pb-3">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1143,7 +1164,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     onSendNow={busy ? sendNow : undefined}
                   />
                 )}
-                {nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />}
+                {nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
+                  <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 pb-2">
+                    <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />
+                  </div>
+                )}
                 {onTelegram ? <TelegramOnly /> : composer}
               </div>
             </>
