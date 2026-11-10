@@ -15,6 +15,10 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
   task: async ({ chat, world }, { metadata }) => {
     const { reply, pretend } = await import("../emplio");
     const { SKILLS } = await import("./cases");
+    // the server's reminder on the first command of a reply, as in the app (src/chat.ts)
+    const { notCounted, skillNote } = await import("../../src/chat");
+    let byHand = 0;
+    const noted = (command: string, result: string) => [result, skillNote(notCounted(command) ? 0 : ++byHand, command)].filter(Boolean).join("\n\n");
     // "use" cases end at the first piece of real work: by then it has read the skill or it hasn't. "save" cases
     // go on (on pretend results) until a skill is written or the reply ends.
     return reply(
@@ -23,8 +27,8 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
       (command) => {
         const read = readOf([command])[0];
         if (savedOf([command]).length) return null;
-        if (read) return SKILL(read);
-        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return pretend(command, world);
+        if (read) return noted(command, SKILL(read));
+        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, pretend(command, world));
         return null;
       },
       14,

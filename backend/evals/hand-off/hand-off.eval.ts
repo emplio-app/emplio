@@ -14,7 +14,7 @@ const app = () => import("../emplio");
 // It ends when Emplio hands off, asks the person, or just answers.
 async function decide({ business, chat, world }: Input): Promise<Output> {
   const { reply, pretend } = await app();
-  const { longRunNote, MAX_BY_HAND, notCounted, remindAt, TOO_MANY } = await import("../../src/chat");
+  const { longRunNote, MAX_BY_HAND, notCounted, remindAt, skillNote, TOO_MANY } = await import("../../src/chat");
   let byHand = 0;
   const said = await reply(
     business,
@@ -23,7 +23,7 @@ async function decide({ business, chat, world }: Input): Promise<Output> {
       if (/\bemplio (hand|ask)\b/.test(command)) return null;
       const nth = notCounted(command) ? 0 : ++byHand;
       if (nth > MAX_BY_HAND) return TOO_MANY;
-      const result = pretend(command, world);
+      const result = [pretend(command, world), skillNote(nth, command)].filter(Boolean).join("\n\n");
       return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
     },
     12,

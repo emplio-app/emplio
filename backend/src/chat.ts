@@ -68,6 +68,18 @@ export const MAX_BY_HAND = 8;
 // The reminder a reply done by hand gets at 4 commands, then every 15 (longRun, below)
 export const longRunNote = (nth: number, automation: boolean) =>
   `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
+// The rule on saving skills (sandbox.ts "Skills:") was skipped in chat, by the cheaper models nearly always
+// (evals/skills), until it was said next to the work: on a reply's first command, and at the two moments it goes
+// wrong: a job's steps being written into the standing instructions, and a script run from tmp as if for the first time.
+// ponytail: three patterns, not an understanding of the command; add one when the evals show another moment
+export const skillNote = (nth: number, command: string): string | null =>
+  /(>|\btee\b|\bsed -i)[^\n]*\b(AGENT|preferences)\.md|\b(AGENT|preferences)\.md[^\n]*<</.test(command)
+    ? "[A rule or a preference belongs here. How to do a job (its steps, a corrected method) belongs in a skill: if that's what this is, save it as a skill too before you finish.]"
+    : /\b(python3?|bash|sh|node|bun)\s+\S*\/tmp\/\S+\.(py|sh|js|ts)\b/.test(command)
+      ? "[A script in tmp isn't a skill yet. If you've done this job before or it will come again, save it as a skill, with the script in it, before you finish.]"
+      : nth === 1
+        ? "[Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
+        : null;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
@@ -903,7 +915,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {
-        const note = [guard.check(command, result), ...(caller.jobId ? [] : [longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
+        const note = [guard.check(command, result), ...(caller.jobId ? [] : [!automation && skillNote(nth, command), longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
         return note ? { ...result, output: `${String(result.output ?? "")}\n\n${note}` } : result;
       };
       // the checklist moves as the command starts, so they see where the job is while it runs

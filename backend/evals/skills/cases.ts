@@ -20,7 +20,8 @@ export type Case = {
   // what this business's commands answer, first match wins, so the job can be finished: [words in the command, the result]
   world?: [string, string][];
   // use: the skill it must read first (null: none). save: whether a SKILL.md must be written in this reply.
-  expect: { use?: string | null; save?: boolean };
+  // rule: the owner's "from now on" steps may also go in the standing instructions (company/AGENT.md), which every chat reads
+  expect: { use?: string | null; save?: boolean; rule?: boolean };
 };
 
 export const SKILLS = [
@@ -42,7 +43,7 @@ export const cases = (): Case[] => [
   { name: "gst sum, not a quote", category: "leave", source: "written", chat: [person("whats 18% gst on 4500")], expect: { use: null } },
   { name: "an email", category: "leave", source: "written", chat: [person("email raj that the shop opens at 11 tomorrow")], expect: { use: null } },
   { name: "a short message", category: "leave", source: "written", chat: [person("write a 2 line whatsapp msg saying we're closed on diwali day")], expect: { use: null } },
-  { name: "a question about couriers", category: "leave", source: "written", chat: [person("is delhivery or bluedart usually cheaper for pune to bangalore")], expect: { use: null } },
+  // (a question about couriers was here: reading the courier skill for it is fair, "if one fits even partly")
 
   // ── save ───────────────────────────────────────────────────────────────────────────────────────────────────────
   {
@@ -58,9 +59,9 @@ export const cases = (): Case[] => [
     ],
     world: [
       ["^\\s*ls\\b", "match.py  orders.csv  read.py"],
-      ["^\\s*(cat|head|sed|wc)\\b.*orders", "order_id,amount\\n4301,2134.40\\n4302,3619.81\\n… 116 more rows"],
-      ["payout-oct\\.csv", "order_id,amount,fee,tcs\\n4301,1840.00,276.00,18.40\\n4302,3120.50,468.10,31.21"],
-      ["^\\s*(cat|head|sed|wc)\\b.*\\.py", "import csv\\n# match.py: matches each payout's amount to the order's amount in the orders sheet\\norders = {r['order_id']: float(r['amount']) for r in csv.DictReader(open('/work/tmp/amazon/orders.csv'))}\\nrows = list(csv.DictReader(open('/work/in/payout-oct.csv')))\\nok = sum(1 for r in rows if abs(orders[r['order_id']] - float(r['amount'])) < 0.01)\\nprint(f'{ok} matched, {len(rows) - ok} do not match (amounts differ)')"],
+      ["^\\s*(cat|head|sed|wc)\\b.*orders", "order_id,amount\n4301,2134.40\n4302,3619.81\n… 116 more rows"],
+      ["payout-oct\\.csv", "order_id,amount,fee,tcs\n4301,1840.00,276.00,18.40\n4302,3120.50,468.10,31.21"],
+      ["^\\s*(cat|head|sed|wc)\\b.*\\.py", "import csv\n# match.py: matches each payout's amount to the order's amount in the orders sheet\norders = {r['order_id']: float(r['amount']) for r in csv.DictReader(open('/work/tmp/amazon/orders.csv'))}\nrows = list(csv.DictReader(open('/work/in/payout-oct.csv')))\nok = sum(1 for r in rows if abs(orders[r['order_id']] - float(r['amount'])) < 0.01)\nprint(f'{ok} matched, {len(rows) - ok} do not match (amounts differ)')"],
       ["python3", "After adding back fee and TCS: 118 of 118 payouts match the orders sheet."],
     ],
     expect: { save: true },
@@ -96,9 +97,9 @@ export const cases = (): Case[] => [
       ["apps (actions|info)", "zoho_books.get_order  One order by number\nzoho_books.create_return  Create a sales return for an order (returns the pickup date)\nwhatsapp.send_message  Message a customer"],
       ["create_return", '{"return":"RET-88","order":"4391","pickup_date":"2026-11-12"}'],
       ["get_order|4391", '{"number":"4391","customer":"Sneha Patil","phone":"+91 98200 00000","date":"2026-11-06","items":[{"name":"Curtain 7ft grey blackout","qty":2}]}'],
-      ["send_message", "Sent."],
+      ["send_message|whatsapp", '{"sent":true,"to":"+91 98200 00000","id":"wamid.8841"}'],
     ],
-    expect: { save: true },
+    expect: { save: true, rule: true },
   },
 
   // ── one-off ────────────────────────────────────────────────────────────────────────────────────────────────────

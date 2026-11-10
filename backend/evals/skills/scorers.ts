@@ -21,7 +21,8 @@ export function rightCall({ output, expected }: Args): Score {
   const wrong: string[] = [];
   if (expected.use === null && read.length) wrong.push(`read ${read.join(", ")} for nothing`);
   if (expected.use && read[0] !== expected.use) wrong.push(read.length ? `read ${read[0]}, not ${expected.use}` : `didn't read ${expected.use}`);
-  if (expected.save === true && !saved.length) wrong.push("no skill saved");
+  const ruled = !!expected.rule && output.commands.some((c) => /(>|\btee\b|\bsed -i)[^\n]*\bAGENT\.md|\bAGENT\.md[^\n]*<</.test(c));
+  if (expected.save === true && !saved.length && !ruled) wrong.push("no skill saved");
   if (expected.save === false && saved.length) wrong.push(`saved ${saved.join(", ")} for a one-off`);
   return { name: "right_call", score: wrong.length ? 0 : 1, metadata: { wrong, read, saved } };
 }
