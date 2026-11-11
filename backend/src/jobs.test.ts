@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { MAX_BY_HAND, notCounted, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { cardsIn, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, tooOld, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, tooOld, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -177,4 +177,11 @@ test("each hand-off card is one run of its job: the prompt it was handed, and wh
   expect(runSpan(msgs, "m2")).toEqual({ msgs: msgs.slice(2), latest: true });
   // a prompt not in the chat yet has no run
   expect(runSpan(msgs, "m3")).toBeNull();
+});
+
+test("a plain copy's finished work gets the agent nudge; an agent's, a deeper thread's or unfinished work doesn't", () => {
+  expect(agentNudge({ status: "done", agent: null, depth: 1 })).toContain("emplio agents add");
+  expect(agentNudge({ status: "done", agent: "invoice-chaser", depth: 1 })).toBe("");
+  expect(agentNudge({ status: "done", agent: null, depth: 2 })).toBe("");
+  expect(agentNudge({ status: "asking", agent: null, depth: 1 })).toBe("");
 });

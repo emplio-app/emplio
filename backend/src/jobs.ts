@@ -112,6 +112,10 @@ const NOTE_REPORT = 1500;
 export const untoldNote = (reports: string[]) =>
   `[The person worked in these threads' chats directly, so you weren't woken. Their latest reports, for you to know; don't mention them unless it matters (\`emplio threads show <id>\` for all of one):\n\n${reports.map((r) => (r.length > NOTE_REPORT ? `${r.slice(0, NOTE_REPORT)}…` : r)).join("\n\n")}\n]`;
 
+// agents still at it for this chat: Emplio isn't waiting on the person yet (chat.ts nextStep)
+export const stillWorking = async (conversationId: string) =>
+  !!(await db.query.jobs.findFirst({ where: and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")), columns: { id: true } }));
+
 export async function untoldReports(conversationId: string) {
   if (!untold.size) return null;
   const rows = await db.select().from(jobs).where(and(eq(jobs.conversationId, conversationId), isNull(jobs.parentId)));
@@ -366,12 +370,19 @@ async function recorded(w: Row) {
   return recordedLine(changes.slice(-10), await timezoneOf(w.userId));
 }
 
+// Under the report of a plain copy's finished work: the moment to turn a kind of work into an agent.
+// ponytail: said in staff chats too, where `emplio agents add` refuses with its own clear error; check admin here if that's noisy
+export const agentNudge = (w: Pick<Row, "status" | "agent" | "depth">) =>
+  w.status === "done" && !w.agent && w.depth === 1
+    ? "\n[A plain copy of you did this. If this kind of work will come back, make an agent for it now so the next one goes to it: `emplio agents add` (emplio agents help). A true one-off: ignore this.]"
+    : "";
+
 const full = async (w: Row) => {
   const actions = await actionsOf(w);
   const head = `${short(w.id)} "${w.name}"${w.agent ? ` (${w.agent})` : ""}: ${w.status}, ${actions.length} actions\n`;
   return w.status === "working"
     ? `${head}now: ${actions.filter((a) => !a.done).at(-1)?.description ?? "thinking"}`
-    : `${head}${w.report ?? ""}${await recorded(w)}`;
+    : `${head}${w.report ?? ""}${await recorded(w)}${agentNudge(w)}`;
 };
 const notFound = (ref?: string) => `error: none of your threads starts with ${ref ?? "(nothing)"}; see emplio threads list`;
 

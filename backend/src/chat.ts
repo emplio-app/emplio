@@ -45,10 +45,11 @@ import { slashCommand } from "./skills";
 import { allowedIn } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
+import { NEXT_STEP_MODEL, writeNextStep } from "./next-step";
 import { holdRead, readLater, SILENT } from "./reader";
 import { TASK } from "./tasks";
 import { pushTo } from "./push";
@@ -64,6 +65,21 @@ export const remindAt = (commands: number) => commands >= LONG_RUN && (commands 
 // In a reply to a person, past this many the server refuses commands until Emplio hands off: reminders alone were
 // ignored (a 15-command report done by hand). Where nobody waits (automations, check-ins, tasks, threads) there's no limit.
 export const MAX_BY_HAND = 8;
+// The reminder a reply done by hand gets at 4 commands, then every 15 (longRun, below)
+export const longRunNote = (nth: number, automation: boolean) =>
+  `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
+// The rule on saving skills (sandbox.ts "Skills:") was skipped in chat, by the cheaper models nearly always
+// (evals/skills), until it was said next to the work: on a reply's first command, and at the two moments it goes
+// wrong: a job's steps being written into the standing instructions, and a script run from tmp as if for the first time.
+// ponytail: three patterns, not an understanding of the command; add one when the evals show another moment
+export const skillNote = (nth: number, command: string): string | null =>
+  /(>|\btee\b|\bsed -i)[^\n]*\b(AGENT|preferences)\.md|\b(AGENT|preferences)\.md[^\n]*<</.test(command)
+    ? "[A rule or a preference belongs here. How to do a job (its steps, a corrected method) belongs in a skill: if that's what this is, save it as a skill too before you finish.]"
+    : /\b(python3?|bash|sh|node|bun)\s+\S*\/tmp\/\S+\.(py|sh|js|ts)\b/.test(command)
+      ? "[A script in tmp isn't a skill yet. If you've done this job before or it will come again, save it as a skill, with the script in it, before you finish.]"
+      : nth === 1
+        ? "[Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
+        : null;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
@@ -309,7 +325,7 @@ export async function foldIdleChats() {
 
 // What the main chat is. Never changes, so it stays in the provider's cache; the person's other chats lately
 // (otherChats) change, so they go in the context notes on their messages (contextNote).
-const mainChatNote = (ctx: Ctx) =>
+export const mainChatNote = (ctx: Pick<Ctx, "userName">) =>
   [
     `## This is ${ctx.userName}'s main chat with you`,
     "The same conversation in the web app and on their phone (Telegram). What you did on your own (check-ins, tasks, automations) is posted here, with a link to where it was done: open that chat (`emplio history show <chat>`) when they ask about it.",
@@ -409,6 +425,31 @@ const closeToolCalls = (message: UIMessage): UIMessage => ({
   ),
 });
 
+// The bash tool as the model sees it (the evals offer the same one, without running anything)
+export const BASH_DESCRIPTION =
+  "Run a bash command in this chat's own Linux computer (python, node, curl), starting in /work. " +
+  "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
+  "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
+  "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +
+  "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
+  "Commands time out after 120s: for anything long-running (servers, watchers, big runs) set background: true instead of using & or nohup yourself.";
+export const bashInput = z.object({
+  description: commandLabel.describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
+  command: z.string().describe("The bash command or script to run"),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      "Run detached for long runs or servers. Returns at once with a pid and a log file; " +
+        "check later with tail on the log, stop with kill -- -<pid>.",
+    ),
+  step: z
+    .number()
+    .int()
+    .optional()
+    .describe("When there's a checklist (emplio plan): the number of the step this command works on. The person's checklist moves to it, ticking off the one before."),
+});
+
 // Who Emplio is in this chat and how it talks: the top of its prompt (jobs share it, jobs.ts).
 export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">, automation?: string): string[] {
   const who = `${ctx.userName} (${ctx.role})`;
@@ -448,6 +489,41 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
   ];
 }
 
+// Emplio's shared instructions as one text, from pieces already read. The evals (backend/evals/emplio.ts) build
+// theirs with this too, so they check the wording the app sends.
+export const emplioPrompt = (p: { rules: string[]; computer: string; team: string[]; connected: string; business: string; userName: string; personal: string; skills: string[]; visual?: boolean }) =>
+  [
+    ...p.rules,
+    "",
+    p.computer,
+    "",
+    MANAGER_PROMPT,
+    "",
+    "## Team",
+    ...p.team,
+    "",
+    "## Connected now (emplio apps list for details)",
+    p.connected,
+    "",
+    "## This business's standing instructions (company/AGENT.md)",
+    p.business,
+    "",
+    `## About ${p.userName} (me/profile.md and me/preferences.md)`,
+    p.personal,
+    "",
+    "## Skills (read the matching SKILL.md before you start)",
+    ...p.skills,
+    "",
+    // the generated OpenUI prompt demands UI for every reply; this overrides it (it comes later)
+    ...(p.visual
+      ? [
+          "Override of the openui-lang instructions above: reply in plain Markdown by default.",
+          "Only answer in openui-lang (starting with `root = Card(...)`) when the request clearly benefits from visual UI, such as comparisons, data, charts, step-by-step plans, forms or choices to click.",
+          "Greetings, quick answers, explanations, writing and drafting stay plain Markdown. Never mix the two in one reply.",
+        ]
+      : []),
+  ].join("\n");
+
 const textOf = (message: UIMessage) =>
   message.parts.map((p) => (p.type === "text" ? p.text : "")).join(" ").trim();
 
@@ -478,21 +554,6 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
   }
 }
 
-// A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
-// to tap. Kept cheap three ways: the small title model, one answer per reply kept here, and a prompt that only
-// grows at its end (fixed instructions, then the chat as it was) so the provider's prompt cache covers everything
-// but the newest turn.
-const NEXT_STEP_RULES = [
-  "After each reply from an AI employee, you write a small card that lets the person move the work forward with one tap.",
-  'Reply with JSON only, no code fence: {"summary": "...", "question": "...", "buttons": ["...", "..."]}',
-  "summary: one plain sentence, under 25 words, on what was just said or done and where things now stand. Use the whole chat, so it's useful even when the last reply is short. Don't copy the reply's wording. Say what isn't done yet if that matters.",
-  "question: the one short question, under 15 words, that most moves the work forward, from the AI employee to the person. If the last reply already asks something, ask that.",
-  'buttons: 2 or 3 answers to that question, 1 to 3 words each, in the person\'s voice. First the one that moves things forward ("Yes, send it"), then one that declines or waits ("Not yet").',
-  "Write in the language of the chat, in plain words a business owner uses. Only offer what the chat points to: no new facts, no work nobody talked about.",
-  `Only write a card when there's a real next step the person can decide. If the work is finished and nothing waits on them, or it was small talk, reply with exactly ${SILENT} and nothing else.`,
-].join("\n");
-const NEXT_STEP_ASK = `Write the card for the last reply: JSON only, or ${SILENT}.`;
-const HISTORY_LIMIT = 2000;
 // A command's result as Emplio reads it: without the Allow cards, which are for the person's screen. To Emplio an
 // allowed action simply ran, and a refused one says so in its output; a card left in read as one still waiting.
 export const withoutCards = (output: unknown) => {
@@ -501,22 +562,10 @@ export const withoutCards = (output: unknown) => {
   return rest;
 };
 
-const nextStepShape = z.object({
-  summary: z.string().trim().min(1).max(300),
-  question: z.string().trim().min(1).max(200),
-  buttons: z.array(z.string().trim().min(1).max(40)).min(2).max(3),
-});
+// A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
+// to tap. The writer itself is next-step.ts; here is when a card is wanted, and one answer per reply kept.
 // ponytail: in memory, by the reply it follows; lost on restart, which only means one more cheap call
 const nextSteps = new Map<string, NextStep | null>();
-
-// anything but a well-formed card (including SILENT) is no card
-export function parseNextStep(text: string): NextStep | null {
-  try {
-    return nextStepShape.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
-  } catch {
-    return null;
-  }
-}
 
 async function lastTurns(conversationId: string) {
   return (await loadMessages(conversationId)).filter((m) => m.role === "user" || m.role === "assistant");
@@ -526,29 +575,16 @@ export async function nextStep(bill: Bill & { conversationId: string }, peek: bo
   const all = await lastTurns(bill.conversationId);
   const last = all.at(-1);
   if (last?.role !== "assistant") return null;
+  // only once everything is done and Emplio waits on the person: the reply after the agents' reports gets the card
+  if (await stillWorking(bill.conversationId)) return null;
   if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
   // it already put a question or button in the chat that's waiting on them: a second one would compete with it
   if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;
   // so would an Allow card still waiting for their tap
   if (await waitingIn(bill.conversationId)) return null;
-  // older turns are dropped 40 at a time, not one per reply, so the start of the prompt stays the same
-  const kept = all.slice(all.length <= 80 ? 0 : Math.floor((all.length - 40) / 40) * 40);
-  const history: ModelMessage[] = kept.flatMap((m) => {
-    const text = textOf(m).slice(0, HISTORY_LIMIT);
-    return text ? [{ role: m.role as "user" | "assistant", content: text }] : [];
-  });
-  // a long last reply goes in whole here, at the end, so the chat before it still matches what's cached
-  const reply = textOf(last);
-  const ask = reply.length > HISTORY_LIMIT ? `${NEXT_STEP_ASK}\n\nThe last reply in full:\n${reply}` : NEXT_STEP_ASK;
   try {
-    const { text } = await generateText({
-      model: model({ openrouterKey: "" }, TITLE_MODEL, bill),
-      providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: { effort: "low" } } },
-      system: NEXT_STEP_RULES,
-      messages: [...history, { role: "user", content: ask }],
-      maxOutputTokens: 400,
-    });
-    const card = parseNextStep(text);
+    const turns = all.map((m) => ({ role: m.role as "user" | "assistant", text: textOf(m) }));
+    const { card } = await writeNextStep(turns, model({ openrouterKey: "" }, NEXT_STEP_MODEL, bill));
     nextSteps.set(last.id, card);
     if (nextSteps.size > 2000) nextSteps.delete(nextSteps.keys().next().value!);
     return card;
@@ -771,50 +807,30 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       role: "system",
       // its own cache mark too, so jobs (same prompt, their own messages) read it from the cache
       providerOptions: { openrouter: { cacheControl: cache } },
-      content: [
-        ...agentRules(ctx, automation),
-        "",
-        sandboxPrompt(session),
-        "",
-        MANAGER_PROMPT,
-        "",
-        "## Team",
-        ...(await listTeam(ctx.workspaceId)).map((m) => `- ${m.name ?? "(name not set)"} <${m.email}>, ${m.role}`),
-        "",
-        "## Connected now (emplio apps list for details)",
-        await connectedNow(ctx).catch(() => "(unavailable right now; emplio apps list)"),
-        "",
-        "## This business's standing instructions (company/AGENT.md)",
+      content: emplioPrompt({
+        rules: agentRules(ctx, automation),
+        computer: sandboxPrompt(session),
+        team: (await listTeam(ctx.workspaceId)).map((m) => `- ${m.name ?? "(name not set)"} <${m.email}>, ${m.role}`),
+        connected: await connectedNow(ctx).catch(() => "(unavailable right now; emplio apps list)"),
         // ponytail: read from Gitea on every message; cache per workspace if it shows up in latency
-        await businessInstructions(session).catch((error) => {
+        business: await businessInstructions(session).catch((error) => {
           log.error(error, "reading AGENT.md failed");
           return "(unavailable right now)";
         }),
-        "",
-        `## About ${ctx.userName} (me/profile.md and me/preferences.md)`,
-        await personalFiles(session).catch((error) => {
+        userName: ctx.userName,
+        personal: await personalFiles(session).catch((error) => {
           log.error(error, "reading profile failed");
           return "(unavailable right now)";
         }),
-        "",
-        "## Skills (read the matching SKILL.md before you start)",
-        ...(await skillsList(session).then(
+        skills: await skillsList(session).then(
           (list) => (list.length ? list : ["(none yet)"]),
           (error) => {
             log.error(error, "listing skills failed");
             return ["(unavailable right now; look in company/skills/ and me/skills/)"];
           },
-        )),
-        "",
-        // the generated OpenUI prompt demands UI for every reply; this overrides it (it comes later)
-        ...(visual
-          ? [
-              "Override of the openui-lang instructions above: reply in plain Markdown by default.",
-              "Only answer in openui-lang (starting with `root = Card(...)`) when the request clearly benefits from visual UI, such as comparisons, data, charts, step-by-step plans, forms or choices to click.",
-              "Greetings, quick answers, explanations, writing and drafting stay plain Markdown. Never mix the two in one reply.",
-            ]
-          : []),
-      ].join("\n"),
+        ),
+        visual,
+      }),
     },
   ];
   prompts.delete(id);
@@ -879,34 +895,13 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       return null;
     }
     if (!nth || !remindAt(nth)) return null;
-    return `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
+    return longRunNote(nth, !!automation);
   };
   // Emplio's bash, and its threads' (jobs.ts): `emplio hand` acts for whoever runs it
   // `guard`: this run's check for commands that keep failing (stuck.ts)
   const makeBash = (caller: Caller, guard: FailureGuard = failureGuard()) => tool({
-    description:
-      "Run a bash command in this chat's own Linux computer (python, node, curl), starting in /work. " +
-      "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
-      "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
-      "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +
-      "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
-      "Commands time out after 120s: for anything long-running (servers, watchers, big runs) set background: true instead of using & or nohup yourself.",
-    inputSchema: z.object({
-      description: commandLabel.describe("Write this first, before command: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the command, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
-      command: z.string().describe("The bash command or script to run"),
-      background: z
-        .boolean()
-        .optional()
-        .describe(
-          "Run detached for long runs or servers. Returns at once with a pid and a log file; " +
-            "check later with tail on the log, stop with kill -- -<pid>.",
-        ),
-      step: z
-        .number()
-        .int()
-        .optional()
-        .describe("When there's a checklist (emplio plan): the number of the step this command works on. The person's checklist moves to it, ticking off the one before."),
-    }),
+    description: BASH_DESCRIPTION,
+    inputSchema: bashInput,
     // A generator so a command waiting on the person's OK for an app action (approvals.ts) can show the
     // card while it waits: each yield before the last is an in-progress output the chat draws.
     async *execute({ description, command, background, step }, { abortSignal }) {
@@ -930,7 +925,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {
-        const note = [guard.check(command, result), ...(caller.jobId ? [] : [longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
+        const note = [guard.check(command, result), ...(caller.jobId ? [] : [!automation && skillNote(nth, command), longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
         return note ? { ...result, output: `${String(result.output ?? "")}\n\n${note}` } : result;
       };
       // the checklist moves as the command starts, so they see where the job is while it runs

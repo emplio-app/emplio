@@ -56,7 +56,8 @@ export function newPart<M extends { role: string; createdAt: Date }>(rows: M[], 
   return { before: rows.slice(Math.max(0, start - CONTEXT), start), fresh: rows.slice(start) };
 }
 
-const PROMPT = (name: string, role: string) => `You read part of a chat between ${name} (${role}) and the AI employee of a business, for the business's background agent: the one that keeps the company moving, learns from every chat and improves the AI employee. You only read and report. Never suggest what to do, never judge, never repeat the chat.
+// exported for the evals (backend/evals/reader)
+export const PROMPT = (name: string, role: string) => `You read part of a chat between ${name} (${role}) and the AI employee of a business, for the business's background agent: the one that keeps the company moving, learns from every chat and improves the AI employee. You only read and report. Never suggest what to do, never judge, never repeat the chat.
 
 Report only what's in the new part, and only what the background agent would want:
 - Facts about the business ${name} stated (clients, suppliers, prices, decisions, who does what).
