@@ -97,7 +97,7 @@ export function TeamPage() {
           )}
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-10 px-4 py-6 sm:py-8">
           <div className="-mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
             <nav className="flex flex-wrap items-center gap-1" aria-label="Show">

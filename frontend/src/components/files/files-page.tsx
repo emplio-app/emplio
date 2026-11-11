@@ -79,7 +79,7 @@ export function FilesPage() {
         <MemoryTabs />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 px-4 py-4 sm:py-6">
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -152,7 +152,7 @@ export function FilesPage() {
                       <span className="grid min-w-0 gap-0.5">
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="truncate text-sm font-medium">{f.name}</span>
-                          {f.version > 1 && <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">v{f.version}</span>}
+                          {f.version > 1 && <span className="shrink-0 rounded bg-muted px-1 text-[0.65rem] text-muted-foreground">v{f.version}</span>}
                           {f.shareUrl && <UsersIcon className="size-3 shrink-0 text-muted-foreground" aria-label="Shared" />}
                         </span>
                         <span className="truncate text-xs text-muted-foreground">

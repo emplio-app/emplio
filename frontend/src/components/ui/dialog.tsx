@@ -3,6 +3,9 @@
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { cn } from "cn"
+import { animate } from "motion"
+
+import { haptic } from "@/lib/haptics"
 
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
@@ -40,29 +43,83 @@ function DialogOverlay({
 }
 
 // On phones a dialog is a bottom sheet (globals.css): drag this bar down to close it. Only the bar, so scrolling
-// the sheet's content is never mistaken for a drag.
+// the sheet's content is never mistaken for a drag. The sheet stays under the finger; let go, and it carries on
+// at the finger's speed to where a throw that fast would land (not to whichever end was nearer); pulled up past
+// its place it resists more the further it goes; and it can be caught again mid-flight.
+const rubberband = (over: number, limit = 64) => (over * limit * 0.55) / (limit + 0.55 * over)
+// where something let go at this speed (px/s) comes to rest: the slowing-down a scrolled list has
+const project = (velocity: number, rate = 0.998) => ((velocity / 1000) * rate) / (1 - rate)
+
 export function SheetGrabber() {
-  const startY = React.useRef(0)
-  const sheet = (e: React.TouchEvent) => e.currentTarget.parentElement!
+  const drag = React.useRef<{ start: number; from: number; y: number; trail: [time: number, y: number][] } | null>(null)
+  const flight = React.useRef<{ stop(): void } | null>(null)
+
+  const dimOf = (el: HTMLElement) => el.parentElement?.querySelector<HTMLElement>(':scope > [data-slot$="-overlay"]')
+  const place = (el: HTMLElement, y: number) => {
+    el.style.transform = `translateY(${y}px)`
+    // the dimming behind lifts as the sheet leaves
+    const dim = dimOf(el)
+    if (dim) dim.style.opacity = String(1 - Math.min(1, Math.max(0, y / el.offsetHeight)))
+  }
+
+  const release = (e: React.PointerEvent, cancelled = false) => {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    const el = e.currentTarget.parentElement!
+    const [t0, y0] = d.trail[0]!
+    const [t1, y1] = d.trail.at(-1)!
+    // held still before letting go: no speed to carry on with
+    const still = cancelled || t1 === t0 || e.timeStamp - t1 > 100
+    // no faster than a hand flicks: one odd sample must not fling the sheet off its place
+    const velocity = still ? 0 : Math.max(-3000, Math.min(3000, ((y1 - y0) / (t1 - t0)) * 1000))
+    // the way it was moving decides: thrown back up it stays, otherwise it goes where it would land
+    const close = !cancelled && velocity > -50 && d.y + project(velocity) > el.offsetHeight / 2
+    const to = close ? el.offsetHeight : 0
+    const done = () => {
+      if (close) return el.querySelector<HTMLElement>(':scope > [data-slot$="-close"]')?.click()
+      el.style.transform = ""
+      const dim = dimOf(el)
+      if (dim) dim.style.opacity = ""
+    }
+    if (close) haptic()
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return place(el, to), done()
+    flight.current = animate(d.y, to, {
+      type: "spring",
+      velocity,
+      visualDuration: 0.3,
+      // a little bounce only when it was thrown back into place
+      bounce: !close && Math.abs(velocity) > 300 ? 0.2 : 0,
+      onUpdate: (y) => place(el, y),
+      onComplete: done,
+    })
+  }
+
   return (
     <div
       aria-hidden
       className="absolute inset-x-16 top-0 z-10 h-6 touch-none sm:hidden"
-      onTouchStart={(e) => {
-        startY.current = e.touches[0]!.clientY
-        sheet(e).style.transition = "none"
+      onPointerDown={(e) => {
+        const el = e.currentTarget.parentElement!
+        e.currentTarget.setPointerCapture(e.pointerId)
+        flight.current?.stop()
+        // from where it is on screen right now: also when caught mid-flight, or while still sliding in
+        const from = new DOMMatrixReadOnly(getComputedStyle(el).transform).m42
+        el.dataset.dragged = ""
+        place(el, from)
+        drag.current = { start: e.clientY, from, y: from, trail: [[e.timeStamp, from]] }
       }}
-      onTouchMove={(e) => {
-        const moved = Math.max(0, e.touches[0]!.clientY - startY.current)
-        sheet(e).style.transform = `translateY(${moved}px)`
+      onPointerMove={(e) => {
+        const d = drag.current
+        if (!d) return
+        const raw = d.from + e.clientY - d.start
+        d.y = raw < 0 ? -rubberband(-raw) : raw
+        place(e.currentTarget.parentElement!, d.y)
+        d.trail.push([e.timeStamp, d.y])
+        while (d.trail.length > 2 && e.timeStamp - d.trail[0]![0] > 100) d.trail.shift()
       }}
-      onTouchEnd={(e) => {
-        const el = sheet(e)
-        const moved = e.changedTouches[0]!.clientY - startY.current
-        el.style.transition = "transform 220ms cubic-bezier(0.32, 0.72, 0, 1)"
-        if (moved > 80) el.querySelector<HTMLElement>(':scope > [data-slot$="-close"]')?.click()
-        else el.style.transform = ""
-      }}
+      onPointerUp={(e) => release(e)}
+      onPointerCancel={(e) => release(e, true)}
     >
       <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-foreground/20" />
     </div>

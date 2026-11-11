@@ -483,7 +483,7 @@ export function BrowserPanel() {
           <div onPointerDown={nudge} onWheel={nudge} className="absolute inset-2 cursor-default lg:inset-3">
             <div
               role="status"
-              className={`absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border bg-popover/95 py-1.5 pr-1.5 pl-4 text-sm text-popover-foreground shadow-lg backdrop-blur transition-all duration-200 ${
+              className={`absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border bg-popover/95 py-1.5 pr-1.5 pl-4 text-sm text-popover-foreground shadow-lg backdrop-blur transition duration-200 ${
                 nudged ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-90"
               }`}
             >

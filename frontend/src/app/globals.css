@@ -58,6 +58,19 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Letters sit closer as text grows and a touch wider when it is small: one spacing is wrong at some size.
+     A tracking-* class still wins. */
+  --text-xs--letter-spacing: 0.01em;
+  --text-lg--letter-spacing: -0.01em;
+  --text-xl--letter-spacing: -0.015em;
+  --text-2xl--letter-spacing: -0.02em;
+  --text-3xl--letter-spacing: -0.025em;
+  --text-4xl--letter-spacing: -0.03em;
+  --text-5xl--letter-spacing: -0.035em;
+  --text-6xl--letter-spacing: -0.04em;
+  --text-7xl--letter-spacing: -0.04em;
+  --text-8xl--letter-spacing: -0.04em;
+  --text-9xl--letter-spacing: -0.04em;
 }
 
 /* Warm neutrals + one brand color (forest green). */
@@ -140,6 +153,14 @@
   --sidebar-ring: oklch(0.64 0.11 158);
 }
 
+/* A press answers right away, on the way down, and lets go gently. */
+.group\/button:active:not(:disabled),
+[data-slot="input-group-button"]:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 100ms;
+  transition-timing-function: ease-out;
+}
+
 /* Phones zoom the page into any text field under 16px; outside the layers so no utility undercuts it */
 @media (pointer: coarse) {
   input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
@@ -203,7 +224,7 @@
     height: 3rem;
     font-size: 1.125rem;
   }
-  /* A press answers the finger right away, and lets go gently. */
+  /* a finger covers more of the button than a cursor: a little more give, a little sooner */
   .group\/button:active:not(:disabled),
   [data-slot="input-group-button"]:active:not(:disabled) {
     transform: scale(0.96);
@@ -236,14 +257,56 @@ input:is([type="date"], [type="datetime-local"], [type="time"], [type="month"], 
 /* --- Phone screens: the way sheets and pages move in a phone's own apps. --- */
 
 /* The tab bar makes way while typing, leaving the screen to the keyboard and the text */
+body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) {
+  --tabs-h: 0px;
+}
 body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) .bottom-tabs {
   display: none;
+}
+/* The tab bar floats over the page (bottom-tabs.tsx). A page ends above it, unless its lists are marked
+   .under-tabs: those run on underneath the glass and get the room at their own end instead. */
+@media (max-width: 767.98px) {
+  :root {
+    --tabs-h: calc(3.5rem + env(safe-area-inset-bottom));
+  }
+  .page-in:not(:has(.under-tabs)),
+  .under-tabs {
+    padding-bottom: var(--tabs-h);
+  }
+}
+
+/* Frosted glass for bars that float over content: what scrolls underneath shows through, blurred. Solid for
+   people who asked their device for less see-through or more contrast, and where blur isn't supported. */
+.material {
+  background-color: var(--background);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .material {
+    background-color: color-mix(in oklch, var(--background) 72%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-color: color-mix(in oklch, var(--foreground) 8%, transparent);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .material {
+    background-color: var(--background);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-color: var(--border);
+  }
+}
+@media (prefers-contrast: more) {
+  .material {
+    border-color: var(--foreground);
+  }
 }
 
 /* The side menu follows the finger (sidebar.tsx); while dragged it goes where the finger is, with no easing. */
 .phone-drawer {
   transform: translateX(var(--drawer-swipe-movement-x, 0px));
-  transition: transform 340ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* let go mid-swipe, it finishes sooner the faster the finger was going (--drawer-swipe-strength, 0.1 to 1) */
+  transition: transform calc(var(--drawer-swipe-strength, 1) * 340ms) cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
 }
 .phone-drawer[data-swiping] {
@@ -297,6 +360,13 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
     border-radius: 1.25rem 1.25rem 0 0;
     animation: sheet-in 340ms cubic-bezier(0.32, 0.72, 0, 1);
+    /* more of the sheet below the screen's edge, for when it is pulled up past its place (dialog.tsx) */
+    box-shadow: 0 4rem 0 var(--popover);
+  }
+  /* once a finger has taken it, the finger moves it (dialog.tsx SheetGrabber), not the slide-in */
+  [data-slot="dialog-content"][data-dragged]:not([data-closed]),
+  [data-slot="sheet-content"][data-dragged]:not([data-closed]) {
+    animation: none;
   }
   /* a side panel (a task's details) too: none of its own sliding or fading */
   [data-slot="sheet-content"] {
@@ -306,7 +376,6 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     border: 0;
     opacity: 1;
     transition: none;
-    box-shadow: none;
   }
   [data-slot="dialog-content"][data-closed],
   [data-slot="sheet-content"][data-closed] {
@@ -343,16 +412,57 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     transform: translate(var(--page-x), var(--page-y));
   }
 }
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+/* For people who asked their device for less motion: nothing slides, grows or bounces, but things still fade,
+   so a change is still seen. Outside the layers, so it wins over the classes that set the movement. */
 @media (prefers-reduced-motion: reduce) {
-  .phone-drawer,
-  .phone-drawer-backdrop,
-  .page-in > *,
-  [data-slot="sheet-content"],
-  [data-slot="dialog-content"],
-  [data-slot="dialog-content"][data-closed],
-  [data-slot="sheet-content"][data-closed] {
+  /* menus, dialogs and tooltips (tw-animate-css) come and go as a fade only */
+  *,
+  ::before,
+  ::after {
+    --tw-enter-scale: 1;
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-scale: 1;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+  }
+  .animate-ping,
+  .animate-bounce {
     animation: none;
+  }
+  /* a new page fades in where it is */
+  .page-in {
+    --page-x: 0px;
+    --page-y: 0px;
+  }
+  /* the side menu still follows a finger, but doesn't slide by itself */
+  .phone-drawer {
     transition: none;
+  }
+  /* a side panel fades in where it is */
+  [data-slot="sheet-content"]:is([data-starting-style], [data-ending-style]) {
+    --tw-translate-x: 0;
+    --tw-translate-y: 0;
+  }
+  @media (max-width: 639.98px) {
+    [data-slot="sheet-content"],
+    [data-slot="dialog-content"] {
+      animation: fade-in 200ms ease;
+    }
+    [data-slot="dialog-content"][data-closed],
+    [data-slot="sheet-content"][data-closed] {
+      animation: fade-out 200ms ease forwards;
+    }
   }
 }
 
@@ -397,8 +507,10 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
        The message list keeps its own bounce. */
     overscroll-behavior: none;
   }
+  /* a heading with no size class; with one, the size brings its own spacing (@theme above) */
   h1, h2, h3, h4, h5, h6 {
-    @apply font-heading tracking-tight;
+    @apply font-heading;
+    letter-spacing: -0.02em;
   }
 }
 /* landing page: smooth anchor jumps + logo marquee */

@@ -73,7 +73,7 @@ function Person({ t, short }: { t: Task; short?: boolean }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={t.assigneeName}>
       {t.assigneeId ? (
-        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-primary/10 text-[0.65rem] font-semibold text-primary">
           {initials(t.assigneeName)}
         </span>
       ) : (
@@ -106,7 +106,7 @@ function StatusPill({ status }: { status: TaskStatus }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
         status === "doing" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
         status === "waiting" && "bg-amber-500/15 text-amber-800 dark:text-amber-300",
         (status === "done" || status === "cancelled") && "bg-muted text-muted-foreground",
@@ -253,7 +253,7 @@ export function TasksPage() {
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-4 px-4 py-4 sm:gap-6 sm:py-6">
           <QuickAdd people={people} />
 

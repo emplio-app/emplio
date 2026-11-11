@@ -90,7 +90,7 @@ export function MentionIcon({ m, className }: { m: Pick<Mention, "kind" | "label
   const box = cn("flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-3.5", className);
   if (m.kind === "app") return <AppLogo src={m.logo} className={cn("size-7", className)} />;
   if (m.kind === "person")
-    return <span className={cn(box, "rounded-full text-[11px] font-medium")}>{m.label.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>;
+    return <span className={cn(box, "rounded-full text-[0.65rem] font-medium")}>{m.label.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>;
   const Icon = { record: Building2Icon, task: ClipboardListIcon, file: FileTextIcon, chat: MessageSquareIcon, table: TableIcon }[m.kind];
   return (
     <span className={box}>
@@ -177,7 +177,7 @@ export function useMentionMenu(input: string, setInput: (text: string) => void) 
       {matches.map((m, i) => (
         <div key={`${m.kind}:${m.id}`}>
           {m.kind !== matches[i - 1]?.kind && (
-            <div className="flex items-center justify-between px-2.5 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <div className="flex items-center justify-between px-2.5 pt-2 pb-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
               {GROUP[m.kind]}
             </div>
           )}
