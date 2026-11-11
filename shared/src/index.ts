@@ -447,6 +447,7 @@ export const MODEL_PROVIDERS = [
   { key: "x-ai", label: "xAI (Grok)" },
   { key: "qwen", label: "Alibaba (Qwen)" },
   { key: "z-ai", label: "Zhipu (GLM)" },
+  { key: "deepseek", label: "DeepSeek" },
   { key: "mistralai", label: "Mistral" },
   { key: "meta-llama", label: "Meta (Llama)" },
 ] as const;
