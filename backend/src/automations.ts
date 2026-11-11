@@ -333,7 +333,7 @@ export async function askToAllow(s: Session, a: Automation) {
   });
   if (refused) return `${refused}\n(Until it's allowed, runs can't do: ${list}. It can also be allowed in Automations.)`;
   await allow();
-  return `Allowed: its runs can do ${list} without asking.`;
+  return `${s.user.name} allowed it: its runs can do ${list} without asking. Nothing more is needed from them.`;
 }
 
 export async function listAutomationRuns(workspaceId: string, name?: string, limit = 50) {
@@ -721,9 +721,9 @@ Setting one up so it runs well:
   Narrow with the trigger's own settings (a Gmail search query) where it has them; otherwise put the condition in the
   prompt ("if it isn't from acme.com, stop").
 - It runs as whoever saves it, with their apps: connect any it needs first. List under actions: every app action its runs
-  take that sends, creates, changes or deletes something (reading needs no listing). Saving it shows the person one card
-  to allow them; runs may then do exactly those and nothing else that changes things. Say in a few words what the card
-  is for. Read the reply to add: it says if something stops it from running.
+  take that sends, creates, changes or deletes something (reading needs no listing). Saving it asks the person to allow
+  them and waits for their answer; runs may then do exactly those and nothing else that changes things. Read the
+  reply to add: it says whether they allowed it, and if something stops it from running.
 - Write the prompt for a run nobody watches: what to do, and what to leave for a person to decide. Look up each app action
   now (emplio apps info <action>) and write the exact commands into the prompt, inputs filled from the event's fields,
   e.g. emplio apps run todoist.add_task '{"content": "Reply to <sender>: <subject>"}', so runs go straight to work.

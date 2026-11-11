@@ -1,4 +1,4 @@
-import type { PlanStep, JobInfo } from "@emplio/shared";
+import type { Approval, PlanStep, JobInfo } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { type AnyPgColumn, bigint, boolean, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -409,6 +409,28 @@ export const dbQueries = pgTable(
 
 // Threads Emplio hands work to (`emplio hand`, jobs.ts), the hidden record of each. One row per thread: its brief, what
 // it's doing, its report, and its whole conversation, so `emplio hand <id>` can send it a message or a follow-up.
+// An OK asked of the person before an action sends or changes something (approvals.ts): the card, their answer
+// and how the action went. The reply that asked holds the card as it was; what happened to it is only here.
+export const approvals = pgTable(
+  "approvals",
+  {
+    // the card's id
+    id: uuid().primaryKey(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid().notNull().references(() => users.id, { onDelete: "cascade" }),
+    // the chat whose command asked
+    conversationId: uuid().notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    // the chat the person is in: the one that started the job asking, or the same chat
+    showIn: uuid().notNull().references(() => conversations.id, { onDelete: "cascade" }),
+    card: jsonb().$type<Omit<Approval, "decision" | "result">>().notNull(),
+    // null: waiting for them
+    decision: text({ enum: ["once", "always", "deny", "timeout", "skipped"] }),
+    result: jsonb().$type<NonNullable<Approval["result"]>>(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index().on(t.showIn, t.createdAt), index().on(t.conversationId, t.createdAt)],
+);
+
 export const jobs = pgTable(
   "jobs",
   {

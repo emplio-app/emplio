@@ -1,14 +1,15 @@
 "use client";
 
 import type { Approval } from "@emplio/shared";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, ChevronRightIcon, PaperclipIcon, XIcon } from "lucide-react";
-import { useContext, useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { ReplyContext } from "@/components/chat/ask-card";
 import { AppLogo } from "@/components/chat/connect-card";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
-import { api } from "@/lib/api";
+import { api, approvalsQueryKey } from "@/lib/api";
 
 const DONE: Record<NonNullable<Approval["decision"]>, string> = {
   once: "Allowed",
@@ -36,27 +37,17 @@ const fields = (input: unknown) =>
     return [];
   });
 
-// An app action the agent wants to run that sends or changes something. It can be answered until it expires
-// (2 hours, approvals.ts), then it folds up; an old card without that time counts as expired once its reply ended.
-export function ApprovalCard({ approval: card, waiting }: { approval: Approval; waiting: boolean }) {
-  const gone = card.expiresAt ? Date.parse(card.expiresAt) < Date.now() : !waiting;
-  // a message from them after this reply: they wrote instead of answering (the server skipped it too)
-  const repliedAfter = useContext(ReplyContext) !== undefined;
-  const approval = card.decision ? card : repliedAfter ? { ...card, decision: "skipped" as const } : gone ? { ...card, decision: "timeout" as const } : card;
-  const expired = approval.decision === "timeout" || approval.decision === "skipped";
+// This chat's cards as the server has them now (GET /conversations/:id/approvals), by id: each card's answer and
+// how its action went. A reply only holds the card as it was asked.
+export const ApprovalsContext = createContext<Map<string, Approval>>(new Map());
+export const stillWaiting = (a: Approval) => !a.decision && (!a.expiresAt || Date.parse(a.expiresAt) > Date.now());
+
+function Fields({ approval }: { approval: Approval }) {
   const [details, setDetails] = useState(false);
-  const answer = useMutation({ mutationFn: (decision: "once" | "always" | "deny") => api<{ result?: string }>(`/approvals/${approval.id}`, { decision }) });
   const shown = fields(approval.input);
   return (
-    <div className="flex w-full max-w-md flex-col gap-3 rounded-xl border bg-card p-3">
-      <div className="flex items-center gap-3">
-        <AppLogo src={approval.logo} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{approval.title}</div>
-          <div className="truncate text-xs text-muted-foreground">{approval.appName}{approval.decision ? "" : " · wants your OK"}</div>
-        </div>
-      </div>
-      {!expired && !!shown.length && (
+    <>
+      {!!shown.length && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           {shown.slice(0, 8).map(({ k, v, file }) => (
             <div key={k} className="contents">
@@ -69,49 +60,101 @@ export function ApprovalCard({ approval: card, waiting }: { approval: Approval; 
           ))}
         </dl>
       )}
-      {!expired && (
-        <>
-          <button
-            type="button"
-            onClick={() => setDetails((d) => !d)}
-            aria-expanded={details}
-            className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ChevronRightIcon className={`size-3 transition-transform ${details ? "rotate-90" : ""}`} /> Details
-          </button>
-          {details && (
-            <pre className="max-h-60 overflow-auto rounded-lg bg-muted p-2 text-xs whitespace-pre-wrap break-words">
-              {JSON.stringify(approval.input, null, 2)}
-            </pre>
-          )}
-        </>
+      <button
+        type="button"
+        onClick={() => setDetails((d) => !d)}
+        aria-expanded={details}
+        className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRightIcon className={`size-3 transition-transform ${details ? "rotate-90" : ""}`} /> Details
+      </button>
+      {details && (
+        <pre className="max-h-60 overflow-auto rounded-lg bg-muted p-2 text-xs whitespace-pre-wrap break-words">
+          {JSON.stringify(approval.input, null, 2)}
+        </pre>
       )}
-      {answer.data?.result ? (
-        // answered after the agent moved on: done by the server, this is how it went
-        <div className="text-xs font-medium text-primary">{answer.data.result}</div>
-      ) : approval.decision ? (
-        <div className={`flex items-center gap-1.5 text-xs font-medium ${approval.decision === "once" || approval.decision === "always" ? "text-primary" : "text-muted-foreground"}`}>
-          {approval.decision === "once" || approval.decision === "always" ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
-          {DONE[approval.decision]}
+    </>
+  );
+}
+
+// An app action Emplio wants to run that sends or changes something, waiting for the person's tap. It sits just
+// above the chat box (chat-view.tsx), not in the scroll, so it's in view whatever was written after it.
+export function ApprovalAsk({ approval }: { approval: Approval }) {
+  const queryClient = useQueryClient();
+  const answer = useMutation({
+    mutationFn: (decision: "once" | "always" | "deny") => api(`/approvals/${approval.id}`, { decision }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: approvalsQueryKey }),
+  });
+  return (
+    <Card size="sm" className="gap-3 px-3 shadow-lg animate-in fade-in duration-200">
+      <div className="flex items-center gap-3">
+        <AppLogo src={approval.logo} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{approval.title}</div>
+          <div className="truncate text-xs text-muted-foreground">{approval.appName} · wants your OK</div>
         </div>
-      ) : answer.isSuccess ? (
+      </div>
+      <Fields approval={approval} />
+      {answer.isPending || answer.isSuccess ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Spinner className="size-3" /> {answer.variables === "deny" ? "Denying…" : "Running…"}
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={answer.isPending} onClick={() => answer.mutate("once")}>
+          <Button size="sm" onClick={() => answer.mutate("once")}>
             Allow
           </Button>
           {!approval.oneOff && (
-            <Button size="sm" variant="outline" disabled={answer.isPending} onClick={() => answer.mutate("always")}>
+            <Button size="sm" variant="outline" onClick={() => answer.mutate("always")}>
               Always allow
             </Button>
           )}
-          <Button size="sm" variant="ghost" disabled={answer.isPending} onClick={() => answer.mutate("deny")}>
+          <Button size="sm" variant="ghost" onClick={() => answer.mutate("deny")}>
             Deny
           </Button>
           {answer.error && <span className="w-full text-xs text-destructive">{answer.error.message}</span>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// The same card where it was asked, in the reply: one row with how it was answered and how the action went; open,
+// what was sent. A card from before the server kept them has only what the reply saved: it counts as expired once
+// its time is up or its reply ended (`waiting`), and as skipped when they wrote a message after it.
+export function ApprovalCard({ approval: card, waiting }: { approval: Approval; waiting: boolean }) {
+  const kept = useContext(ApprovalsContext).get(card.id);
+  const repliedAfter = useContext(ReplyContext) !== undefined;
+  const [open, setOpen] = useState(false);
+  const now = kept ?? card;
+  const gone = now.expiresAt ? Date.parse(now.expiresAt) < Date.now() : !waiting;
+  const approval = now.decision ? now : !kept && repliedAfter ? { ...now, decision: "skipped" as const } : gone ? { ...now, decision: "timeout" as const } : now;
+  const allowed = approval.decision === "once" || approval.decision === "always";
+  const failed = allowed && approval.result?.ok === false;
+  return (
+    <div className="flex w-full max-w-md flex-col rounded-xl border bg-card text-sm">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left">
+        <AppLogo src={approval.logo} className="size-5" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{approval.title}</span>
+        <span className={`flex shrink-0 items-center gap-1 text-xs ${allowed && !failed ? "text-primary" : failed ? "text-destructive" : "text-muted-foreground"}`}>
+          {!approval.decision ? (
+            <>
+              <Spinner className="size-3" /> Waiting for your OK
+            </>
+          ) : (
+            <>
+              {allowed && !failed ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
+              {failed ? "Allowed, but it failed" : `${DONE[approval.decision]}${approval.result?.ok ? ", done" : ""}`}
+            </>
+          )}
+        </span>
+        <ChevronRightIcon className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-3 border-t px-3 py-2.5">
+          <div className="text-xs text-muted-foreground">{approval.appName}</div>
+          {failed && approval.result?.text && <div className="text-xs break-words text-destructive">{approval.result.text}</div>}
+          <Fields approval={approval} />
         </div>
       )}
     </div>

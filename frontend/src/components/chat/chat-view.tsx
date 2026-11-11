@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -50,6 +50,7 @@ import { ReplyContext } from "@/components/chat/ask-card";
 import { BrowserChip, BrowserPanel, BrowserProvider, useLiveBrowser } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
+import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { useMentionMenu } from "@/components/chat/mention-menu";
@@ -61,6 +62,7 @@ import { pausedNote, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
+  approvalsQueryKey,
   api,
   chatTransport,
   conversationsQueryKey,
@@ -513,6 +515,17 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     return () => void (current = false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on a reply finishing (and opening the chat), not as the queue changes
   }, [status, id]);
+  // This chat's Allow cards as the server has them (approvals.ts): the ones still waiting sit above the chat box,
+  // and each card in a reply reads its answer and outcome from here. Its live nudges refetch it (useLiveEvents).
+  const { data: cards } = useQuery({ queryKey: [...approvalsQueryKey, id], queryFn: () => api<Approval[]>(`/conversations/${id}/approvals`) });
+  const kept = useMemo(() => new Map((cards ?? []).map((a) => [a.id, a])), [cards]);
+  const asks = (cards ?? []).filter(stillWaiting);
+  // the room the cards took goes back when the last one is answered, so the reply isn't left with a gap under it
+  const hadAsks = useRef(false);
+  useEffect(() => {
+    if (hadAsks.current && !asks.length) setCardRoom(0);
+    hadAsks.current = !!asks.length;
+  }, [asks.length]);
   // the bubble shows the button's words; Emplio also gets the question, since it didn't write the card itself
   const answerNextStep = (button: string) => {
     sendText(`${CLICK_PREFIX}${button}\nForm values: ${JSON.stringify({ question: nextStep?.question })}`);
@@ -1028,6 +1041,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     <BrowserProvider value={browser}>
     <OpenFileProvider value={showFile}>
     <ChatSendContext value={sendLatest}>
+    <ApprovalsContext value={kept}>
       <div className="flex min-h-0 flex-1">
         <div className="relative flex h-full min-w-0 flex-1 flex-col" {...dropZone}>
           {dragging && (
@@ -1164,10 +1178,19 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     onSendNow={busy ? sendNow : undefined}
                   />
                 )}
-                {nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
-                  <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 pb-2">
-                    <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />
+                {asks.length ? (
+                  // waiting for their tap: here whatever they're typing or Emplio is doing, until answered
+                  <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 flex max-h-[60dvh] flex-col gap-2 overflow-y-auto pb-2">
+                    {asks.map((a) => (
+                      <ApprovalAsk key={a.id} approval={a} />
+                    ))}
                   </div>
+                ) : (
+                  nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
+                    <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 pb-2">
+                      <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />
+                    </div>
+                  )
                 )}
                 {onTelegram ? <TelegramOnly /> : composer}
               </div>
@@ -1177,6 +1200,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         <BrowserPanel />
         <FilePanel file={browser.open ? null : openFile} onClose={() => setOpenFile(null)} />
       </div>
+    </ApprovalsContext>
     </ChatSendContext>
     </OpenFileProvider>
     </BrowserProvider>
