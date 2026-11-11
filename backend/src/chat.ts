@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
-import { moveOn } from "./approvals";
+import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
 import { context, contextOf, type Ctx } from "./auth";
@@ -554,6 +554,14 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
   }
 }
 
+// A command's result as Emplio reads it: without the Allow cards, which are for the person's screen. To Emplio an
+// allowed action simply ran, and a refused one says so in its output; a card left in read as one still waiting.
+export const withoutCards = (output: unknown) => {
+  if (!output || typeof output !== "object" || !("approvals" in output)) return output;
+  const { approvals: _cards, ...rest } = output as { approvals?: unknown };
+  return rest;
+};
+
 // A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
 // to tap. The writer itself is next-step.ts; here is when a card is wanted, and one answer per reply kept.
 // ponytail: in memory, by the reply it follows; lost on restart, which only means one more cheap call
@@ -572,6 +580,8 @@ export async function nextStep(bill: Bill & { conversationId: string }, peek: bo
   if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
   // it already put a question or button in the chat that's waiting on them: a second one would compete with it
   if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;
+  // so would an Allow card still waiting for their tap
+  if (await waitingIn(bill.conversationId)) return null;
   try {
     const turns = all.map((m) => ({ role: m.role as "user" | "assistant", text: textOf(m) }));
     const { card } = await writeNextStep(turns, model({ openrouterKey: "" }, NEXT_STEP_MODEL, bill));
@@ -945,13 +955,16 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         if (!finished) yield { approvals: [...cards.values()], ...(started.size && { jobs: [...started] }) };
       }
       let result = judged(await done);
+      // on the cards it allowed: how it went
+      void outcome([...cards.values()], ctx.userId, result).catch(() => {});
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`emplio plan done\` before your answer. Stopping to ask them something: leave it open.]` };
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }) };
     },
     // files from `emplio view` go to the model as real images/PDFs, not as JSON
-    toModelOutput: async ({ output }) => {
+    toModelOutput: async ({ output: all }) => {
+      const output = withoutCards(all);
       const viewed = ((output as { viewed?: unknown }).viewed ?? []) as { url?: string; mediaType?: string; filename?: string }[];
       if (!viewed.some((f) => f.url)) return { type: "json", value: output as never };
       return {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ask, collectOut, commandEnded, commandStarted, EZ, findOut, MAX_COMMANDS, requestsTrailer, runEz, usesBrowser, withRequests, withRoom } from "./sandbox";
@@ -299,4 +299,58 @@ test("emplio hand and report read what's on stdin, and old emplio jobs points to
   const old = await run(`./emplio jobs start x <<'EOF'\nbrief\nEOF`);
   expect(old.args).toEqual([]);
   expect(old.err).toContain("emplio hand");
+});
+
+test("a browser size Emplio set is put back before each later command, for that browser only", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  // stands in for agent-browser: writes down every call it gets
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\necho done\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const run = async (command: string, session = "chat-1") => {
+    const p = Bun.spawn(["bash", "-c", command], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: "k", BROWSER_CDP_URL: "x", BROWSER_SESSION: session, BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+    await p.exited;
+  };
+  const calls = async () => (await Bun.file(join(home, "calls")).text()).trim().split("\n").map((l) => l.replace(/^--cdp x --session \S+ /, ""));
+  await run("./emplio browser open https://a.example");
+  await run("./emplio browser set viewport 390 844");
+  await run("./emplio browser snapshot -i");
+  await run("./emplio browser open https://a.example", "chat-2");
+  expect(await calls()).toEqual(["open https://a.example", "set viewport 390 844", "eval innerWidth", "set viewport 390 844", "snapshot -i", "open https://a.example"]);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("close asks the server to stop the browser, and later browser steps in that command stop", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\necho done\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `c${Date.now()}`;
+  const p = Bun.spawn(["bash", "-c", "./emplio browser close; ./emplio browser open https://a.example"], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: key, BROWSER_CDP_URL: "x", BROWSER_SESSION: "chat-1", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  expect(out).toContain(`BROWSERCLOSE:${key}\t@`);
+  expect(err).toContain("Run this in your next command");
+  expect(existsSync(join(home, "calls"))).toBe(false);
+  rmSync(home, { recursive: true, force: true });
+  rmSync(`/tmp/emplio-resize.${key}`, { force: true });
+  rmSync(out.match(/\t@(\S+)/)![1], { force: true });
+});
+
+test("a size the browser said yes to but didn't take goes to the server, and later browser steps in that command stop", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  // stands in for a browser whose size is fixed: says done, stays 1280 wide
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\ncase "$*" in *innerWidth) echo 1280 ;; *"get url") echo https://a.example/ ;; *) echo done ;; esac\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `t${Date.now()}`;
+  const p = Bun.spawn(["bash", "-c", "./emplio browser viewport 390 844; ./emplio browser snapshot -i"], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: key, BROWSER_CDP_URL: "x", BROWSER_SESSION: "chat-1", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  const file = out.match(new RegExp(`BROWSERSIZE:${key}\\t@(\\S+)`))?.[1];
+  expect(Buffer.from(readFileSync(file!, "utf8"), "base64").toString().split("\0").slice(0, 3)).toEqual(["390", "844", "https://a.example/"]);
+  expect(err).toContain("Run this in your next command");
+  expect(out).not.toContain("snapshot");
+  expect(existsSync(join(home, ".local/share/agent-browser/size-chat-1"))).toBe(false);
+  rmSync(home, { recursive: true, force: true });
+  rmSync(`/tmp/emplio-resize.${key}`, { force: true });
+  rmSync(file!, { force: true });
 });

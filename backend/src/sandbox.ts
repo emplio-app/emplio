@@ -7,7 +7,7 @@ import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
-import { browserFor, browserLocal, connectionFor, newDownloads, pageChecked, signInLink } from "./browser";
+import { browserFor, browserLocal, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -449,6 +449,7 @@ case "$1" in
     # for any command that mentions emplio browser
     shift
     [ -n "$BROWSER_CDP_URL" ] || { echo "emplio browser: no browser attached; say emplio browser in the command itself. A script file: emplio browser run <script> [args]" >&2; exit 1; }
+    [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting. Run this in your next command." >&2; exit 1; }
     [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser skill" >&2; exit 2; }
     ab="$HOME/.local/bin/agent-browser"; guides="$HOME/.local/share/agent-browser"
     if [ ! -x "$ab" ]; then
@@ -461,10 +462,13 @@ case "$1" in
     run() { AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" "$ab" --cdp "$BROWSER_CDP_URL" --session "$BROWSER_SESSION" "$@"; }
     case "$1" in
       skill) shift; AGENT_BROWSER_SKILLS_DIR="$guides" exec "$ab" skills get core "$@" ;;
-      # the server stops this browser itself, after 10 minutes unused; its sign-ins are saved then
-      close) echo "The browser stays open for now and closes by itself after 10 minutes unused." ; exit 0 ;;
+      # stopped by the server after this command (sign-ins are saved first); the next browser command starts a fresh
+      # one, at the usual size and with no phone setting. Later browser steps in this command stop.
+      close) : > "/tmp/emplio-resize.$EZ_KEY"; req BROWSERCLOSE; exit 0 ;;
       # onto the paid connection in the person's country; the server does the switching
       local) req BROWSERLOCAL "$(run get url 2>/dev/null)"; exit 0 ;;
+      # the page size: emplio browser viewport 390 844 means set viewport 390 844
+      viewport) shift; set -- set viewport "$@" ;;
       # a saved script: its emplio browser commands inherit the browser, which the words in this command attached.
       # bash -e, so it stops at the first failed step
       run)
@@ -496,6 +500,15 @@ case "$1" in
         done
         echo "emplio browser: \${names[*]} didn't reach the browser in time" >&2; exit 1 ;;
     esac
+    # A size Emplio set (set viewport, set device) lasts only while the tool's background process does, and that can
+    # end between commands: the page then snaps back to the browser's own size. So it's kept for this browser and
+    # put back before each command. A new browser (after an idle stop) starts at its own size again.
+    # ponytail: one extra call per browser command once a size is set; only when the process has ended if that's slow
+    size="$guides/size-$BROWSER_SESSION"
+    case "$1 $2" in
+      "set viewport"|"set device") ;;
+      *) [ -f "$size" ] && { was=(); while IFS= read -r w; do was+=("$w"); done < "$size"; run "\${was[@]}" >/dev/null 2>&1; } ;;
+    esac
     # a failure is also noted for the end of the result (requestsTrailer), since >/dev/null or | tail -1 can hide it
     # (141: | head stopped reading, not a failure)
     e="$(mktemp)"
@@ -511,6 +524,16 @@ ${CALLS_PY}
 PY
       AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" EMPLIO_AB="$ab" python3 -c "$py" "$@" 2>"$e"; rc=$?
     else run "$@" 2>"$e"; rc=$?; fi
+    [ "$rc" = 0 ] && case "$1 $2" in "set viewport"|"set device") mkdir -p "$guides" && printf '%s\\n' "$@" > "$size" ;; esac
+    # Some browser services say yes to a new page size and keep the old one: theirs is fixed when the browser starts.
+    # So look, and if the width didn't take, ask the server to start this chat's browser again at that size
+    # (browserSize). That happens after this command, so its later browser steps stop instead of running at the old size.
+    if [ "$rc" = 0 ] && [ "$1 $2" = "set viewport" ]; then
+      case "$(run eval innerWidth 2>/dev/null)" in
+        ''|*[!0-9]*|"$3") ;;
+        *) rm -f "$size"; : > "/tmp/emplio-resize.$EZ_KEY"; req BROWSERSIZE "$3" "$4" "$(run get url 2>/dev/null)" ;;
+      esac
+    fi
     cat "$e" >&2
     step="$*"; [ "$rc" = 0 ] || [ "$rc" = 141 ] || printf '%s: %s\\n' "\${step:0:80}" "$(head -c 300 "$e")" >> "/tmp/emplio-failed.$EZ_KEY"
     rm -f "$e"; exit $rc ;;
@@ -752,7 +775,7 @@ Apps: ${name}'s own accounts (Gmail, Calendar, Drive, Slack, Notion and more) th
 - To message a teammate on their phone yourself (a report, alert, reminder): \`emplio channels send <email> <message>\`; replies come back to you there.
 - emplio commands run after the rest of the command, so one command can't feed an emplio result onward, and a script or loop can't use them (\`out=$(emplio apps run ...)\` gets nothing back, however long the requests then take): use its output (big ones saved under /work/tmp/apps/) in the next command.
 - Git: plain \`git\` works with GitHub (clone, pull, push), on the GitHub account connected in apps; never ask for a token or put one in a URL. For a whole repository or many files, clone it; don't fetch files one by one through actions. Not connected, and the repository is private: a Connect button shows by itself. ${bg ? "A push needs \"Always allow\" for github.git_push." : `A push may fail the first time and show ${name} an Allow card (the result says so): once allowed, run the same push again.`} A big clone: \`background: true\`.
-- ${bg ? `Actions that send, change or delete run here only if ${name} has said "Always allow" to them; the result tells you if not.` : `Actions that send, change or delete may show ${name} an Allow / Deny card and wait: that's their OK, so don't also ask in words. One such action per command, so the card is clear.`} Ask ${name} first before messaging anyone outside the business, moving money or deleting things.
+- ${bg ? `Actions that send, change or delete run here only if ${name} has said "Always allow" to them; the result tells you if not.` : `Actions that send, change or delete may show ${name} an Allow / Deny card and wait: that's their OK, so don't also ask in words. By the time the command returns they've answered: a result means they allowed it and it's done, so never ask them to tap or allow it afterwards. One such action per command, so the card is clear.`} Ask ${name} first before messaging anyone outside the business, moving money or deleting things.
 - Never ask anyone to paste a password or key in chat (apps get theirs through Connect; the rest through logins, below). If one is pasted, don't repeat it; ask them to save it properly and change it if it matters.
 
 MCP servers: tools the business added by address, shared by the team, listed under Connected now. Use them like apps with the server's name: \`emplio apps actions <server>\`, \`emplio apps info|run <server>.<tool>\`. \`emplio mcp help\` manages them${admin && !bg ? "" : "; only the owner or an admin adds them (Integrations → MCP)"}.
@@ -1445,6 +1468,14 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const [url] = Buffer.from(line.slice(`BROWSERLOCAL:${key}\t`.length), "base64").toString().split("\0");
       lines.push(await browserLocal(s.conversationId, s.workspaceId, url).catch((error) => (console.error("browser switch failed", error), "emplio browser local: that didn't work")));
     }
+    else if (line.startsWith(`BROWSERSIZE:${key}\t`)) {
+      const [width, height, url] = Buffer.from(line.slice(`BROWSERSIZE:${key}\t`.length), "base64").toString().split("\0");
+      lines.push(await browserSize(s.conversationId, Number(width), Number(height), url).catch((error) => (console.error("browser resize failed", error), "emplio browser set viewport: that didn't work")));
+    }
+    else if (line.startsWith(`BROWSERCLOSE:${key}\t`)) {
+      await stopBrowser(s.conversationId).catch((error) => console.error("browser close failed", error));
+      lines.push("The browser is closed, sign-ins kept. The next emplio browser command starts a fresh one at the usual size, with no phone setting.");
+    }
     else if (line.startsWith(`SITES:${key}\t`))
       lines.push(await sitesCommand(s.workspaceId, Buffer.from(line.slice(`SITES:${key}\t`.length), "base64").toString().split("\0").slice(0, -1)));
     else if (line.startsWith(`AGENTS:${key}\t`)) {
@@ -1519,7 +1550,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.

@@ -4,14 +4,17 @@
 // "Always allow" to, and, in chats, businesses whose Settings say "Just do it". Runs nobody is watching
 // (automations, the background agent) get only the first two, plus what their automation lists and an owner or admin
 // allowed (automations.ts); anything else is refused.
+// Each ask is a row (the approvals table): the card, their answer and how the action went. The screens read that;
+// Emplio reads only what its command returned (chat.ts toModelOutput), so to it an allowed action just ran.
 import type { Approval } from "@emplio/shared";
 import { generateId } from "ai";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context } from "./auth";
 import { db } from "./db";
-import { conversations, messages, workspaceMembers } from "./db/schema";
+import { approvals, workspaceMembers } from "./db/schema";
 import { postMessage } from "./chat";
+import { startedIn } from "./jobs";
 import { connectCard, getAction, providerFor, runAction } from "./integrations";
 import { notify } from "./live";
 import type { Session } from "./sandbox";
@@ -22,7 +25,8 @@ const WAIT_MS = 10 * 60_000;
 const VALID_MS = 2 * 60 * 60_000;
 
 type Waiting = { workspaceId: string; userId: string; conversationId: string; decide: (d: NonNullable<Approval["decision"]>) => void };
-// ponytail: in memory, so a server restart drops pending asks (the command gets "no answer"); fine for one server
+// ponytail: in memory, so a server restart drops pending asks (their rows are closed at the next start, approvalRoutes);
+// fine for one server
 const waiting = new Map<string, Waiting>();
 type Later = { workspaceId: string; userId: string; conversationId: string; card: Approval; run: () => Promise<unknown> };
 // ponytail: in memory too; after a restart a late answer gets "expired"
@@ -60,6 +64,28 @@ const setAllowed = (workspaceId: string, userId: string, value: ReturnType<typeo
     .set({ alwaysAllowed: value })
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
 
+// An ask's answer or outcome, kept; their open apps look again.
+const keep = (id: string, userId: string, set: { decision?: NonNullable<Approval["decision"]>; result?: NonNullable<Approval["result"]> }) =>
+  db.update(approvals).set(set).where(eq(approvals.id, id)).then(() => notify(userId));
+
+// Whether a card in this chat is still waiting for their tap (the next-step card stays away then, chat.ts).
+export const waitingIn = async (chatId: string) =>
+  !!(await db.query.approvals.findFirst({
+    where: and(eq(approvals.showIn, chatId), isNull(approvals.decision), gt(approvals.createdAt, new Date(Date.now() - VALID_MS))),
+    columns: { id: true },
+  }));
+
+// How the commands that asked went, for the cards they allowed: one such action per command, so the command's
+// outcome is the action's.
+export async function outcome(cards: Approval[], userId: string, result: { exitCode?: number; output?: unknown }) {
+  const allowed = cards.filter((c) => c.decision === "once" || c.decision === "always");
+  if (!allowed.length) return;
+  const text = String(result.output ?? "").trim();
+  const failed = (result.exitCode ?? 0) !== 0 || text.startsWith("error:");
+  for (const c of allowed)
+    await keep(c.id, userId, { result: failed ? { ok: false, text: text.replace(/^error:\s*/, "").split("\n")[0]!.slice(0, 300) } : { ok: true } });
+}
+
 // What an action that isn't an app's is (an MCP tool), and how to do it if it's allowed after the command moved on.
 // alwaysAsk: asked every time, whatever "Just do it" or "Always allow" say (installing a skill from outside)
 type Own = { title: string; readOnly: boolean; appName: string; logo?: string; alwaysAsk?: boolean; run: () => Promise<unknown> };
@@ -95,6 +121,8 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     expiresAt: new Date(Date.now() + VALID_MS).toISOString(),
     ...(asks && { oneOff: true }),
   };
+  await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn: await startedIn(s.conversationId), card });
+  notify(s.user.id);
   s.notify(card);
   const decision = await new Promise<NonNullable<Approval["decision"]>>((resolve) => {
     const done = (d: NonNullable<Approval["decision"]>) => {
@@ -110,10 +138,11 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   if (decision === "timeout") {
     const run = own?.run ?? (() => runAction({ workspaceId: s.workspaceId, userId: s.user.id }, action, input, { conversationId: s.conversationId, account }));
     later.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, card, run });
-    setTimeout(() => later.get(card.id) && (later.delete(card.id), void settle(s.conversationId, card.id, "timeout")), VALID_MS - WAIT_MS);
+    setTimeout(() => later.get(card.id) && (later.delete(card.id), void keep(card.id, s.user.id, { decision: "timeout" }).catch(() => {})), VALID_MS - WAIT_MS);
     return `error: no answer from ${s.user.name} yet, so ${action} wasn't run. Their card stays up for ${VALID_MS / 3_600_000} hours: if they tap Allow it's done then and you'll see it in this chat; after that it expires. Say in a few words that it's waiting for their OK; don't ask it again.`;
   }
   s.notify({ ...card, decision });
+  await keep(card.id, s.user.id, { decision });
   if (decision === "always" && !asks)
     await setAllowed(s.workspaceId, s.user.id, sql`array_append(array_remove(${workspaceMembers.alwaysAllowed}, ${action}), ${action})`);
   if (decision === "once" || decision === "always") return null;
@@ -132,22 +161,8 @@ export function moveOn(conversationId: string | null) {
   let waited = false;
   for (const [id, w] of waiting) if (w.conversationId === conversationId) ids.push(id), (waited = true), w.decide("skipped");
   for (const [id, l] of later)
-    if (l.conversationId === conversationId) ids.push(id), later.delete(id), void settle(l.conversationId, id, "skipped").catch(() => {});
+    if (l.conversationId === conversationId) ids.push(id), later.delete(id), void keep(id, l.userId, { decision: "skipped" }).catch(() => {});
   return { ids, waited };
-}
-
-// A card's answer written into the saved reply, so it shows there for good.
-async function settle(conversationId: string, id: string, decision: NonNullable<Approval["decision"]>) {
-  const rows = await db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(desc(messages.createdAt)).limit(50);
-  for (const row of rows) {
-    const text = JSON.stringify(row.parts);
-    if (!text.includes(id)) continue;
-    const parts = (row.parts as { output?: { approvals?: Approval[] } }[]).map((p) =>
-      p.output?.approvals ? { ...p, output: { ...p.output, approvals: p.output.approvals.map((a) => (a.id === id ? { ...a, decision } : a)) } } : p,
-    );
-    await db.update(messages).set({ parts }).where(eq(messages.id, row.id));
-    return;
-  }
 }
 
 // The person's answer to an ask, from whichever channel showed it: true when the waiting command takes it, how it
@@ -159,17 +174,26 @@ export async function decide(id: string, workspaceId: string, userId: string, de
     return true;
   }
   const l = later.get(id);
-  if (!l || l.workspaceId !== workspaceId || l.userId !== userId) return false;
+  if (!l || l.workspaceId !== workspaceId || l.userId !== userId) {
+    // nothing can carry it out any more (it ran out, or the server restarted): its card closes too
+    await db.update(approvals).set({ decision: "timeout" }).where(and(eq(approvals.id, id), eq(approvals.userId, userId), isNull(approvals.decision)));
+    notify(userId);
+    return false;
+  }
   later.delete(id);
-  await settle(l.conversationId, id, decision);
+  await keep(id, userId, { decision });
   if (decision === "always" && !l.card.oneOff)
     await setAllowed(workspaceId, userId, sql`array_append(array_remove(${workspaceMembers.alwaysAllowed}, ${l.card.action}), ${l.card.action})`);
   const text =
     decision === "deny"
       ? `You said no to ${l.card.title}, so it wasn't done.`
       : await l.run().then(
-          () => `Done: ${l.card.title} (you allowed it).`,
-          (error: unknown) => `You allowed ${l.card.title}, but it failed: ${error instanceof Error ? error.message : "something went wrong"}.`,
+          () => keep(id, userId, { result: { ok: true } }).then(() => `Done: ${l.card.title} (you allowed it).`),
+          async (error: unknown) => {
+            const why = error instanceof Error ? error.message : "something went wrong";
+            await keep(id, userId, { result: { ok: false, text: why.slice(0, 300) } });
+            return `You allowed ${l.card.title}, but it failed: ${why}.`;
+          },
         );
   // in the chat, so the AI employee knows how it went
   // not awaited: a reply running in the chat now holds it (chat.ts holdChat), and the button shouldn't wait for that
@@ -180,6 +204,23 @@ export async function decide(id: string, workspaceId: string, userId: string, de
 }
 
 export async function approvalRoutes(app: FastifyInstance) {
+  // asks from before this start can't be answered any more: the commands that waited on them are gone
+  await db.update(approvals).set({ decision: "timeout" }).where(isNull(approvals.decision));
+
+  // a chat's cards, oldest first: the ones waiting show above the chat box, and each card in a reply takes its
+  // answer and outcome from here
+  app.get<{ Params: { id: string } }>("/conversations/:id/approvals", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const rows = await db
+      .select()
+      .from(approvals)
+      .where(and(eq(approvals.workspaceId, ctx.workspaceId), eq(approvals.userId, ctx.userId), or(eq(approvals.showIn, req.params.id), eq(approvals.conversationId, req.params.id))))
+      .orderBy(desc(approvals.createdAt))
+      .limit(300);
+    return rows.reverse().map((r): Approval => ({ ...r.card, ...(r.decision && { decision: r.decision }), ...(r.result && { result: r.result }) }));
+  });
+
   // the person answering a card in their chat
   app.post<{ Params: { id: string }; Body: { decision: string } }>(
     "/approvals/:id",

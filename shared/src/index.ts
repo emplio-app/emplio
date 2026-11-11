@@ -105,8 +105,9 @@ export type SlashCommand =
 // GET /skills: a skill the chat box offers as /name; scope "me" is the person's own
 export type Skill = { name: string; description: string; scope: "company" | "me" };
 
-// An app action waiting for the person's OK (anything that sends, changes or deletes), shown in the chat
-// with Allow / Always allow / Deny. decision: set once answered, or "timeout" when nobody did.
+// An app action waiting for the person's OK (anything that sends, changes or deletes), shown above the chat box
+// with Allow / Always allow / Deny. decision: set once answered, or "timeout" when nobody did. Kept on the server
+// (the approvals table): a saved reply holds the card as it was asked, and its answer and outcome come from there.
 export type Approval = {
   id: string;
   action: string;
@@ -121,6 +122,8 @@ export type Approval = {
   oneOff?: boolean;
   // skipped: they wrote a message instead of answering
   decision?: "once" | "always" | "deny" | "timeout" | "skipped";
+  // how the action went once it was allowed; text: why it failed
+  result?: { ok: boolean; text?: string };
 };
 export type ActionRun = { id: string; action: string; ok: boolean; error: string | null; conversationId: string | null; createdAt: string };
 

@@ -32,6 +32,8 @@ export async function api<T>(
 export const meQueryKey = ["me"];
 export const conversationsQueryKey = ["conversations"];
 export const tasksQueryKey = ["tasks"];
+// each chat's Allow cards (approval-card.tsx), under ["approvals", chat id]
+export const approvalsQueryKey = ["approvals"];
 export const versionQueryKey = ["version"];
 
 // Every task this person may see (owner and admins: all), for the Tasks page and the sidebar's count.
@@ -100,10 +102,11 @@ export function useLiveEvents() {
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
-    // a reply that ended may have added or finished tasks too
+    // a reply that ended may have added or finished tasks too; a card asked or answered nudges as well
     const refresh = () => {
       void queryClient.invalidateQueries({ queryKey: conversationsQueryKey });
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      void queryClient.invalidateQueries({ queryKey: approvalsQueryKey });
     };
     const connect = () => {
       socket = new WebSocket(`${API_URL.replace(/^http/, "ws")}/events`);

@@ -5,8 +5,8 @@ import { Providers } from "./providers";
 import { THEME_SCRIPT } from "@/lib/theme";
 import { ogImage, SiteHead, siteMetadata } from "@cloud/site";
 
-const sans = DM_Sans({ variable: "--font-dm-sans", subsets: ["latin"] });
-const heading = Bricolage_Grotesque({ variable: "--font-bricolage", subsets: ["latin"] });
+const sans = DM_Sans({ variable: "--font-dm-sans", subsets: ["latin"], axes: ["opsz"] });
+const heading = Bricolage_Grotesque({ variable: "--font-bricolage", subsets: ["latin"], axes: ["opsz"] });
 const mono = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] });
 const logo = Fredoka({ variable: "--font-logo", subsets: ["latin"], weight: "500" });
 

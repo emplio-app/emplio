@@ -24,4 +24,4 @@ jobs:
           path-to-document: https://github.com/emplio-app/emplio/blob/main/CLA.md
           branch: cla-signatures
           # the Emplio team, and bots
-          allowlist: ashish141199,dependabot[bot],github-actions[bot]
+          allowlist: ashish141199,Emplio,dependabot[bot],github-actions[bot]

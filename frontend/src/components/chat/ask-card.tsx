@@ -110,7 +110,7 @@ export function AskCard({ cards }: { cards: Card[] }) {
               type="button"
               tabIndex={-1}
               onClick={() => setStep(i)}
-              className={`h-1.5 rounded-full transition-all ${i === step ? "w-4 bg-primary" : answers[c.id]?.trim() ? "w-1.5 bg-primary/50" : "w-1.5 bg-border"}`}
+              className={`h-1.5 rounded-full transition-[width,background-color] ${i === step ? "w-4 bg-primary" : answers[c.id]?.trim() ? "w-1.5 bg-primary/50" : "w-1.5 bg-border"}`}
             />
           ))}
         </div>
@@ -196,7 +196,7 @@ function Question({
   return (
     <div className="flex flex-col gap-2" role="group" aria-label={card.question}>
       {card.text && <p className="max-h-72 overflow-y-auto rounded-lg bg-muted/50 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">{card.text}</p>}
-      <p className="text-[15px] leading-snug font-medium">{card.question}</p>
+      <p className="text-[0.9rem] leading-snug font-medium">{card.question}</p>
       {card.multi && !locked && <p className="-mt-1 text-xs text-muted-foreground">Pick all that apply</p>}
       {!!card.options.length && (
         <div className="flex flex-col gap-1.5">

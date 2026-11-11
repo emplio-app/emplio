@@ -108,7 +108,7 @@ export function useSkillMenu(input: string, setInput: (text: string) => void) {
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 text-sm font-medium">
               /{s.name}
-              {s.kind === "skill" && s.scope === "me" && <span className="rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">yours</span>}
+              {s.kind === "skill" && s.scope === "me" && <span className="rounded bg-muted px-1 text-[0.65rem] font-normal text-muted-foreground">yours</span>}
             </span>
             <span className="line-clamp-2 text-xs text-muted-foreground">{s.description}</span>
           </span>

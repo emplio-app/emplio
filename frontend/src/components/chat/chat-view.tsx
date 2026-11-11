@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -50,6 +50,7 @@ import { ReplyContext } from "@/components/chat/ask-card";
 import { BrowserChip, BrowserPanel, BrowserProvider, useLiveBrowser } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
+import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { useMentionMenu } from "@/components/chat/mention-menu";
@@ -60,7 +61,9 @@ import { Button } from "@/components/ui/button";
 import { pausedNote, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { haptic } from "@/lib/haptics";
 import {
+  approvalsQueryKey,
   api,
   chatTransport,
   conversationsQueryKey,
@@ -400,6 +403,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // While a reply is in progress, new messages wait in line and go out one by one.
   const send = (raw: string) => {
     if (attachments.uploading || (!raw.trim() && !attachments.ready && !quotes.some((q) => q.note.trim()))) return;
+    haptic();
     const text = withQuotes(quotes, raw);
     const message = { text, files: attachments.take(), mentions: mentionMenu.linked, command };
     if (busy || queue.length) enqueue({ id: uuid(), ...message });
@@ -486,17 +490,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     const part = (type: string) => (message.parts.find((p) => p.type === type) as { data?: unknown } | undefined)?.data;
     setMessages(messages.slice(0, i));
     forked.current = true;
-    dispatch({ text, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
+    // a tapped answer left as it was keeps the question that goes with it, which the edit box doesn't show
+    const sent = text === userFacingText(textOf(message)) ? textOf(message) : text;
+    dispatch({ text: sent, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
   };
 
   // The closable card after each reply, made by a small model (backend chat.ts nextStep). Opening a chat only
   // shows one already made.
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  // How much of the chat the card floats over. Kept until the next send, so closing it or typing moves nothing.
+  const [cardRoom, setCardRoom] = useState(0);
   const nextStepAfter = useRef(status);
   useEffect(() => {
     const wasBusy = nextStepAfter.current === "submitted" || nextStepAfter.current === "streaming";
     nextStepAfter.current = status;
-    if (status === "submitted" || status === "streaming") return setNextStep(null);
+    if (status === "submitted" || status === "streaming") {
+      setCardRoom(0);
+      return setNextStep(null);
+    }
     if (isNew && !wasBusy) return;
     if (status !== "ready" || (wasBusy && queue.length)) return;
     let current = true;
@@ -506,6 +517,17 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     return () => void (current = false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- on a reply finishing (and opening the chat), not as the queue changes
   }, [status, id]);
+  // This chat's Allow cards as the server has them (approvals.ts): the ones still waiting sit above the chat box,
+  // and each card in a reply reads its answer and outcome from here. Its live nudges refetch it (useLiveEvents).
+  const { data: cards } = useQuery({ queryKey: [...approvalsQueryKey, id], queryFn: () => api<Approval[]>(`/conversations/${id}/approvals`) });
+  const kept = useMemo(() => new Map((cards ?? []).map((a) => [a.id, a])), [cards]);
+  const asks = (cards ?? []).filter(stillWaiting);
+  // the room the cards took goes back when the last one is answered, so the reply isn't left with a gap under it
+  const hadAsks = useRef(false);
+  useEffect(() => {
+    if (hadAsks.current && !asks.length) setCardRoom(0);
+    hadAsks.current = !!asks.length;
+  }, [asks.length]);
   // the bubble shows the button's words; Emplio also gets the question, since it didn't write the card itself
   const answerNextStep = (button: string) => {
     sendText(`${CLICK_PREFIX}${button}\nForm values: ${JSON.stringify({ question: nextStep?.question })}`);
@@ -678,11 +700,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         .catch(() => (loadingOlder.current = false));
     }
   };
+  // The card floats over the chat, so the message area keeps its size. Only when it would cover the end of the
+  // reply does the chat move, once and by just enough.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const last = document.getElementById(`m-${messages.at(-1)?.id}`);
+    if (!cardRoom || !el || !last) return;
+    const bottom = el.getBoundingClientRect().bottom;
+    const end = last.getBoundingClientRect().bottom;
+    // past the bottom edge: they've scrolled up to read something else
+    if (end <= bottom && end > bottom - cardRoom) el.scrollBy({ top: end - bottom + cardRoom, behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the card arrives
+  }, [cardRoom]);
+
   const checkBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setAtBottom(gap < 80);
+    setAtBottom(gap < 80 + cardRoom);
     // after a send the reply fills in below the prompt instead (pinLatest)
     stuck.current = !pinLatest && gap < 2;
     // two screens ahead, so a pause in scrolling has them ready before the top is reached
@@ -706,7 +741,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     return (
       now && (
         <div key={now} className="type-in" style={{ "--type-len": now.length } as React.CSSProperties}>
-          <Shimmer className="text-[15px] leading-relaxed">{now}</Shimmer>
+          <Shimmer className="text-[0.9rem] leading-relaxed">{now}</Shimmer>
         </div>
       )
     );
@@ -784,7 +819,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 }
               }}
               rows={Math.min(10, editText.split("\n").length + 1)}
-              className="w-full resize-none bg-transparent text-[15px] outline-none"
+              className="w-full resize-none bg-transparent text-[0.9rem] outline-none"
             />
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -796,7 +831,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             </div>
           </div>
         ) : (message.role === "assistant" || text) && (
-          <MessageContent className="text-[15px] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
+          <MessageContent className="text-[0.9rem] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
             {message.role === "user" ? (
               <LongText>
                 <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
@@ -819,7 +854,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         )}
         {message.role === "user" && editing !== message.id && (
           <UserMessageActions
-            text={text}
+            text={userFacingText(text)}
             versions={(message.metadata as Versions | undefined)?.versions ?? []}
             current={message.id}
             // a Telegram thread is answered there, so it isn't edited here either
@@ -827,7 +862,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             onEdit={
               text && !fromEmplio
                 ? () => {
-                    setEditText(text);
+                    setEditText(userFacingText(text));
                     setEditing(message.id);
                   }
                 : undefined
@@ -894,7 +929,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               <>
                 {busy && messages.at(-1)?.role === "user" && (
                   <Message from="assistant">
-                    <MessageContent className="text-[15px] leading-relaxed">{thinking()}</MessageContent>
+                    <MessageContent className="text-[0.9rem] leading-relaxed">{thinking()}</MessageContent>
                   </Message>
                 )}
 
@@ -957,7 +992,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className="px-4 pt-4 text-[15px]"
+          className="px-4 pt-4 text-[0.9rem]"
         />
       </div>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
@@ -1008,6 +1043,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     <BrowserProvider value={browser}>
     <OpenFileProvider value={showFile}>
     <ChatSendContext value={sendLatest}>
+    <ApprovalsContext value={kept}>
       <div className="flex min-h-0 flex-1">
         <div className="relative flex h-full min-w-0 flex-1 flex-col" {...dropZone}>
           {dragging && (
@@ -1114,7 +1150,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                       box?.setSelectionRange(box.value.length, box.value.length);
                     }}
                   />
-                  <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8">
+                  <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8" style={cardRoom ? { paddingBottom: cardRoom + 32 } : undefined}>
                     {list}
                   </div>
                 </div>
@@ -1124,13 +1160,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     variant="secondary"
                     aria-label="Scroll to bottom"
                     onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })}
+                    style={cardRoom ? { bottom: cardRoom + 16 } : undefined}
                     className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border shadow-lg"
                   >
                     <ArrowDownIcon className="size-4" />
                   </Button>
                 )}
               </div>
-              <div className="mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pb-3">
+              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pb-3">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1143,7 +1180,20 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     onSendNow={busy ? sendNow : undefined}
                   />
                 )}
-                {nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />}
+                {asks.length ? (
+                  // waiting for their tap: here whatever they're typing or Emplio is doing, until answered
+                  <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 flex max-h-[60dvh] flex-col gap-2 overflow-y-auto pb-2">
+                    {asks.map((a) => (
+                      <ApprovalAsk key={a.id} approval={a} />
+                    ))}
+                  </div>
+                ) : (
+                  nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
+                    <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 pb-2">
+                      <NextStepCard card={nextStep} onAnswer={answerNextStep} onClose={closeNextStep} />
+                    </div>
+                  )
+                )}
                 {onTelegram ? <TelegramOnly /> : composer}
               </div>
             </>
@@ -1152,6 +1202,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         <BrowserPanel />
         <FilePanel file={browser.open ? null : openFile} onClose={() => setOpenFile(null)} />
       </div>
+    </ApprovalsContext>
     </ChatSendContext>
     </OpenFileProvider>
     </BrowserProvider>
@@ -1309,7 +1360,7 @@ function UserMessageActions({
 }) {
   const at = versions.indexOf(current);
   return (
-    <MessageActions className="absolute top-full right-0 gap-0.5 text-muted-foreground [&_button]:size-7 [&_svg]:size-3.5! opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-versions]]:opacity-100">
+    <MessageActions className="absolute top-full right-0 gap-0.5 text-muted-foreground pointer-coarse:static pointer-coarse:self-end has-[[data-versions]]:static has-[[data-versions]]:self-end [&_button]:size-7 [&_svg]:size-3.5! opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-versions]]:opacity-100">
       {text && <CopyButton text={text} />}
       {onEdit && !disabled && (
         <MessageAction tooltip="Edit" onClick={onEdit}>

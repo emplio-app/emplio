@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 const TAB = "relative flex min-w-0 flex-col items-center justify-center gap-0.5 text-[0.68rem] font-medium outline-none transition-opacity select-none active:opacity-60 [-webkit-touch-callout:none] [&_svg]:size-5";
 
 // A phone's way around the app, in place of the side menu's button. The menu stays behind More (and a swipe in
-// from the edge) for search, usage and the account. Hidden while typing: globals.css .bottom-tabs.
+// from the edge) for search, usage and the account. Hidden while typing: globals.css .bottom-tabs. It floats
+// over the page as frosted glass: lists scroll on underneath it (globals.css .under-tabs).
 export function BottomTabs() {
   const pathname = usePathname();
   const { setOpenMobile, openMobile } = useSidebar();
@@ -44,7 +45,7 @@ export function BottomTabs() {
   );
 
   return (
-    <nav aria-label="Main" className="bottom-tabs shrink-0 border-t bg-background pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-[env(safe-area-inset-bottom)] md:hidden">
       <div className="grid h-14 grid-cols-5">
         {tab(
           main ? `/chat/${main.id}` : "/home",
@@ -63,7 +64,7 @@ export function BottomTabs() {
           <ClipboardListIcon />,
           pathname.startsWith("/tasks"),
           needsMe ? (
-            <span className="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.6rem] leading-none text-primary-foreground">{needsMe}</span>
+            <span className="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.65rem] leading-none text-primary-foreground">{needsMe}</span>
           ) : undefined,
         )}
         {tab("/knowledge", "Memory", <BookOpenIcon />, pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database"))}

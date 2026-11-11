@@ -156,7 +156,7 @@ export function QuoteChips({ quotes, onChange }: { quotes: Quote[]; onChange: (q
                 if (e.metaKey || e.ctrlKey) e.currentTarget.form?.requestSubmit();
                 else focusAfter(i);
               }}
-              className="mt-1 ml-5.5 block w-[calc(100%-1.375rem)] resize-none border-l-2 border-foreground/15 bg-transparent py-0.5 pl-2.5 text-[15px] [field-sizing:content] outline-none placeholder:text-muted-foreground/50 focus:border-primary/60"
+              className="mt-1 ml-5.5 block w-[calc(100%-1.375rem)] resize-none border-l-2 border-foreground/15 bg-transparent py-0.5 pl-2.5 text-[0.9rem] [field-sizing:content] outline-none placeholder:text-muted-foreground/50 focus:border-primary/60"
             />
           )}
         </div>

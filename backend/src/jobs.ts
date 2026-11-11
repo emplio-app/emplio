@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, isReport, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary } from "@emplio/shared";
+import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -198,7 +198,7 @@ async function unattended(chatId: string): Promise<string | null> {
 }
 
 // The chat a job's chat goes back to, through any jobs that started it; any other chat is its own.
-async function startedIn(chatId: string): Promise<string> {
+export async function startedIn(chatId: string): Promise<string> {
   const parent = await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId), columns: { conversationId: true } });
   return parent ? startedIn(parent.conversationId) : chatId;
 }
@@ -287,7 +287,7 @@ function actionsIn(msgs: ChatMessages): Action[] {
     m.role !== "assistant"
       ? []
       : (m.parts as unknown as (Bash & { input?: { command?: string } })[])
-          .filter((p) => p.type === "tool-bash" && !isReport(p.input?.command))
+          .filter((p) => p.type === "tool-bash")
           .map((p) => ({
             id: p.toolCallId,
             description: p.input?.description ?? "…",

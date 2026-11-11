@@ -117,7 +117,7 @@ export function DatabasePage() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav className={`w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Tables">
+        <nav className={`under-tabs w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Tables">
           {tables.isPending && <Skeleton className="h-40 rounded-xl" />}
           {tables.error && <p className="p-2 text-sm text-destructive">{tables.error.message}</p>}
           {tables.data?.length === 0 && <p className="p-2 text-sm text-muted-foreground">No tables yet.</p>}
@@ -191,7 +191,7 @@ export function DatabasePage() {
                 <p className="p-6 text-sm text-destructive">{page.error.message}</p>
               ) : (
                 <>
-                  <div className="min-h-0 flex-1 overflow-auto">
+                  <div className="under-tabs min-h-0 flex-1 overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
