@@ -194,7 +194,7 @@ async function unattended(chatId: string): Promise<string | null> {
 }
 
 // The chat a job's chat goes back to, through any jobs that started it; any other chat is its own.
-async function startedIn(chatId: string): Promise<string> {
+export async function startedIn(chatId: string): Promise<string> {
   const parent = await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId), columns: { conversationId: true } });
   return parent ? startedIn(parent.conversationId) : chatId;
 }
