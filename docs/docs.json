@@ -3,6 +3,7 @@
   "theme": "maple",
   "name": "Emplio",
   "description": "Docs for Emplio, the open-source, self-learning AI employee.",
+  "seo": { "metatags": { "google-site-verification": "kkrQDdYrTKGBUbPGogVKpnzhldmpWzDfinsTBy52n18" } },
   "colors": { "primary": "#1a613f", "light": "#49a072", "dark": "#1a613f" },
   "logo": { "light": "/images/logo-light.png", "dark": "/images/logo-dark.png", "href": "https://emplio.app" },
   "favicon": { "light": "/favicon-light.svg", "dark": "/favicon-dark.svg" },
