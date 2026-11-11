@@ -2,6 +2,23 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.4 (2026-11-11)
+
+### What's new
+
+- Emplio works better on a phone. Nothing hides under the clock or the home bar any more, the file viewer and live browser have a Back button, sheets don't throw the keyboard over themselves, and the menu now opens from a button at the top left of every page.
+- Download and Export to Excel now work in the iPhone app: they open the share sheet, so you can Save to Files, AirDrop or Mail.
+- Closing the keyboard no longer jumps the chat to the end.
+- The iPhone app now shows your usage.
+- DeepSeek models can be picked in Settings.
+- Before installing a skill from the store, Emplio can read it first and install only one that fits.
+
+### For developers
+
+- Phone layout: one `--safe-top`/`--safe-bottom` pair for safe areas, top-left menu button (`SidebarTrigger`) on phones, bottom bar down to four tabs, sheet and dialog fixes; downloads in the app go through `saveFile` and the share sheet; chat keeps its distance from the end across resizes (#61).
+- DeepSeek added to `MODEL_PROVIDERS` (#54).
+- `emplio skills show <owner/repo/skill>`: read a store skill without installing it (#55).
+
 ## 1.2.3 (2026-11-11)
 
 ### What's new
