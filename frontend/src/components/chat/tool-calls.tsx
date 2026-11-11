@@ -1,6 +1,6 @@
 "use client";
 
-import { isReport, splitRef, type Approval, type AskCard as Ask, type ConnectCard as Card, type PlanStep, type SaveLoginCard, type JobInfo } from "@emplio/shared";
+import { splitRef, type Approval, type AskCard as Ask, type ConnectCard as Card, type PlanStep, type SaveLoginCard, type JobInfo } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { BotIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, TerminalIcon, XIcon } from "lucide-react";
@@ -70,7 +70,7 @@ export function AssistantParts({
       if (!p.text.trim()) continue;
       if (last && "text" in last) last.text += "\n\n" + p.text;
       else segments.push({ text: p.text });
-    } else if (p.type === "tool-bash" && !isReport((p as unknown as BashPart).input?.command) && !(p as unknown as BashPart).output?.refused) {
+    } else if (p.type === "tool-bash" && !(p as unknown as BashPart).output?.refused) {
       // an approval card ends the run, so what came after it shows below it, in order
       if (last && "tools" in last && !last.tools.at(-1)!.output?.approvals?.length) last.tools.push(p as unknown as BashPart);
       else segments.push({ tools: [p as unknown as BashPart] });
