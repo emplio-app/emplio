@@ -7,7 +7,7 @@ import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
-import { browserFor, browserLocal, browserSize, connectionFor, newDownloads, pageChecked, signInLink } from "./browser";
+import { browserFor, browserLocal, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -449,7 +449,7 @@ case "$1" in
     # for any command that mentions emplio browser
     shift
     [ -n "$BROWSER_CDP_URL" ] || { echo "emplio browser: no browser attached; say emplio browser in the command itself. A script file: emplio browser run <script> [args]" >&2; exit 1; }
-    [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting at the new size. Run this in your next command." >&2; exit 1; }
+    [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting. Run this in your next command." >&2; exit 1; }
     [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser skill" >&2; exit 2; }
     ab="$HOME/.local/bin/agent-browser"; guides="$HOME/.local/share/agent-browser"
     if [ ! -x "$ab" ]; then
@@ -462,8 +462,9 @@ case "$1" in
     run() { AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" "$ab" --cdp "$BROWSER_CDP_URL" --session "$BROWSER_SESSION" "$@"; }
     case "$1" in
       skill) shift; AGENT_BROWSER_SKILLS_DIR="$guides" exec "$ab" skills get core "$@" ;;
-      # the server stops this browser itself, after 10 minutes unused; its sign-ins are saved then
-      close) echo "The browser stays open for now and closes by itself after 10 minutes unused." ; exit 0 ;;
+      # stopped by the server after this command (sign-ins are saved first); the next browser command starts a fresh
+      # one, at the usual size and with no phone setting. Later browser steps in this command stop.
+      close) : > "/tmp/emplio-resize.$EZ_KEY"; req BROWSERCLOSE; exit 0 ;;
       # onto the paid connection in the person's country; the server does the switching
       local) req BROWSERLOCAL "$(run get url 2>/dev/null)"; exit 0 ;;
       # the page size: emplio browser viewport 390 844 means set viewport 390 844
@@ -1471,6 +1472,10 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const [width, height, url] = Buffer.from(line.slice(`BROWSERSIZE:${key}\t`.length), "base64").toString().split("\0");
       lines.push(await browserSize(s.conversationId, Number(width), Number(height), url).catch((error) => (console.error("browser resize failed", error), "emplio browser set viewport: that didn't work")));
     }
+    else if (line.startsWith(`BROWSERCLOSE:${key}\t`)) {
+      await stopBrowser(s.conversationId).catch((error) => console.error("browser close failed", error));
+      lines.push("The browser is closed, sign-ins kept. The next emplio browser command starts a fresh one at the usual size, with no phone setting.");
+    }
     else if (line.startsWith(`SITES:${key}\t`))
       lines.push(await sitesCommand(s.workspaceId, Buffer.from(line.slice(`SITES:${key}\t`.length), "base64").toString().split("\0").slice(0, -1)));
     else if (line.startsWith(`AGENTS:${key}\t`)) {
@@ -1545,7 +1550,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.
