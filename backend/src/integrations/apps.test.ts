@@ -4,7 +4,7 @@ import { availableApps, providerFor } from "./index";
 import { own } from "./own";
 
 // sign-in only: not connectable until this server has their client id and secret
-const SIGN_IN_ONLY = ["slack", "zoom", "googlecalendar", "googledocs", "googlesheets", "googlemeet", "zoho_mail", "zoho_books", "zoho_invoice", "zoho"];
+const SIGN_IN_ONLY = ["slack", "zoom", "googlebusiness", "googlecalendar", "googledocs", "googlesheets", "googlemeet", "zoho_mail", "zoho_books", "zoho_invoice", "zoho"];
 const NEEDS = ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET"];
 
 test("with no Composio account, every app with a pasted key is still offered, and no Composio app is", async () => {

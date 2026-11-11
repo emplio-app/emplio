@@ -5,11 +5,13 @@ import { codeFlow } from "./oauth";
 import { type Api, call } from "./openapi";
 
 const AUTH = "https://www.googleapis.com/auth/";
-export const GOOGLE_SCOPES: Record<"googlecalendar" | "googledocs" | "googlesheets" | "googlemeet", string[]> = {
+export const GOOGLE_SCOPES: Record<"googlecalendar" | "googledocs" | "googlesheets" | "googlemeet" | "googlebusiness", string[]> = {
   googlecalendar: [`${AUTH}calendar`],
   googledocs: [`${AUTH}documents`, `${AUTH}drive.file`],
   googlesheets: [`${AUTH}spreadsheets`, `${AUTH}drive.file`],
   googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.readonly`, `${AUTH}meetings.space.settings`],
+  // the one scope behind every Business Profile API; Google classes it sensitive, not restricted
+  googlebusiness: [`${AUTH}business.manage`],
 };
 
 export const googleOAuth = (name: string, app: keyof typeof GOOGLE_SCOPES) =>
