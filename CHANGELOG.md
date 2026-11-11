@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.1 (2026-11-11)
+
+### What's new
+
+- The card under a reply now only shows when one tap can answer it, and waits until Emplio's agents have finished. No more buttons like "Send the repo" that can't actually answer.
+- Emplio is better at saving a skill when it learns how to do something, and suggests making an agent when the same kind of work keeps coming back.
+- When Emplio closes its browser, it really closes, so a phone-size page it set up for a test doesn't stick around.
+
+### For developers
+
+- The next-step card writer moved to `backend/src/next-step.ts`; evals live in `backend/evals/` (run with `bun run eval evals`, results to Braintrust) with a repo skill on adding one. New dev dependencies: `braintrust`, `@braintrust/bt` (#23).
+- `emplio browser close` stops the chat's browser after the command, saving sign-ins first (#50).
+- Docs: Google Search Console ownership tag (#45).
+
 ## 1.2.0 (2026-11-11)
 
 ### What's new
