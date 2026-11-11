@@ -29,7 +29,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <TooltipProvider>
         <SidebarProvider className="h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
           <AppSidebar />
-          <SidebarInset className="min-w-0 overflow-hidden pt-[env(safe-area-inset-top)]">
+          <SidebarInset className="min-w-0 overflow-hidden pt-(--safe-top)">
             <NewVersionBar />
             {children}
             <BottomTabs />
@@ -80,15 +80,32 @@ function useFitToScreen() {
       root.setProperty("--app-h", `${view.height}px`);
       root.setProperty("--app-top", `${view.offsetTop}px`);
     };
+    // Once the keyboard is up, the field being typed in stays in sight: iOS scrolls the page to it, but not a
+    // sheet's own scrolling body, which shrank under the keyboard and left the field below its buttons.
+    const reveal = () => {
+      fit();
+      requestAnimationFrame(() => {
+        const el = document.activeElement as HTMLElement | null;
+        const sheet = el?.closest('[data-slot="dialog-content"], [data-slot="sheet-content"]');
+        for (let box = el?.parentElement; el && sheet?.contains(box ?? null); box = box!.parentElement) {
+          if (box!.scrollHeight <= box!.clientHeight || !/auto|scroll/.test(getComputedStyle(box!).overflowY)) continue;
+          const r = el.getBoundingClientRect();
+          const b = box!.getBoundingClientRect();
+          if (r.top < b.top || r.height > b.height) box!.scrollTop -= b.top - r.top + 12;
+          else if (r.bottom > b.bottom) box!.scrollTop += r.bottom - b.bottom + 12;
+          return;
+        }
+      });
+    };
     fit();
-    view.addEventListener("resize", fit);
+    view.addEventListener("resize", reveal);
     view.addEventListener("scroll", fit);
-    window.addEventListener("focusin", fit);
+    window.addEventListener("focusin", reveal);
     window.addEventListener("focusout", fit);
     return () => {
-      view.removeEventListener("resize", fit);
+      view.removeEventListener("resize", reveal);
       view.removeEventListener("scroll", fit);
-      window.removeEventListener("focusin", fit);
+      window.removeEventListener("focusin", reveal);
       window.removeEventListener("focusout", fit);
       root.removeProperty("--app-h");
       root.removeProperty("--app-top");

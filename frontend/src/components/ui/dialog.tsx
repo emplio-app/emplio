@@ -50,6 +50,11 @@ const rubberband = (over: number, limit = 64) => (over * limit * 0.55) / (limit 
 // where something let go at this speed (px/s) comes to rest: the slowing-down a scrolled list has
 const project = (velocity: number, rate = 0.998) => ((velocity / 1000) * rate) / (1 - rate)
 
+// On a phone, opening a sheet doesn't throw the keyboard up over it by focusing its first field: Base UI only
+// holds back when its own trigger opened the sheet by touch, and most of ours open from a tapped row instead.
+export const noKeyboardOnTouch = (type: string) =>
+  type === "touch" || window.matchMedia("(pointer: coarse)").matches ? false : true
+
 export function SheetGrabber() {
   const drag = React.useRef<{ start: number; from: number; y: number; trail: [time: number, y: number][] } | null>(null)
   const flight = React.useRef<{ stop(): void } | null>(null)
@@ -139,6 +144,7 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
+        initialFocus={noKeyboardOnTouch}
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className

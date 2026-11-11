@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { PanelLeftIcon } from "lucide-react"
+import { MenuIcon, PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -211,7 +211,7 @@ function Sidebar({
             >
               <Drawer.Title className="sr-only">Sidebar</Drawer.Title>
               <Drawer.Description className="sr-only">Displays the mobile sidebar.</Drawer.Description>
-              <Drawer.Content className="flex h-full w-full flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+              <Drawer.Content className="flex h-full w-full flex-col pt-(--safe-top) pb-(--safe-bottom)">
                 {children}
               </Drawer.Content>
             </Drawer.Popup>
@@ -259,7 +259,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className="flex size-full flex-col bg-sidebar pt-(--safe-top) pb-(--safe-bottom) group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
         >
           {children}
         </div>
@@ -281,15 +281,16 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon-sm"
-      // on a phone the bottom tabs' More opens the menu (bottom-tabs.tsx)
-      className={cn("max-md:hidden", className)}
+      // on a phone: the menu (search, usage, the account), top left on every page, a bigger target for a thumb
+      className={cn("max-md:size-9 max-md:[&_svg]:size-5", className)}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <PanelLeftIcon className="max-md:hidden" />
+      <MenuIcon className="md:hidden" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )

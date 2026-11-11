@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { saveFile } from "@/lib/save-file";
 
 type Sort = { column: string; dir: "asc" | "desc" } | null;
 type Filters = Record<string, string>;
@@ -47,7 +48,9 @@ async function saveExcel(table: string, data: DbRows) {
   const rows = data.rows.map((row) => row.map((v) => (typeof v === "string" ? v.slice(0, 32_767) : v)));
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([data.columns.map(heading), ...rows]), "Data");
-  XLSX.writeFile(book, `${table.replace(/[^\w -]/g, "_")}.xlsx`);
+  const bytes: ArrayBuffer = XLSX.write(book, { type: "array", bookType: "xlsx" });
+  const type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  await saveFile(new Blob([bytes], { type }), `${table.replace(/[^\w -]/g, "_")}.xlsx`);
 }
 
 // The records Emplio keeps for the business (leads, orders, ...), to look at. View only: changes go through Emplio.
