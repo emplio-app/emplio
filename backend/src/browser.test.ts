@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canReopen, keepIndexedDb, signedInSites, sitesIn } from "./browser";
+import { canReopen, keepIndexedDb, signedInSites, sitesIn, stillRunning } from "./browser";
 
 test("the Live browser button lasts 24 hours after the browser last ran", () => {
   const now = Date.now();
@@ -40,4 +40,12 @@ test("only long-lived, script-hidden sign-in cookies make a site a signed-in one
     now,
   );
   expect([...found].sort()).toEqual(["getswipe.in", "google.com"]);
+});
+
+test("a browser being stopped isn't picked up again as the chat's browser", () => {
+  const b = (id: string, startedAt: string) => ({ id, cdpUrl: "https://cdp", liveUrl: "https://live", startedAt });
+  const listed = [b("old", "2026-11-11T04:57:56"), b("new", "2026-11-11T05:13:40"), { id: "half", cdpUrl: "", liveUrl: "https://live" }];
+  expect(stillRunning(listed, new Set()).map((x) => x.id)).toEqual(["new", "old"]);
+  expect(stillRunning(listed, new Set(["new"])).map((x) => x.id)).toEqual(["old"]);
+  expect(stillRunning([b("old", "2026-11-11T04:57:56")], new Set(["old"]))).toEqual([]);
 });

@@ -161,6 +161,7 @@ export async function stopBrowser(conversationId: string) {
   const live = await pending.catch(() => null);
   if (!live) return;
   clearTimeout(live.timer);
+  stopping.add(live.id);
   // a browser that has already ended doesn't answer: don't hold the stop up for it
   const page = live.owner
     ? await Promise.race([saveState(live.owner, live.cdpUrl), Bun.sleep(20_000).then(() => Promise.reject(new Error("timed out")))]).catch((e) => {
@@ -183,8 +184,15 @@ const toLive = (s: { id: string; liveUrl: string; cdpUrl: string; timeoutAt: str
 
 // The chat's browser still running, if any: this server forgets them when it restarts,
 // so look before starting another. Strays from earlier restarts are stopped.
+// Being stopped ones are left out: a stop takes seconds (sign-ins are saved first), and the chat screen asking for
+// the live view meanwhile would pick the dying browser up again, leaving every later command on a dead one.
+// ponytail: ids are never taken out again; a few bytes per browser until the server restarts
+const stopping = new Set<string>();
+export const stillRunning = <T extends { id: string; cdpUrl?: string | null; liveUrl?: string | null; startedAt?: string }>(listed: T[], leaving: Set<string> = stopping) =>
+  listed.filter((b) => b.cdpUrl && b.liveUrl && !leaving.has(b.id)).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+
 async function find(conversationId: string) {
-  const [newest, ...strays] = (await cloud.browser.listHosted(conversationId)).filter((b) => b.cdpUrl && b.liveUrl).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  const [newest, ...strays] = stillRunning(await cloud.browser.listHosted(conversationId));
   for (const b of strays) void cloud.browser.stopHosted(b.id).catch(() => {});
   return newest ? toLive(newest) : null;
 }
