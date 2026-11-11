@@ -45,7 +45,7 @@ export function BottomTabs() {
   );
 
   return (
-    <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-(--safe-bottom) md:hidden">
       <div className="grid h-14 grid-cols-5">
         {tab(
           main ? `/chat/${main.id}` : "/home",

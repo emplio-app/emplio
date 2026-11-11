@@ -114,6 +114,9 @@
   --sidebar-ring: oklch(0.44 0.09 158);
   /* the visible height; the chat layout follows the phone keyboard with it */
   --app-h: 100dvh;
+  /* the phone's status bar and notch above, its home bar below (viewport-fit=cover draws the page under both) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .dark {
@@ -256,9 +259,18 @@ input:is([type="date"], [type="datetime-local"], [type="time"], [type="month"], 
 
 /* --- Phone screens: the way sheets and pages move in a phone's own apps. --- */
 
-/* The tab bar makes way while typing, leaving the screen to the keyboard and the text */
+/* Menus and pickers stop short of the status bar and the home bar: Base UI only keeps them inside the screen,
+   so a tall one opened upward reached under the clock. */
+[data-slot="dropdown-menu-content"],
+[data-slot="select-content"] {
+  max-height: calc(var(--available-height) - var(--safe-top) - var(--safe-bottom));
+}
+
+/* The tab bar makes way while typing, leaving the screen to the keyboard and the text; the keyboard covers the
+   home bar too, so nothing keeps room for it */
 body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) {
   --tabs-h: 0px;
+  --safe-bottom: 0px;
 }
 body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) .bottom-tabs {
   display: none;
@@ -267,7 +279,7 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
    .under-tabs: those run on underneath the glass and get the room at their own end instead. */
 @media (max-width: 767.98px) {
   :root {
-    --tabs-h: calc(3.5rem + env(safe-area-inset-bottom));
+    --tabs-h: calc(3.5rem + var(--safe-bottom));
   }
   .page-in:not(:has(.under-tabs)),
   .under-tabs {
@@ -354,14 +366,21 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     translate: 0 -100%;
     width: 100%;
     max-width: none;
-    max-height: min(92dvh, var(--app-h));
+    /* never up under the status bar: a tall sheet keeps its grabber and top row where a thumb can reach them */
+    max-height: calc(var(--app-h) - var(--safe-top) - 0.75rem);
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    padding-bottom: max(1rem, var(--safe-bottom));
     border-radius: 1.25rem 1.25rem 0 0;
     animation: sheet-in 340ms cubic-bezier(0.32, 0.72, 0, 1);
     /* more of the sheet below the screen's edge, for when it is pulled up past its place (dialog.tsx) */
     box-shadow: 0 4rem 0 var(--popover);
+  }
+  /* a sheet's button row runs down to the screen's edge, behind the home bar, not a strip short of it */
+  [data-slot="dialog-content"] > [data-slot="dialog-footer"] {
+    margin-bottom: calc(-1 * max(1rem, var(--safe-bottom)));
+    padding-bottom: max(1rem, var(--safe-bottom));
+    border-radius: 0;
   }
   /* once a finger has taken it, the finger moves it (dialog.tsx SheetGrabber), not the slide-in */
   [data-slot="dialog-content"][data-dragged]:not([data-closed]),

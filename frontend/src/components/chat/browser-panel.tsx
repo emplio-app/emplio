@@ -1,7 +1,7 @@
 "use client";
 
 import type { UIMessage } from "ai";
-import { CircleDotIcon, EyeIcon, GlobeIcon, MicIcon, MicOffIcon, MousePointerClickIcon, XIcon } from "lucide-react";
+import { ChevronLeftIcon, CircleDotIcon, EyeIcon, GlobeIcon, MicIcon, MicOffIcon, MousePointerClickIcon, XIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -283,15 +283,15 @@ export function usePanelWidth(key = "browser-panel-width") {
   return { width, dragging, onPointerDown, reset: () => save(null) };
 }
 
-// the side panel's shell, shared with the file panel: beside the chat on wide screens, full screen on phones,
-// its left edge dragged to resize
+// the side panel's shell, shared with the file panel: beside the chat on wide screens, full screen on phones and
+// tablets (clear of the status bar and home bar there), its left edge dragged to resize
 export function SidePanel({ label, widthKey, children }: { label: string; widthKey?: string; children: (dragging: boolean) => React.ReactNode }) {
   const panel = usePanelWidth(widthKey);
   return (
     <aside
       aria-label={label}
       style={{ "--panel-w": panel.width ? `${panel.width}px` : "min(50%, 960px)" } as React.CSSProperties}
-      className="fixed inset-0 z-40 flex flex-col bg-background animate-in fade-in slide-in-from-right-4 duration-200 lg:relative lg:z-auto lg:w-(--panel-w) lg:max-w-[calc(100%-420px)] lg:shrink-0 lg:border-l"
+      className="fixed inset-0 z-40 flex flex-col bg-background pt-(--safe-top) pb-(--safe-bottom) animate-in fade-in slide-in-from-right-4 duration-200 lg:relative lg:pt-0 lg:pb-0 lg:z-auto lg:w-(--panel-w) lg:max-w-[calc(100%-420px)] lg:shrink-0 lg:border-l"
     >
       <div
         role="separator"
@@ -390,7 +390,13 @@ export function BrowserPanel() {
     <SidePanel label="Live browser">
       {(dragging) => (
       <>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 max-sm:gap-1 max-sm:pr-2 max-sm:pl-1.5">
+        {/* on a phone the panel covers the chat: back to it first, the browser keeps going (the chip brings it back) */}
+        {!browser.showing && (
+          <Button size="icon" variant="ghost" onClick={browser.hide} className="size-10 lg:hidden" aria-label="Back to chat" title="Back to chat">
+            <ChevronLeftIcon className="size-5" />
+          </Button>
+        )}
         {browser.showing ? (
           <span role="status" className="flex min-w-0 items-center gap-2 text-destructive">
             <span aria-hidden className="size-2 shrink-0 animate-pulse rounded-full bg-destructive" />
@@ -400,7 +406,7 @@ export function BrowserPanel() {
           </span>
         ) : (
           <>
-            <GlobeIcon className="size-4 text-muted-foreground" />
+            <GlobeIcon className="size-4 text-muted-foreground max-lg:hidden" />
             <span className="text-sm font-medium">Browser</span>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <LiveDot />
@@ -415,37 +421,38 @@ export function BrowserPanel() {
                 size="icon"
                 variant={browser.mic === "muted" ? "secondary" : "ghost"}
                 onClick={browser.toggleMic}
-                className="size-8"
+                className="size-8 max-sm:size-10"
                 title={micLabel}
                 aria-label={micLabel}
                 aria-pressed={browser.mic === "muted"}
               >
                 {browser.mic === "on" ? <MicIcon className="size-4" /> : <MicOffIcon className="size-4" />}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => browser.endShowing(false)} className="h-8 rounded-full">
+              <Button size="sm" variant="ghost" onClick={() => browser.endShowing(false)} className="h-8 rounded-full max-sm:h-10">
                 Cancel
               </Button>
-              <Button size="sm" onClick={() => browser.endShowing(true)} className="h-8 rounded-full">
+              <Button size="sm" onClick={() => browser.endShowing(true)} className="h-8 rounded-full max-sm:h-10">
                 Done
               </Button>
             </>
           ) : (
             <>
-              <Button size="sm" variant="outline" onClick={() => setAsking(true)} className="h-8 gap-1.5 rounded-full">
-                <CircleDotIcon className="size-3.5" />
-                Show Emplio how
+              <Button size="sm" variant="outline" onClick={() => setAsking(true)} className="h-8 gap-1.5 rounded-full max-sm:size-10 max-sm:px-0" title="Show Emplio how">
+                <CircleDotIcon className="size-3.5 max-sm:size-4" />
+                <span className="max-sm:sr-only">Show Emplio how</span>
               </Button>
               <Button
                 size="sm"
                 variant={control ? "default" : "outline"}
                 onClick={() => takeControl(!control)}
-                className={`h-8 gap-1.5 rounded-full transition-shadow ${nudged ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background" : ""}`}
+                title={control ? "Stop controlling" : "Take control"}
+                className={`h-8 gap-1.5 rounded-full transition-shadow max-sm:size-10 max-sm:px-0 ${nudged ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background" : ""}`}
               >
-                {control ? <EyeIcon className="size-3.5" /> : <MousePointerClickIcon className="size-3.5" />}
-                {control ? "Stop controlling" : "Take control"}
+                {control ? <EyeIcon className="size-3.5 max-sm:size-4" /> : <MousePointerClickIcon className="size-3.5 max-sm:size-4" />}
+                <span className="max-sm:sr-only">{control ? "Stop controlling" : "Take control"}</span>
               </Button>
               {/* one X, then ask: people read it as "close this panel", but it used to end the browser too */}
-              <Button size="icon" variant="ghost" onClick={() => setClosing(true)} className="size-8" aria-label="Close">
+              <Button size="icon" variant="ghost" onClick={() => setClosing(true)} className="size-8 max-sm:size-10" aria-label="Close">
                 <XIcon className="size-4" />
               </Button>
             </>

@@ -60,6 +60,10 @@ const settingsQueryKey = ["settings"];
 type Field = (typeof SETTING_FIELDS)[number];
 type Value = Settings[keyof Settings];
 const ICONS = { work: BrainIcon, memory: MessagesSquareIcon, computer: MonitorIcon, schedule: CalendarClockIcon };
+// The tabs run down the side on wide screens and across the top on a phone: there the line under the open one
+// sits on the row's bottom border (its p-2 and 1px border), not up the tab's right edge.
+const TAB =
+  "h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px] max-sm:after:inset-x-0! max-sm:after:top-auto! max-sm:after:-bottom-[9px]! max-sm:after:h-0.5! max-sm:after:w-auto!";
 
 // what Quality shows once any model was picked by hand
 const CUSTOM = "custom";
@@ -201,7 +205,7 @@ export function SettingsDialog({
                   <TabsTrigger
                     key={s.key}
                     value={s.key}
-                    className="h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px]"
+                    className={TAB}
                   >
                     <Icon />
                     {s.label}
@@ -210,7 +214,7 @@ export function SettingsDialog({
               })}
               <TabsTrigger
                 value="appearance"
-                className="h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px]"
+                className={TAB}
               >
                 <SunMoonIcon />
                 Appearance

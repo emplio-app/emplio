@@ -12,6 +12,7 @@ import {
   CheckIcon,
   CopyIcon,
   DownloadIcon,
+  ChevronLeftIcon,
   ExternalLinkIcon,
   FileArchiveIcon,
   FileAudioIcon,
@@ -596,7 +597,13 @@ function Preview({ file }: { file: Shown }) {
     // shown as it looks; Download and Share still give the Word or PowerPoint file itself
     if (made.data?.previewUrl) return <PdfFrame href={fileHref(made.data.previewUrl)} title={file.name} />;
     if (!text.data?.trim()) return <NoPreview file={file} />;
-    if (kind === "markdown") return <MessageResponse className="text-sm">{text.data}</MessageResponse>;
+    // a page to read, with margins, not words against the screen's edge
+    if (kind === "markdown")
+      return (
+        <article className="mx-auto max-w-3xl rounded-lg border bg-background px-4 py-5 sm:px-8 sm:py-7">
+          <MessageResponse className="text-sm">{text.data}</MessageResponse>
+        </article>
+      );
     return (
       <div className="grid gap-2">
         {kind === "office" && <p className="text-xs text-muted-foreground">Only the words are shown here. Download it to see it as it looks.</p>}
@@ -738,8 +745,12 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
     <SidePanel label="File" widthKey="file-panel-width">
       {(dragging) => (
         <>
-          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-            <FileTypeIcon file={file} className="size-4 shrink-0 text-muted-foreground" />
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 max-lg:gap-1 max-lg:pl-1.5">
+            {/* on a phone the file covers the page: back first, where a thumb expects it */}
+            <Button size="icon" variant="ghost" onClick={onClose} className="size-10 shrink-0 lg:hidden" aria-label="Back">
+              <ChevronLeftIcon className="size-5" />
+            </Button>
+            <FileTypeIcon file={file} className="size-4 shrink-0 text-muted-foreground max-lg:hidden" />
             <span className="min-w-0 truncate text-sm font-medium" title={file.name}>
               {file.name}
             </span>
@@ -749,7 +760,7 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
               <Button size="icon-sm" variant="ghost" title="Open in new tab" aria-label="Open in new tab" nativeButton={false} render={<a href={fileHref(file.url)} target="_blank" rel="noreferrer" />}>
                 <ExternalLinkIcon />
               </Button>
-              <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close">
+              <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close" className="max-lg:hidden">
                 <XIcon />
               </Button>
             </div>

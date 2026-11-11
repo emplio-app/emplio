@@ -211,7 +211,7 @@ function Sidebar({
             >
               <Drawer.Title className="sr-only">Sidebar</Drawer.Title>
               <Drawer.Description className="sr-only">Displays the mobile sidebar.</Drawer.Description>
-              <Drawer.Content className="flex h-full w-full flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+              <Drawer.Content className="flex h-full w-full flex-col pt-(--safe-top) pb-(--safe-bottom)">
                 {children}
               </Drawer.Content>
             </Drawer.Popup>
@@ -259,7 +259,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className="flex size-full flex-col bg-sidebar pt-(--safe-top) pb-(--safe-bottom) group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
         >
           {children}
         </div>

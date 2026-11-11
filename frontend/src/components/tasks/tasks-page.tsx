@@ -414,7 +414,8 @@ function QuickAdd({ people }: { people: People }) {
       <div className="flex flex-wrap items-center gap-2">
         <WhoSelect people={people} value={who} onChange={setWho} className="h-8 min-w-0 flex-1 sm:w-44 sm:flex-none" />
         <Input type="date" aria-label="Due" value={due} onChange={(e) => setDue(e.target.value)} className="h-8 min-w-0 flex-1 sm:w-40 sm:flex-none" />
-        <Button type="submit" size="sm" className="ml-auto" disabled={add.isPending || !title.trim()}>
+        {/* on a phone a row of its own, so the person and the date each get half the width (the date was cut off) */}
+        <Button type="submit" size="sm" className="ml-auto max-sm:w-full" disabled={add.isPending || !title.trim()}>
           Add task
         </Button>
       </div>

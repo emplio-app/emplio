@@ -1167,7 +1167,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-md:pb-3">
+              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,var(--safe-bottom))] max-md:pb-3">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
