@@ -479,10 +479,14 @@ case "$1" in
         # A file on this computer: the browser runs on another one and only attaches files in its own downloads
         # folder, so the file goes there first, as a download the page makes of its bytes (same name, so the site
         # sees the real filename). A name already in that folder (something it downloaded) is attached as it is.
+        # Many sites have no file box to point at (hidden in the page's parts, or made when a button is clicked):
+        # then <input> is the button that opens the file picker. It's clicked with the page set to hand any file
+        # box it opens these files, instead of a picker no one can see.
         # ponytail: one eval per 1 MB of base64, kept in the page's memory; a direct DevTools socket if huge files get common
         # ponytail: a changed file sent again under the same name lands as "name (1)" and the first copy gets attached; rename it if that bites
-        [ $# -ge 3 ] || { echo "usage: emplio browser upload <input> <file>..." >&2; exit 2; }
+        [ $# -ge 3 ] || { echo "usage: emplio browser upload <file box or its upload button> <file>..." >&2; exit 2; }
         input="$2"; shift 2; names=(); tries=1
+        run eval "window.__emplioFiles=[];1" >/dev/null || exit 1
         for f in "$@"; do
           n="$(basename "$f")"; names+=("$n")
           [ -f "$f" ] || continue
@@ -491,14 +495,54 @@ case "$1" in
           while read -r piece; do
             printf 'window.__emplioUp.push("%s");1' "$piece" | run eval --stdin >/dev/null || exit 1
           done < <(base64 -w0 "$f" | fold -w 1000000; echo)
-          printf '%s' "(() => { const parts = window.__emplioUp.map(p => Uint8Array.from(atob(p), c => c.charCodeAt(0))); delete window.__emplioUp; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(parts)); a.download = decodeURIComponent(escape(atob('$(printf '%s' "$n" | base64 -w0)'))); (document.body || document.documentElement).appendChild(a); a.click(); a.remove(); return 1; })()" | run eval --stdin >/dev/null || exit 1
+          type="$(file -b --mime-type "$f" 2>/dev/null)"
+          printf '%s' "(() => { const parts = window.__emplioUp.map(p => Uint8Array.from(atob(p), c => c.charCodeAt(0))); delete window.__emplioUp; const file = new File(parts, decodeURIComponent(escape(atob('$(printf '%s' "$n" | base64 -w0)'))), { type: '\${type:-application/octet-stream}' }); window.__emplioFiles.push(file); const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; (document.body || document.documentElement).appendChild(a); a.click(); a.remove(); return 1; })()" | run eval --stdin >/dev/null || exit 1
         done
         # the download takes a moment to land: try until the browser finds it
         for i in $(seq 1 $tries); do
           out="$(run upload "$input" "\${names[@]}" 2>&1)" && { printf '%s\\n' "$out"; exit 0; }
-          case "$out" in *"downloads directory"*) [ "$tries" = 1 ] && { echo "emplio browser: no such file: \${names[*]}" >&2; exit 1; }; sleep 1 ;; *) printf '%s\\n' "$out" >&2; exit 1 ;; esac
+          case "$out" in *"downloads directory"*) [ "$tries" = 1 ] && { echo "emplio browser: no such file: \${names[*]}" >&2; exit 1; }; sleep 1 ;; *) break ;; esac
         done
-        echo "emplio browser: \${names[*]} didn't reach the browser in time" >&2; exit 1 ;;
+        case "$out" in *"downloads directory"*) echo "emplio browser: \${names[*]} didn't reach the browser in time" >&2; exit 1 ;; esac
+        # not a file box: click it as the button that opens one (only files from this computer, whose bytes the page has)
+        [ "$tries" = 60 ] || { printf '%s\\n' "$out" >&2; exit 1; }
+        run eval "$(cat <<'JS'
+(() => {
+  const isFile = (el) => el instanceof HTMLInputElement && el.type === "file";
+  const click = HTMLInputElement.prototype.click, showPicker = HTMLInputElement.prototype.showPicker;
+  const undo = () => {
+    HTMLInputElement.prototype.click = click;
+    if (showPicker) HTMLInputElement.prototype.showPicker = showPicker;
+    removeEventListener("click", onClick, true);
+  };
+  const fill = (box) => {
+    undo();
+    const dt = new DataTransfer();
+    for (const f of window.__emplioFiles) dt.items.add(f);
+    box.files = dt.files;
+    box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    window.__emplioPicked = box.files.length;
+  };
+  const onClick = (e) => {
+    const box = e.composedPath().find(isFile);
+    if (box) { e.preventDefault(); fill(box); }
+  };
+  HTMLInputElement.prototype.click = function () { return isFile(this) ? fill(this) : click.call(this); };
+  if (showPicker) HTMLInputElement.prototype.showPicker = function () { return isFile(this) ? fill(this) : showPicker.call(this); };
+  addEventListener("click", onClick, true);
+  window.__emplioPicked = 0;
+  setTimeout(undo, 10000);
+  return 1;
+})()
+JS
+)" >/dev/null || exit 1
+        clicked="$(run click "$input" 2>&1)" || { printf '%s\\n%s\\n' "$out" "$clicked" >&2; exit 1; }
+        for i in 1 2 3 4 5; do
+          [ "$(run eval "window.__emplioPicked" 2>/dev/null)" -gt 0 ] 2>/dev/null && { echo "✓ Attached \${names[*]}"; exit 0; }
+          sleep 1
+        done
+        echo "emplio browser: $input isn't a file box, and clicking it opened no file picker. Point upload at the button or link that says Upload, Browse or Choose file." >&2; exit 1 ;;
     esac
     # A size Emplio set (set viewport, set device) lasts only while the tool's background process does, and that can
     # end between commands: the page then snaps back to the browser's own size. So it's kept for this browser and
@@ -806,6 +850,7 @@ emplio browser click @e3
 emplio browser fill @e5 "the text"          # clears the box first
 emplio browser find label "Name" fill "x"   # no ref needed; also: find role button click --name "Save"
 emplio browser wait --text "Saved"          # instead of sleeping
+emplio browser upload @e7 /work/out/a.png   # a file from this computer; @e7: the file box or its Upload/Browse button
 \`\`\`
 On any site, in this order: an app connection if it has one (\`emplio apps\`); then the site's own requests (1 below); pages (2 and 3) only when neither can do it. A skill for a site says the same: its exact requests first, page steps as the fallback.
 Use the fastest of these that works:
