@@ -22,7 +22,9 @@ import { fly } from "./fly";
 import { github } from "./github";
 import { googlecalendar } from "./googlecalendar";
 import { googledocs } from "./googledocs";
+import { googleanalytics } from "./googleanalytics";
 import { googlemeet } from "./googlemeet";
+import { googlesearchconsole } from "./googlesearchconsole";
 import { googlesheets } from "./googlesheets";
 import { hostinger } from "./hostinger";
 import { hubspot } from "./hubspot";
@@ -107,7 +109,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlecalendar, googledocs, googlesheets, googlemeet, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";

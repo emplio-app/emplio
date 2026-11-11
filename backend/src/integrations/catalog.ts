@@ -66,6 +66,8 @@ export const CATALOG: CatalogApp[] = [
   own("hostinger", "Hostinger", "developer", "Websites, WordPress, VPS servers, domains, DNS and business email on Hostinger"),
   own("neon", "Neon", "developer", "Postgres databases on Neon: run SQL, and manage projects, branches, databases, roles, backups, auth and storage"),
   own("livekit", "LiveKit", "developer", "Live audio/video rooms, recordings and streams, phone calls (SIP), numbers and voice AI agents on LiveKit"),
+  own("googlesearchconsole", "Google Search Console", "productivity", "See how your website is doing in Google Search: the searches that bring people in, which pages they land on, whether Google can find your pages, and sitemaps"),
+  own("googleanalytics", "Google Analytics", "productivity", "See who visits your website and what they do: visitors, where they come from, which pages sell, live traffic, and your reports and tracking setup"),
   own("github", "GitHub", "developer", "Repositories, issues, pull requests and Actions, and git itself on Emplio's computer"),
 ];
 
