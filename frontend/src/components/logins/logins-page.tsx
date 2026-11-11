@@ -45,7 +45,7 @@ export function LoginsPage() {
           <PlusIcon className="size-3.5" /> Add
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
           {done && (
             <div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">

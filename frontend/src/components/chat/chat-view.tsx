@@ -61,6 +61,7 @@ import { Button } from "@/components/ui/button";
 import { pausedNote, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { haptic } from "@/lib/haptics";
 import {
   approvalsQueryKey,
   api,
@@ -402,6 +403,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // While a reply is in progress, new messages wait in line and go out one by one.
   const send = (raw: string) => {
     if (attachments.uploading || (!raw.trim() && !attachments.ready && !quotes.some((q) => q.note.trim()))) return;
+    haptic();
     const text = withQuotes(quotes, raw);
     const message = { text, files: attachments.take(), mentions: mentionMenu.linked, command };
     if (busy || queue.length) enqueue({ id: uuid(), ...message });
@@ -739,7 +741,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     return (
       now && (
         <div key={now} className="type-in" style={{ "--type-len": now.length } as React.CSSProperties}>
-          <Shimmer className="text-[15px] leading-relaxed">{now}</Shimmer>
+          <Shimmer className="text-[0.9rem] leading-relaxed">{now}</Shimmer>
         </div>
       )
     );
@@ -817,7 +819,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 }
               }}
               rows={Math.min(10, editText.split("\n").length + 1)}
-              className="w-full resize-none bg-transparent text-[15px] outline-none"
+              className="w-full resize-none bg-transparent text-[0.9rem] outline-none"
             />
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -829,7 +831,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             </div>
           </div>
         ) : (message.role === "assistant" || text) && (
-          <MessageContent className="text-[15px] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
+          <MessageContent className="text-[0.9rem] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
             {message.role === "user" ? (
               <LongText>
                 <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
@@ -927,7 +929,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               <>
                 {busy && messages.at(-1)?.role === "user" && (
                   <Message from="assistant">
-                    <MessageContent className="text-[15px] leading-relaxed">{thinking()}</MessageContent>
+                    <MessageContent className="text-[0.9rem] leading-relaxed">{thinking()}</MessageContent>
                   </Message>
                 )}
 
@@ -990,7 +992,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className="px-4 pt-4 text-[15px]"
+          className="px-4 pt-4 text-[0.9rem]"
         />
       </div>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these

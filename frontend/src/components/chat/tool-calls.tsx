@@ -87,7 +87,7 @@ export function AssistantParts({
     const isLast = i === segments.length - 1;
     return "said" in s ? (
       s.said.map((text, j) => (
-        <p key={`${i}-${j}`} className="ml-auto max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed font-medium whitespace-pre-wrap">
+        <p key={`${i}-${j}`} className="ml-auto max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5 text-[0.9rem] leading-relaxed font-medium whitespace-pre-wrap">
           {text}
         </p>
       ))

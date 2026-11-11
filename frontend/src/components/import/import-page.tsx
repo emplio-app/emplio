@@ -139,7 +139,7 @@ export function ImportPage() {
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Bring your memory</h1>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-6">
           <div>
             <h2 className="font-heading text-xl">Bring what another AI knows about you</h2>

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { api, approvalsQueryKey } from "@/lib/api";
+import { haptic } from "@/lib/haptics";
 
 const DONE: Record<NonNullable<Approval["decision"]>, string> = {
   once: "Allowed",
@@ -83,6 +84,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
   const queryClient = useQueryClient();
   const answer = useMutation({
     mutationFn: (decision: "once" | "always" | "deny") => api(`/approvals/${approval.id}`, { decision }),
+    onMutate: (decision) => haptic(decision === "deny" ? "tap" : "success"),
     onSettled: () => queryClient.invalidateQueries({ queryKey: approvalsQueryKey }),
   });
   return (
