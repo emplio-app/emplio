@@ -59,6 +59,7 @@ export const CATALOG: CatalogApp[] = [
   own("todoist", "Todoist", "productivity", "Tasks, projects, labels, filters and comments on your Todoist"),
   own("asana", "Asana", "productivity", "Tasks, projects, comments and deadlines on your Asana, and automations when work moves"),
   own("clickup", "ClickUp", "productivity", "Tasks, lists, comments, goals and time tracking on your ClickUp, and automations when work moves"),
+  own("bing_webmaster", "Bing Webmaster Tools", "productivity", "How your website is doing in Bing and Copilot search: what people search for to find you, which pages they land on, crawl problems, sitemaps, and asking Bing to look at a page now"),
   composio("linkedin", "LinkedIn", "productivity", "Post updates and manage your profile"),
   own("fly", "Fly.io", "developer", "Apps, servers, databases, domains, logs, deploys and billing on Fly.io"),
   own("vercel", "Vercel", "developer", "Websites on Vercel: projects, deploys, logs, domains, DNS, env vars and teams"),
