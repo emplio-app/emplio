@@ -131,7 +131,7 @@ export async function call(api: Api, key: string, send: Send, input: Record<stri
     const text = await res.text();
     const j = parseLine(text);
     // Twirp (LiveKit) says {"code", "msg"}; Plivo {"error": "..."}; Razorpay {"error": {"description"}}
-    const why = j?.error?.message ?? j?.error?.description ?? j?.message ?? j?.msg ?? (typeof j?.error === "string" ? j.error : undefined) ?? text;
+    const why = j?.error?.message ?? j?.error?.description ?? j?.message ?? j?.Message ?? j?.msg ?? (typeof j?.error === "string" ? j.error : undefined) ?? text;
     // field-by-field validation errors, as Laravel-style APIs give them: {"errors": {"name": ["is taken"]}}
     const fields = j?.errors && typeof j.errors === "object" && !Array.isArray(j.errors)
       ? Object.entries(j.errors).map(([k, v]) => `${k}: ${[v].flat().join(", ")}`).join("; ")

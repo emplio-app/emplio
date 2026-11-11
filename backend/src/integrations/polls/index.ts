@@ -9,6 +9,7 @@ import type { ActionDetail, ActionInfo } from "@emplio/shared";
 import { z } from "zod";
 import type { TriggerDetail } from "../types";
 import { airtable } from "./airtable";
+import { bing_webmaster } from "./bing_webmaster";
 import { notion } from "./notion";
 import { github } from "./github";
 import { googlecalendar } from "./googlecalendar";
@@ -20,6 +21,7 @@ import { googlesheets } from "./googlesheets";
 import { hubspot } from "./hubspot";
 import { indiamart } from "./indiamart";
 import { razorpay } from "./razorpay";
+import { swipe } from "./swipe";
 import { todoist } from "./todoist";
 import { zoho } from "./zoho";
 import { zoho_books } from "./zoho_books";
@@ -41,7 +43,7 @@ export type PollTrigger = {
 };
 
 // Every app's polled triggers, one file per app (polls/<app>.ts), each exporting its triggers by short name.
-const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, github, hubspot, notion, airtable, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, zoho_books, zoho_invoice, zoho_mail, zoho };
+const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, swipe, github, hubspot, notion, airtable, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho };
 const POLLS: Record<string, PollTrigger> = Object.fromEntries(
   Object.entries(APPS).flatMap(([app, triggers]) => Object.entries(triggers).map(([name, t]) => [`${app}.${name}`, t])),
 );
