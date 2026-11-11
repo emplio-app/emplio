@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.5 (2026-11-11)
+
+### What's new
+
+- When a new version is ready, the button now says "Update".
+- The install guide shows how to check the install script before running it.
+
+### For developers
+
+- New-version bar button reads "Update" instead of "Refresh"; it still reloads the page (#69).
+- README: the install checksum check is a visible section with a direct link to `install.sh.sha256` (#68).
+
 ## 1.2.4 (2026-11-11)
 
 ### What's new
