@@ -300,3 +300,22 @@ test("emplio hand and report read what's on stdin, and old emplio jobs points to
   expect(old.args).toEqual([]);
   expect(old.err).toContain("emplio hand");
 });
+
+test("a browser size Emplio set is put back before each later command, for that browser only", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  // stands in for agent-browser: writes down every call it gets
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\necho done\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const run = async (command: string, session = "chat-1") => {
+    const p = Bun.spawn(["bash", "-c", command], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: "k", BROWSER_CDP_URL: "x", BROWSER_SESSION: session, BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+    await p.exited;
+  };
+  const calls = async () => (await Bun.file(join(home, "calls")).text()).trim().split("\n").map((l) => l.replace(/^--cdp x --session \S+ /, ""));
+  await run("./emplio browser open https://a.example");
+  await run("./emplio browser set viewport 390 844");
+  await run("./emplio browser snapshot -i");
+  await run("./emplio browser open https://a.example", "chat-2");
+  expect(await calls()).toEqual(["open https://a.example", "set viewport 390 844", "set viewport 390 844", "snapshot -i", "open https://a.example"]);
+  rmSync(home, { recursive: true, force: true });
+});

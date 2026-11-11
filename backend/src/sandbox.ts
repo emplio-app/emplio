@@ -496,6 +496,15 @@ case "$1" in
         done
         echo "emplio browser: \${names[*]} didn't reach the browser in time" >&2; exit 1 ;;
     esac
+    # A size Emplio set (set viewport, set device) lasts only while the tool's background process does, and that can
+    # end between commands: the page then snaps back to the browser's own size. So it's kept for this browser and
+    # put back before each command. A new browser (after an idle stop) starts at its own size again.
+    # ponytail: one extra call per browser command once a size is set; only when the process has ended if that's slow
+    size="$guides/size-$BROWSER_SESSION"
+    case "$1 $2" in
+      "set viewport"|"set device") ;;
+      *) [ -f "$size" ] && { was=(); while IFS= read -r w; do was+=("$w"); done < "$size"; run "\${was[@]}" >/dev/null 2>&1; } ;;
+    esac
     # a failure is also noted for the end of the result (requestsTrailer), since >/dev/null or | tail -1 can hide it
     # (141: | head stopped reading, not a failure)
     e="$(mktemp)"
@@ -511,6 +520,7 @@ ${CALLS_PY}
 PY
       AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" EMPLIO_AB="$ab" python3 -c "$py" "$@" 2>"$e"; rc=$?
     else run "$@" 2>"$e"; rc=$?; fi
+    [ "$rc" = 0 ] && case "$1 $2" in "set viewport"|"set device") mkdir -p "$guides" && printf '%s\\n' "$@" > "$size" ;; esac
     cat "$e" >&2
     step="$*"; [ "$rc" = 0 ] || [ "$rc" = 141 ] || printf '%s: %s\\n' "\${step:0:80}" "$(head -c 300 "$e")" >> "/tmp/emplio-failed.$EZ_KEY"
     rm -f "$e"; exit $rc ;;
