@@ -1,5 +1,6 @@
 // Skills from the public skill store (skills.sh, the open agent-skills index):
-// `emplio skills find` searches it, `emplio skills add` installs one into skills/<name>/ of the company's files
+// `emplio skills find` searches it, `emplio skills show` reads one without installing it (no card: nothing goes
+// into the business's files), `emplio skills add` installs one into skills/<name>/ of the company's files
 // (owner/admin) or the person's own (member, or --mine). Every install is the person's call: an Allow / Deny card
 // shows what it is, where from, how many use it, what the store's security scanners said and whether it carries
 // scripts; "Just do it" and "Always allow" don't skip it, and nobody-watching runs can't install. A skill two
@@ -88,6 +89,45 @@ async function fetchSkill(source: string, skill: string) {
 // "owner/repo/skill" or "owner/repo@skill", as find lists them
 const parse = (ref: string) => /^([\w.-]+\/[\w.-]+)[/@]([\w.:-]+)$/.exec(ref.trim());
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+const SCRIPT = /\.(py|js|mjs|ts|sh|bash|rb|ps1)$/i;
+
+// A store skill as show and add see it: the scanners' report (two "high" stop it here), its files, and how many use it
+async function look(source: string, skill: string) {
+  const report = await audit(source, skill);
+  if (blocked(report))
+    throw new Error(`the store's security scanners rate ${source}/${skill} high risk (${safety(report)}), so it can't be installed. Find another one, or write the skill yourself.`);
+  const { files, description } = await fetchSkill(source, skill);
+  const found = (await search(skill).catch(() => [])).find((f) => f.source === source && f.skill === skill);
+  const scripts = files.filter((f) => SCRIPT.test(f.path)).map((f) => f.path);
+  return { report, files, description, found, scripts };
+}
+
+// `emplio skills show`: a store skill read before asking to install it. SKILL.md comes whole (like skills use);
+// every file is put in `put`'s folder on the computer (outside company/ and me/, so nothing is installed) for the
+// agent to open its scripts there. Returns the text for the agent and SKILL.md, or an error.
+export async function previewSkill(ref: string, put: (name: string, files: { path: string; content: Uint8Array }[]) => Promise<string>) {
+  const m = parse(ref);
+  if (!m) return `error: say which skill as owner/repo/skill, as emplio skills find lists it`;
+  const [, source, skill] = m as unknown as [string, string, string];
+  try {
+    const l = await look(source, skill);
+    const dir = await put(`${source}/${skill}`.replace(/[^\w.-]+/g, "-"), l.files);
+    return { text: describeSkill(`${source}/${skill}`, l, dir), skill: new TextDecoder().decode(l.files.find((f) => f.path === "SKILL.md")!.content) };
+  } catch (error) {
+    return `error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+export function describeSkill(ref: string, l: Pick<Awaited<ReturnType<typeof look>>, "report" | "files" | "found" | "scripts">, dir: string) {
+  const others = l.files.map((f) => f.path).filter((p) => p !== "SKILL.md" && !l.scripts.includes(p));
+  return [
+    `${ref}\t${l.found ? `${l.found.installs.toLocaleString("en-IN")} installs` : "installs unknown"}\t${safety(l.report)}`,
+    `Not installed. Its files are in ${dir}/ to read (SKILL.md follows): open its scripts there before deciding, they would run on this computer.`,
+    `Scripts: ${l.scripts.length ? l.scripts.join(", ") : "none, instructions only"}`,
+    `Other files: ${others.length ? (others.length > 30 ? `${others.slice(0, 30).join(", ")} and ${others.length - 30} more` : others.join(", ")) : "none"}`,
+    `If it fits the job, say what it is and why, then: emplio skills add ${ref}`,
+  ].join("\n");
+}
 
 async function install(s: Session, ref: string, mine: boolean, catchUp: (repo: string) => Promise<unknown>, again = false) {
   const m = parse(ref);
@@ -99,12 +139,7 @@ async function install(s: Session, ref: string, mine: boolean, catchUp: (repo: s
   const there = (await listPaths(s.workspaceId, repo)).filter((p) => p.path.startsWith(`skills/${name}/`));
   if (there.length && !again) return `error: ${dirOf(repo)}/skills/${name} already exists. emplio skills update ${name} fetches it again; or remove it first`;
 
-  const report = await audit(source, skill);
-  if (blocked(report))
-    return `error: the store's security scanners rate ${source}/${skill} high risk (${safety(report)}), so it can't be installed. Find another one, or write the skill yourself.`;
-  const { files, description } = await fetchSkill(source, skill);
-  const found = (await search(skill).catch(() => [])).find((f) => f.source === source && f.skill === skill);
-  const scripts = files.filter((f) => /\.(py|js|mjs|ts|sh|bash|rb|ps1)$/i.test(f.path)).map((f) => f.path);
+  const { report, files, description, found, scripts } = await look(source, skill);
   const where = repo === "company" ? "the whole team's skills" : `${s.user.name}'s own skills`;
 
   const run = async () => {
@@ -136,6 +171,7 @@ async function install(s: Session, ref: string, mine: boolean, catchUp: (repo: s
 
 const USAGE = `usage: emplio skills use <name>                     read a skill here whole (SKILL.md, however long, and a list of its other files)
        emplio skills find <words>                    the public skill store (skills.sh): skills others wrote, most used first
+       emplio skills show <owner/repo/skill>            read a store skill before installing it: SKILL.md, and its files to open (installs nothing)
        emplio skills add <owner/repo/skill> [--mine]    install one, after ${"the person's"} OK on a card (into the company's skills; --mine or a member: their own)
        emplio skills list                               the skills here (also listed in your instructions)
        emplio skills update <name>                      fetch an installed store skill again, after an OK
