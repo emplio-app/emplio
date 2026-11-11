@@ -46,8 +46,8 @@ import { zoho_mail } from "./zoho_mail";
 export type OwnAction = {
   description: string;
   input: z.ZodObject;
-  // input already checked against `input`; key is the decrypted login
-  run(input: any, key: string): Promise<unknown>;
+  // input already checked against `input`; key is the decrypted login, connection the id its webhooks arrive under
+  run(input: any, key: string, connection?: string): Promise<unknown>;
   // only looks things up: runs without asking the person first
   readOnly?: boolean;
 };
@@ -233,7 +233,7 @@ export const own: Provider = {
     if (!login?.secret) throw new AppsError("not connected");
     const parsed = action.input.safeParse(input ?? {});
     if (!parsed.success) throw new AppsError(parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; "));
-    return action.run(parsed.data, login.secret);
+    return action.run(parsed.data, login.secret, login.externalId);
   },
 
   async listTriggers(app, words) {
