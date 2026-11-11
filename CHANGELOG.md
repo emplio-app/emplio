@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.0 (2026-11-11)
+
+### What's new
+
+- Emplio now works with your Google Business Profile: read and reply to reviews, keep your hours, address and photos right, post offers and events, and see how many people called or asked for directions.
+- It can see how your website is doing in search. Google Search Console and Bing Webmaster Tools show the searches that bring people in, which pages they land on and anything stopping your pages from being found, and Google Analytics shows who visits and what they do.
+- Swipe can now start work by itself, so Emplio can act the moment an invoice goes out, a payment lands or a bill goes overdue.
+
+### For developers
+
+- Three new integrations of our own: Google Business Profile (#58), Google Search Console and Google Analytics (#60), and Bing Webmaster Tools (#62). The Google ones use the existing single Google OAuth client, each adding its own scopes to `GOOGLE_SCOPES`; Bing connects with a pasted API key.
+- Each Google app needs its API turned on in the same Google Cloud project, and Business Profile also needs Google's approval of an API access request before any of its calls answer.
+- Swipe gained triggers: its dashboard webhooks plus polled checks for new invoices, payments, overdue bills, customers, expenses and low stock (#57).
+
 ## 1.2.2 (2026-11-11)
 
 ### What's new
