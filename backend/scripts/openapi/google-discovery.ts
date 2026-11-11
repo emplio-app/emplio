@@ -29,11 +29,14 @@ const param = (name: string, location: string, p: Schema) => ({
   schema: p.repeated ? { type: "array", items: convert({ ...p, description: undefined, repeated: undefined }) } : convert({ ...p, description: undefined }),
 });
 
-export async function discovery(url: string, app: string, scopes: string[]) {
+// leaveOut: method ids to drop before anything else, for ones no scope we ask for can call (Analytics' chat) or the
+// provider has shut down (Search Console's mobile-friendly test)
+export async function discovery(url: string, app: string, scopes: string[], leaveOut: string[] = []) {
   const doc = (await (await fetch(url)).json()) as Schema;
   const schemas = Object.fromEntries(Object.entries<Schema>(doc.schemas).map(([k, s]) => [k, convert(s)]));
   const paths: Schema = {};
   const method = (m: Schema) => {
+    if (leaveOut.includes(m.id)) return;
     if (!m.scopes?.some((s: string) => scopes.includes(s))) throw new Error(`${m.id} needs one of ${m.scopes}, and ${app} asks for none of them`);
     const path = `/${m.flatPath ?? m.path}`;
     const named = [...path.matchAll(/\{(\w+)\}/g)].map((x) => x[1]!);
