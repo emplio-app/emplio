@@ -116,10 +116,9 @@ Run the same command again to update. Your settings and data stay.
 
 The full guide, from setup to every setting, is at [docs.emplio.app](https://docs.emplio.app).
 
-<details>
-<summary><b>Check the script before running it</b></summary>
+### Check the script before running it
 
-`emplio.app/install.sh` sends you to [install.sh](install.sh) in this repo. To read it first and make sure what you downloaded is exactly that file:
+`emplio.app/install.sh` sends you to [install.sh](install.sh) in this repo, and its checksum is published in [install.sh.sha256](install.sh.sha256). To read the script first and make sure what you downloaded is exactly that file:
 
 ```bash
 curl -fsSLo install.sh https://emplio.app/install.sh
@@ -128,8 +127,6 @@ bash install.sh
 ```
 
 The second line prints `install.sh: OK` when the file matches. If it doesn't, don't run it, and please [tell us](https://github.com/emplio-app/emplio/issues).
-
-</details>
 
 <details>
 <summary><b>Adding your team</b></summary>
