@@ -24,7 +24,7 @@ export function NewVersionBar() {
     <div className="flex shrink-0 items-center justify-center gap-3 border-b bg-muted px-4 py-1.5 text-sm">
       A new version of Emplio is ready.
       <Button size="sm" onClick={() => window.location.reload()}>
-        Refresh
+        Update
       </Button>
     </div>
   );
