@@ -57,6 +57,27 @@ export async function searchMessages(who: Who, words: string, chat?: string, lim
   return rows.map((r) => ({ ...r, role: r.role as SearchHit["role"], createdAt: r.createdAt.toISOString() }));
 }
 
+// The sidebar's search box: chats whose title matches come first (no message, empty snippet), then
+// matching messages from the other chats.
+export async function searchChats(who: Who, words: string): Promise<SearchHit[]> {
+  const query = toQuery(words);
+  if (!query) return [];
+  const [titled, found] = await Promise.all([
+    db
+      .select({ conversationId: conversations.id, title: conversations.title, updatedAt: conversations.updatedAt })
+      .from(conversations)
+      .where(and(mine(who), sql`to_tsvector('simple', ${conversations.title}) @@ to_tsquery('simple', ${query})`))
+      .orderBy(desc(conversations.updatedAt))
+      .limit(10),
+    searchMessages(who, words),
+  ]);
+  const ids = new Set(titled.map((c) => c.conversationId));
+  return [
+    ...titled.map((c) => ({ conversationId: c.conversationId, title: c.title, messageId: "", role: "user" as const, createdAt: c.updatedAt.toISOString(), snippet: "", n: 0 })),
+    ...found.filter((h) => !ids.has(h.conversationId)),
+  ];
+}
+
 // Words spelled close to these (Athavale → aathavale) in what the person wrote in their chats and in the file repos they may see, for
 // when a name is written differently than searched. Trigram similarity (pg_trgm) over the words of messages.search
 // and file_index.search.
@@ -225,6 +246,6 @@ export async function searchRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { q?: string } }>("/search", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return searchMessages(ctx, (req.query.q ?? "").slice(0, 200));
+    return searchChats(ctx, (req.query.q ?? "").slice(0, 200));
   });
 }
