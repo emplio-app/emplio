@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { OwnApp } from "../index";
 import { type Api, call, rest, specActions } from "../openapi";
+import { events, receive, triggers, watch, wanted, webhookSetup } from "./triggers";
 
 const api: Api = {
   name: "Swipe",
@@ -66,6 +67,18 @@ const expenses = {
   get_expense_pdf: rest(api, "GET", "/v2/expense/pdf/{hash_id}", "Swipe's PDF of an expense (not the receipts attached to it).", z.object({ hash_id: hashId })),
 };
 
+// Swipe's webhook is a setting in its dashboard, not something an API can switch on, so the business has to paste
+// the address in once. This is what to tell them, for this connection.
+const setup = {
+  get_webhook_setup: {
+    description:
+      "Where to paste Emplio's address in Swipe so Swipe's instant triggers (new_document, stock_moved…) work. Swipe takes a webhook only in its own dashboard and only one per company, so the owner does this once by hand; tell them the address and the two events to tick exactly as this answers. Swipe's polled triggers (new_invoice, invoice_paid, payment_received…) need none of this.",
+    input: z.object({}),
+    readOnly: true,
+    run: async (_input: Record<string, unknown>, _key: string, connection?: string) => webhookSetup(connection),
+  },
+};
+
 export const swipe: OwnApp = {
   app: "swipe",
   name: "Swipe",
@@ -79,5 +92,6 @@ export const swipe: OwnApp = {
   async check(key) {
     await call(api, key, { method: "GET", path: "/v2/product/list", query: ["num_records"], headers: [] }, { num_records: 1 });
   },
-  actions: { ...(await specActions(new URL("./actions.json", import.meta.url), api)), ...expenses },
+  actions: { ...(await specActions(new URL("./actions.json", import.meta.url), api)), ...expenses, ...setup },
+  push: { events, triggers, wanted, receive, start: (_key, connection) => watch(connection) },
 };
