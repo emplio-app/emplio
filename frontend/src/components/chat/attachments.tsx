@@ -3,6 +3,7 @@
 import type { FileUIPart } from "ai";
 import { FileTextIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useOpenFile } from "@/components/files/file-viewer";
 import { API_URL } from "@/lib/api";
 import { cn, uuid } from "@/lib/utils";
 
@@ -264,24 +265,26 @@ function ChipButton({ label, onClick, children }: { label: string; onClick: () =
   );
 }
 
-// Attachments shown on a sent message: images as thumbnails, everything else as a file card.
+// Attachments shown on a sent message: images as thumbnails, everything else as a file card; a tap opens it
+// beside the chat (a new tab would be Safari in the iPhone app, not signed in).
 export function MessageAttachments({ parts }: { parts: FileUIPart[] }) {
+  const open = useOpenFile();
   if (!parts.length) return null;
+  const show = (p: FileUIPart) => open?.({ url: p.url, name: p.filename ?? "File", mediaType: p.mediaType });
   return (
     <div className="ml-auto flex max-w-full flex-wrap items-start justify-end gap-2">
       {parts.map((p, i) =>
         p.mediaType.startsWith("image/") ? (
-          <a key={i} href={fileHref(p.url)} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border">
+          <button key={i} type="button" onClick={() => show(p)} className="block overflow-hidden rounded-xl border" aria-label={`Open ${p.filename ?? "image"}`}>
             {/* eslint-disable-next-line @next/next/no-img-element -- served via an authenticated redirect */}
             <img src={fileHref(p.url)} alt={p.filename ?? "image"} className="h-40 w-auto max-w-72 object-cover" />
-          </a>
+          </button>
         ) : (
-          <a
+          <button
             key={i}
-            href={fileHref(p.url)}
-            target="_blank"
-            rel="noreferrer"
-            className="flex max-w-64 items-center gap-2.5 rounded-xl border bg-card p-2 pr-3 transition-colors hover:bg-muted"
+            type="button"
+            onClick={() => show(p)}
+            className="flex max-w-64 items-center gap-2.5 rounded-xl border bg-card p-2 pr-3 text-left transition-colors hover:bg-muted"
           >
             <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
               <FileTextIcon className="size-4" />
@@ -290,7 +293,7 @@ export function MessageAttachments({ parts }: { parts: FileUIPart[] }) {
               <div className="truncate text-sm font-medium">{p.filename ?? "File"}</div>
               <div className="truncate text-xs text-muted-foreground">{kindOf(p.filename, p.mediaType)}</div>
             </div>
-          </a>
+          </button>
         ),
       )}
     </div>

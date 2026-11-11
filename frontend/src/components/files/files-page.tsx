@@ -10,7 +10,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { fileHref } from "@/components/chat/attachments";
-import { downloadHref, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
+import { inApp } from "@/lib/save-file";
+import { download, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -190,11 +191,10 @@ export function FilesPage() {
                           <MessageSquareIcon /> Go to its chat
                         </DropdownMenuItem>
                       )}
-                      {/* the server answers with the file as a download, so the page stays */}
-                      <DropdownMenuItem onClick={() => (window.location.href = downloadHref({ url: f.url, name: f.name, mediaType: f.mediaType }))}>
+                      <DropdownMenuItem onClick={() => download({ url: f.url, name: f.name, mediaType: f.mediaType })}>
                         <DownloadIcon /> Download
                       </DropdownMenuItem>
-                      {/\.(md|txt)$/i.test(f.name) && (
+                      {/\.(md|txt)$/i.test(f.name) && !inApp() && (
                         <DropdownMenuItem onClick={() => void savePdf({ url: f.url, name: f.name, mediaType: f.mediaType })}>
                           <FileDownIcon /> Download as PDF
                         </DropdownMenuItem>

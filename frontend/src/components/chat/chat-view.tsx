@@ -596,26 +596,33 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // reading at the very end of an opened chat (not a just-sent prompt): the end stays in view as what's
   // there finishes drawing (code highlighting, images, diagrams), not just the instant it was opened
   const stuck = useRef(true);
+  // the chat's height as last settled: a scroll while it differs is the browser fitting a resize
+  const viewHeight = useRef(0);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // the bottom stays put when the view changes height (the phone keyboard opening), so what was just above
-    // the composer still is
-    let height = el.clientHeight;
+    // The bottom stays put when the view changes height (the phone keyboard opening or closing), so what was
+    // just above the composer still is. Kept as the distance from the end: a view growing (the keyboard going)
+    // first has the browser pull the position back to fit, and its scroll event isn't theirs (checkBottom).
+    let height = (viewHeight.current = el.clientHeight);
+    let below = el.scrollHeight - el.scrollTop - height;
+    const keep = () => void (el.clientHeight === height && (below = el.scrollHeight - el.scrollTop - height));
     const observer = new ResizeObserver(() => {
       const pin = Date.now() - pinnedAt.current < 1500 && el.querySelector<HTMLElement>("[data-pin]");
       // ponytail: a phone's composer and keyboard settle right after sending
       if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
       else if (stuck.current) el.scrollTop = el.scrollHeight;
       // only when it did change: setting the position, even to the same value, ends a flick on an iPhone
-      else if (el.clientHeight !== height) el.scrollTop += height - el.clientHeight;
-      height = el.clientHeight;
+      else if (el.clientHeight !== height) el.scrollTop = el.scrollHeight - el.clientHeight - below;
+      height = viewHeight.current = el.clientHeight;
+      keep();
       setViewportHeight(height);
     });
     observer.observe(el);
     if (contentRef.current) observer.observe(contentRef.current);
-    return () => observer.disconnect();
+    el.addEventListener("scroll", keep, { passive: true });
+    return () => (observer.disconnect(), el.removeEventListener("scroll", keep));
   }, [empty]);
 
   useEffect(() => {
@@ -715,7 +722,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
 
   const checkBottom = () => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || el.clientHeight !== viewHeight.current) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAtBottom(gap < 80 + cardRoom);
     // after a send the reply fills in below the prompt instead (pinLatest)

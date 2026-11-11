@@ -44,6 +44,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { SidePanel } from "@/components/chat/browser-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { inApp, saveFile } from "@/lib/save-file";
 import { copyText } from "@/lib/utils";
 
 // what a chat message carries about a file (older messages have no id: no text preview or sharing)
@@ -51,7 +53,18 @@ export type Shown = { id?: string; url: string; name: string; mediaType: string;
 
 export const madeQueryKey = ["made"];
 
-export const downloadHref = (f: Shown) => `${fileHref(f.url)}?download=${encodeURIComponent(f.name)}`;
+const downloadHref = (f: Shown) => `${fileHref(f.url)}?download=${encodeURIComponent(f.name)}`;
+// the server answers with the file as a download, so the page stays. The iPhone app can't download: there the
+// bytes (?raw, storage won't hand them to the page) go to the share sheet (save-file.ts).
+export function download(f: Shown) {
+  if (!inApp()) return void (window.location.href = downloadHref(f));
+  fetch(`${fileHref(f.url)}?raw`, { credentials: "include" })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Couldn't download ${f.name}.`);
+      await saveFile(new Blob([await res.blob()], { type: f.mediaType }), f.name);
+    })
+    .catch((error: Error) => toast.error(error.message));
+}
 
 const ext = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 const SHEET = ["xlsx", "xlsm", "xls", "ods", "csv", "tsv"];
@@ -619,7 +632,7 @@ function NoPreview({ file }: { file: Shown }) {
     <div className="flex flex-col items-center gap-3 py-16 text-center text-sm text-muted-foreground">
       <FileTypeIcon file={file} className="size-10 opacity-50" />
       This file can&apos;t be shown here.
-      <Button size="sm" nativeButton={false} render={<a href={downloadHref(file)} />}>
+      <Button size="sm" onClick={() => download(file)}>
         <DownloadIcon /> Download
       </Button>
     </div>
@@ -699,12 +712,12 @@ export async function savePdf(file: Shown) {
   frame.contentWindow!.print();
 }
 
-// Download: the file itself; a .md or .txt one can also be saved as a PDF.
+// Download: the file itself; a .md or .txt one can also be saved as a PDF (not in the iPhone app: no print there).
 function DownloadButton({ file, label }: { file: Shown; label: string }) {
   const e = ext(file.name);
   if (e !== "md" && e !== "txt")
     return (
-      <Button size="icon-sm" variant="ghost" title="Download" aria-label={label} nativeButton={false} render={<a href={downloadHref(file)} />}>
+      <Button size="icon-sm" variant="ghost" title="Download" aria-label={label} onClick={() => download(file)}>
         <DownloadIcon />
       </Button>
     );
@@ -714,12 +727,15 @@ function DownloadButton({ file, label }: { file: Shown; label: string }) {
         <DownloadIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-max">
-        <DropdownMenuItem render={<a href={downloadHref(file)} />}>
+        <DropdownMenuItem onClick={() => download(file)}>
           <DownloadIcon /> Download as .{e}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void savePdf(file)}>
-          <FileDownIcon /> Download as PDF
-        </DropdownMenuItem>
+        {/* drawn only when open, so the page and the server agree on the button */}
+        {!inApp() && (
+          <DropdownMenuItem onClick={() => void savePdf(file)}>
+            <FileDownIcon /> Download as PDF
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -729,6 +745,7 @@ function DownloadButton({ file, label }: { file: Shown; label: string }) {
 // by whoever renders FilePanel beside them.
 const OpenFile = createContext<((f: Shown) => void) | null>(null);
 export const OpenFileProvider = OpenFile.Provider;
+export const useOpenFile = () => useContext(OpenFile);
 
 // Beside the chat (or the Files list) like the live browser, full screen on phones.
 export function FilePanel({ file: given, onClose }: { file: Shown | null; onClose: () => void }) {
@@ -757,9 +774,12 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
             <div className="ml-auto flex shrink-0 items-center gap-1">
               {file.id && <Share key={file.id} id={file.id} />}
               <DownloadButton file={file} label="Download" />
-              <Button size="icon-sm" variant="ghost" title="Open in new tab" aria-label="Open in new tab" nativeButton={false} render={<a href={fileHref(file.url)} target="_blank" rel="noreferrer" />}>
-                <ExternalLinkIcon />
-              </Button>
+              {/* the iPhone app would hand it to Safari, which isn't signed in */}
+              {!inApp() && (
+                <Button size="icon-sm" variant="ghost" title="Open in new tab" aria-label="Open in new tab" nativeButton={false} render={<a href={fileHref(file.url)} target="_blank" rel="noreferrer" />}>
+                  <ExternalLinkIcon />
+                </Button>
+              )}
               <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close" className="max-lg:hidden">
                 <XIcon />
               </Button>
@@ -777,7 +797,7 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
 
 // The files a reply made, under it: pictures as themselves, everything else as a card; a click opens it beside the chat.
 export function MadeCards({ files }: { files: { id?: string; url: string; filename: string; mediaType?: string }[] }) {
-  const open = useContext(OpenFile);
+  const open = useOpenFile();
   const shown = [...new Map(files.map((f) => [f.url, { id: f.id, url: f.url, name: f.filename, mediaType: f.mediaType ?? "application/octet-stream" }])).values()];
   return (
     <div className="flex flex-wrap gap-2">
