@@ -2,6 +2,29 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.0 (2026-11-11)
+
+### What's new
+
+- On phones, Emplio feels more like a phone's own app: sheets follow your finger and close with a quick flick, the bottom bar is frosted glass with your lists scrolling under it, and buttons give a little when pressed.
+- If your phone is set to reduce motion, things now fade instead of sliding or zooming everywhere in the app.
+- "Allow" requests now wait just above the chat box, so they stay in view however much is written after them. Once answered, each shows in one line whether it was allowed and how it went.
+- Emplio no longer asks you to tap Allow after you already have.
+- The next-step card no longer makes the chat jump, and editing a tapped answer shows just your answer.
+- On phones, the buttons under a sent message no longer sit on top of the reply.
+- When Emplio reports a problem, the step it took now shows in its list of actions.
+- Emplio can test a website at phone size: its browser keeps the page size it was asked for.
+
+### For developers
+
+- Approvals have their own `approvals` table and `GET /conversations/:id/approvals`; cards are no longer part of a command's result, so the model never reads them. Cards left waiting by a restart are closed at the next start (#41).
+- `emplio browser set viewport` is replayed before each later browser command for that chat's browser, and a hosted browser that won't change size is restarted at the asked size; `emplio browser viewport W H` is a short form (#44, #47).
+- A browser being stopped is no longer picked up again (#42).
+- `emplio report` shows in a reply's actions (#39).
+- The phone app adds `@capacitor/haptics`; taps need the next iPhone build (#46).
+- `/site/...` hands over to Emplio Cloud's pages, not found without the cloud folder (#43). Commits made as "Emplio" are exempt from the CLA check (#31).
+- Database migration: `approvals`.
+
 ## 1.1.0 (2026-11-09)
 
 ### What's new
