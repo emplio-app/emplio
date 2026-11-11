@@ -40,7 +40,7 @@ function Snippet({ text }: { text: string }) {
   );
 }
 
-// Messages in this person's chats matching what's typed in the sidebar's search box.
+// Chats whose title matches, then messages in this person's chats matching what's typed in the sidebar's search box.
 export function SearchResults({ query, onOpen }: { query: string; onOpen: () => void }) {
   const q = useDebounced(query.trim());
   const hits = useQuery({
@@ -56,9 +56,9 @@ export function SearchResults({ query, onOpen }: { query: string; onOpen: () => 
   return (
     <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5 px-2 py-2">
       {hits.data.map((h) => (
-        <li key={h.messageId}>
+        <li key={h.messageId || h.conversationId}>
           <Link
-            href={`/chat/${h.conversationId}#m-${h.messageId}`}
+            href={`/chat/${h.conversationId}${h.messageId ? `#m-${h.messageId}` : ""}`}
             onClick={onOpen}
             className="block rounded-md px-2 py-2 hover:bg-sidebar-accent"
           >
@@ -66,9 +66,11 @@ export function SearchResults({ query, onOpen }: { query: string; onOpen: () => 
               <span className="truncate text-sm font-medium">{h.title}</span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{day(h.createdAt)}</span>
             </div>
-            <p className="line-clamp-2 text-xs break-words text-muted-foreground">
-              <Snippet text={h.snippet.replace(/\s+/g, " ")} />
-            </p>
+            {h.snippet && (
+              <p className="line-clamp-2 text-xs break-words text-muted-foreground">
+                <Snippet text={h.snippet.replace(/\s+/g, " ")} />
+              </p>
+            )}
           </Link>
         </li>
       ))}

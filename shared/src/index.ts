@@ -158,7 +158,7 @@ export type Automation = {
   lastRun: AutomationRun | null;
 };
 
-// A message found by searching one's chats; snippet marks the matches with **.
+// A message found by searching one's chats; snippet marks the matches with **. A chat found by its title: messageId and snippet empty.
 export type SearchHit = {
   conversationId: string;
   title: string;
