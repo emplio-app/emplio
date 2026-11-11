@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.6 (2026-11-11)
+
+### What's new
+
+- Buying a plan after the free period now starts the month's usage at 0%. Any free usage you had left is kept as extra usage.
+
+### For developers
+
+- Emplio Cloud billing: a first plan payment moves leftover founding, pass or free credit into extra usage, so it no longer counts in the month's percentage; a cloud migration fixes businesses already on a plan.
+
 ## 1.2.5 (2026-11-11)
 
 ### What's new
