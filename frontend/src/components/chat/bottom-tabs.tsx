@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenIcon, ClipboardListIcon, MenuIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
+import { BookOpenIcon, ClipboardListIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -10,12 +10,12 @@ import { cn } from "@/lib/utils";
 
 const TAB = "relative flex min-w-0 flex-col items-center justify-center gap-0.5 text-[0.68rem] font-medium outline-none transition-opacity select-none active:opacity-60 [-webkit-touch-callout:none] [&_svg]:size-5";
 
-// A phone's way around the app, in place of the side menu's button. The menu stays behind More (and a swipe in
-// from the edge) for search, usage and the account. Hidden while typing: globals.css .bottom-tabs. It floats
+// A phone's way around the app. The side menu (search, usage, the account) opens from the button top left on
+// every page (ui/sidebar.tsx SidebarTrigger), or a swipe in from the edge. Hidden while typing: globals.css .bottom-tabs. It floats
 // over the page as frosted glass: lists scroll on underneath it (globals.css .under-tabs).
 export function BottomTabs() {
   const pathname = usePathname();
-  const { setOpenMobile, openMobile } = useSidebar();
+  const { setOpenMobile } = useSidebar();
   const { data: conversations } = useConversations();
   const { data: me } = useMe();
   const { data: tasks } = useTasks();
@@ -46,7 +46,7 @@ export function BottomTabs() {
 
   return (
     <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-(--safe-bottom) md:hidden">
-      <div className="grid h-14 grid-cols-5">
+      <div className="grid h-14 grid-cols-4">
         {tab(
           main ? `/chat/${main.id}` : "/home",
           "Chat",
@@ -69,10 +69,6 @@ export function BottomTabs() {
         )}
         {tab("/knowledge", "Memory", <BookOpenIcon />, pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database"))}
         {tab("/team", "Team", <UsersIcon />, pathname.startsWith("/team"))}
-        <button type="button" onClick={() => setOpenMobile(true)} aria-expanded={openMobile} className={cn(TAB, "text-muted-foreground")}>
-          <MenuIcon />
-          More
-        </button>
       </div>
     </nav>
   );

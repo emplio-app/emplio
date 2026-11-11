@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { PanelLeftIcon } from "lucide-react"
+import { MenuIcon, PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -281,15 +281,16 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon-sm"
-      // on a phone the bottom tabs' More opens the menu (bottom-tabs.tsx)
-      className={cn("max-md:hidden", className)}
+      // on a phone: the menu (search, usage, the account), top left on every page, a bigger target for a thumb
+      className={cn("max-md:size-9 max-md:[&_svg]:size-5", className)}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      <PanelLeftIcon className="max-md:hidden" />
+      <MenuIcon className="md:hidden" />
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )
