@@ -36,7 +36,8 @@ async function ready(cdpUrl: string) {
   throw new Error("the browser didn't start");
 }
 
-export async function startHosted(conversationId: string, owner: Owner): Promise<HostedBrowser> {
+// _size: for services whose page size is fixed at the start. This one takes a new size while running, so it's never asked.
+export async function startHosted(conversationId: string, owner: Owner, _size?: { width: number; height: number }): Promise<HostedBrowser> {
   const r = await runner("/browsers", { method: "POST", body: JSON.stringify({ chat: conversationId, workspaceId: owner.workspaceId, userId: owner.userId }) });
   const b = (await r.json()) as Started;
   await ready(b.cdpUrl);

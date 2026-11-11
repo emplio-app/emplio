@@ -199,8 +199,10 @@ async function find(conversationId: string) {
 
 export type Owner = { workspaceId: string; userId: string };
 
-const start = async (conversationId: string, owner: Owner) => {
-  const live = toLive(await cloud.browser.startHosted(conversationId, owner));
+export type Size = { width: number; height: number };
+
+const start = async (conversationId: string, owner: Owner, size?: Size) => {
+  const live = toLive(await cloud.browser.startHosted(conversationId, owner, size));
   const saved = await savedState(owner).catch(() => null);
   // A browser service's own profile brings back cookies and local storage. Its docs don't promise Indexed DB, so that
   // always goes through, and only databases the browser doesn't already have get written.
@@ -381,6 +383,20 @@ export async function browserLocal(conversationId: string, workspaceId: string, 
   if (!live.paid) return "This browser has no other connection to move to.";
   if (url && /^https?:/.test(url)) await rememberPaid(workspaceId, siteOf(new URL(url).host));
   return "On a local connection in the person's country. Pages already open need opening again to use it.";
+}
+
+// A page size the running browser wouldn't take (the script checks, see BROWSERSIZE in sandbox.ts): the chat's browser
+// is stopped, which saves its sign-ins, and started again at that size on the page it was on.
+// ponytail: the size lasts for that browser; after an idle stop the next one is the usual size and Emplio asks again
+export async function browserSize(conversationId: string, width: number, height: number, url?: string) {
+  if (!(width >= 320 && width <= 3840 && height >= 240 && height <= 2160)) return "emplio browser set viewport <width> <height>: width 320 to 3840, height 240 to 2160";
+  const owner = (await openBrowser(conversationId))?.owner;
+  if (!owner) return "emplio browser set viewport: no browser open";
+  await stopBrowser(conversationId);
+  remember(conversationId, start(conversationId, owner, { width, height }));
+  const live = await browserFor(conversationId, owner);
+  if (url && /^https?:/.test(url)) await goTo(live.cdpUrl, url).catch((e) => console.error("browser page not reopened:", e));
+  return `The browser was started again at ${width}x${height}, still signed in and on the same page. Other tabs and anything half typed are gone. Carry on in your next command.`;
 }
 
 // A link on our own address for signing in from a phone (Telegram has no live view beside the chat): it
