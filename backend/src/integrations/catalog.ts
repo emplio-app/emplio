@@ -60,12 +60,15 @@ export const CATALOG: CatalogApp[] = [
   own("todoist", "Todoist", "productivity", "Tasks, projects, labels, filters and comments on your Todoist"),
   own("asana", "Asana", "productivity", "Tasks, projects, comments and deadlines on your Asana, and automations when work moves"),
   own("clickup", "ClickUp", "productivity", "Tasks, lists, comments, goals and time tracking on your ClickUp, and automations when work moves"),
+  own("bing_webmaster", "Bing Webmaster Tools", "productivity", "How your website is doing in Bing and Copilot search: what people search for to find you, which pages they land on, crawl problems, sitemaps, and asking Bing to look at a page now"),
   composio("linkedin", "LinkedIn", "productivity", "Post updates and manage your profile"),
   own("fly", "Fly.io", "developer", "Apps, servers, databases, domains, logs, deploys and billing on Fly.io"),
   own("vercel", "Vercel", "developer", "Websites on Vercel: projects, deploys, logs, domains, DNS, env vars and teams"),
   own("hostinger", "Hostinger", "developer", "Websites, WordPress, VPS servers, domains, DNS and business email on Hostinger"),
   own("neon", "Neon", "developer", "Postgres databases on Neon: run SQL, and manage projects, branches, databases, roles, backups, auth and storage"),
   own("livekit", "LiveKit", "developer", "Live audio/video rooms, recordings and streams, phone calls (SIP), numbers and voice AI agents on LiveKit"),
+  own("googlesearchconsole", "Google Search Console", "productivity", "See how your website is doing in Google Search: the searches that bring people in, which pages they land on, whether Google can find your pages, and sitemaps"),
+  own("googleanalytics", "Google Analytics", "productivity", "See who visits your website and what they do: visitors, where they come from, which pages sell, live traffic, and your reports and tracking setup"),
   own("github", "GitHub", "developer", "Repositories, issues, pull requests and Actions, and git itself on Emplio's computer"),
 ];
 

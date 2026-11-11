@@ -11,6 +11,7 @@ import { decrypt, encrypt } from "../../secrets";
 import { AppsError, type Provider } from "../types";
 import { anthropic, google, openai, openrouter } from "./ai";
 import { airtable } from "./airtable";
+import { bing_webmaster } from "./bing_webmaster";
 import { notion } from "./notion";
 import { asana } from "./asana";
 import { calendly } from "./calendly";
@@ -22,7 +23,9 @@ import { github } from "./github";
 import { googlebusiness } from "./googlebusiness";
 import { googlecalendar } from "./googlecalendar";
 import { googledocs } from "./googledocs";
+import { googleanalytics } from "./googleanalytics";
 import { googlemeet } from "./googlemeet";
+import { googlesearchconsole } from "./googlesearchconsole";
 import { googlesheets } from "./googlesheets";
 import { hostinger } from "./hostinger";
 import { hubspot } from "./hubspot";
@@ -47,8 +50,8 @@ import { zoho_mail } from "./zoho_mail";
 export type OwnAction = {
   description: string;
   input: z.ZodObject;
-  // input already checked against `input`; key is the decrypted login
-  run(input: any, key: string): Promise<unknown>;
+  // input already checked against `input`; key is the decrypted login, connection the id its webhooks arrive under
+  run(input: any, key: string, connection?: string): Promise<unknown>;
   // only looks things up: runs without asking the person first
   readOnly?: boolean;
 };
@@ -107,7 +110,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, slack, zoho_books, zoho_invoice, zoho_mail, zoho, zoom };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
@@ -234,7 +237,7 @@ export const own: Provider = {
     if (!login?.secret) throw new AppsError("not connected");
     const parsed = action.input.safeParse(input ?? {});
     if (!parsed.success) throw new AppsError(parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; "));
-    return action.run(parsed.data, login.secret);
+    return action.run(parsed.data, login.secret, login.externalId);
   },
 
   async listTriggers(app, words) {
