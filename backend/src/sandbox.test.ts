@@ -320,6 +320,22 @@ test("a browser size Emplio set is put back before each later command, for that 
   rmSync(home, { recursive: true, force: true });
 });
 
+test("close asks the server to stop the browser, and later browser steps in that command stop", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\necho done\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `c${Date.now()}`;
+  const p = Bun.spawn(["bash", "-c", "./emplio browser close; ./emplio browser open https://a.example"], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: key, BROWSER_CDP_URL: "x", BROWSER_SESSION: "chat-1", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  expect(out).toContain(`BROWSERCLOSE:${key}\t@`);
+  expect(err).toContain("Run this in your next command");
+  expect(existsSync(join(home, "calls"))).toBe(false);
+  rmSync(home, { recursive: true, force: true });
+  rmSync(`/tmp/emplio-resize.${key}`, { force: true });
+  rmSync(out.match(/\t@(\S+)/)![1], { force: true });
+});
+
 test("a size the browser said yes to but didn't take goes to the server, and later browser steps in that command stop", async () => {
   const home = mkdtempSync(join(tmpdir(), "emplio-"));
   mkdirSync(join(home, ".local/bin"), { recursive: true });
