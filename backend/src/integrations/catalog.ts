@@ -33,6 +33,7 @@ export const CATALOG: CatalogApp[] = [
   composio("gmail", "Gmail", "email", "Read, search, draft and send email"),
   composio("outlook", "Outlook", "email", "Microsoft email and calendar"),
   own("zoho_mail", "Zoho Mail", "email", "Read, send and sort your company email in Zoho Mail"),
+  own("googlebusiness", "Google Business Profile", "productivity", "Your shop on Google Search and Maps: read and reply to reviews, keep hours, address and photos right, post offers and events, and see how many people called or asked for directions"),
   own("googlecalendar", "Google Calendar", "calendar", "See your schedule, create and move events, find free time, and start work when something changes"),
   own("calendly", "Calendly", "calendar", "Book and cancel meetings, share booking links, and start work the moment someone books, cancels or doesn't show up"),
   own("googlemeet", "Google Meet", "calendar", "Create meeting links, see who joined, read transcripts and meeting notes, and find where recordings are saved"),

@@ -12,6 +12,7 @@ const EXPECTED: Record<keyof typeof GOOGLE_SCOPES, string[]> = {
   googledocs: [`${AUTH}documents`, `${AUTH}drive.file`],
   googlesheets: [`${AUTH}spreadsheets`, `${AUTH}drive.file`],
   googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.readonly`, `${AUTH}meetings.space.settings`],
+  googlebusiness: [`${AUTH}business.manage`],
   googlesearchconsole: [`${AUTH}webmasters`],
   googleanalytics: [`${AUTH}analytics.readonly`, `${AUTH}analytics.edit`, `${AUTH}analytics.manage.users`],
 };

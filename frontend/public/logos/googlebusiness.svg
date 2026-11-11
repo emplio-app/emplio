@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Google Business Profile">
+  <title>Google Business Profile</title>
+  <!-- shopfront body -->
+  <path d="M9 20h30v18a2 2 0 0 1-2 2H11a2 2 0 0 1-2-2V20z" fill="#1A73E8"/>
+  <!-- doorway -->
+  <path d="M19.5 40V29.5a4.5 4.5 0 0 1 9 0V40h-9z" fill="#fff" opacity=".95"/>
+  <!-- striped awning -->
+  <path d="M6 10a2 2 0 0 1 2-2h8v10H6v-8z" fill="#4285F4"/>
+  <path d="M16 8h8v10h-8V8z" fill="#EA4335"/>
+  <path d="M24 8h8v10h-8V8z" fill="#FBBC04"/>
+  <path d="M32 8h8a2 2 0 0 1 2 2v8H32V8z" fill="#34A853"/>
+  <!-- awning shadow line -->
+  <rect x="6" y="16.5" width="36" height="3.5" rx="1.75" fill="#174EA6"/>
+</svg>

@@ -33,11 +33,14 @@ const param = (name: string, location: string, p: Schema) => ({
 // provider has shut down (Search Console's mobile-friendly test)
 export async function discovery(url: string, app: string, scopes: string[], leaveOut: string[] = []) {
   const doc = (await (await fetch(url)).json()) as Schema;
+  // Google Business Profile's documents name no scopes at all (every one of its APIs sits behind business.manage alone),
+  // so there is nothing to check against; a document that does name them still has every method checked.
+  const declaresScopes = Boolean(doc.auth?.oauth2?.scopes);
   const schemas = Object.fromEntries(Object.entries<Schema>(doc.schemas).map(([k, s]) => [k, convert(s)]));
   const paths: Schema = {};
   const method = (m: Schema) => {
     if (leaveOut.includes(m.id)) return;
-    if (!m.scopes?.some((s: string) => scopes.includes(s))) throw new Error(`${m.id} needs one of ${m.scopes}, and ${app} asks for none of them`);
+    if (declaresScopes && !m.scopes?.some((s: string) => scopes.includes(s))) throw new Error(`${m.id} needs one of ${m.scopes}, and ${app} asks for none of them`);
     const path = `/${m.flatPath ?? m.path}`;
     const named = [...path.matchAll(/\{(\w+)\}/g)].map((x) => x[1]!);
     const declared = Object.entries<Schema>(m.parameters ?? {});

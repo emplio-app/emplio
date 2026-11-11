@@ -1,15 +1,18 @@
-// The one Google sign-in behind Calendar, Docs, Sheets and Meet: each app asks for its own scopes, and only ones Google
+// The one Google sign-in behind Calendar, Docs, Sheets, Meet, Search Console, Analytics and Business Profile: each app
+// asks for its own scopes, and only ones Google
 // classes as sensitive or non-sensitive. Restricted scopes (Gmail, full Drive) would need a yearly security audit.
 import type { OwnApp } from "./index";
 import { codeFlow } from "./oauth";
 import { type Api, call } from "./openapi";
 
 const AUTH = "https://www.googleapis.com/auth/";
-export const GOOGLE_SCOPES: Record<"googlecalendar" | "googledocs" | "googlesheets" | "googlemeet" | "googlesearchconsole" | "googleanalytics", string[]> = {
+export const GOOGLE_SCOPES: Record<"googlecalendar" | "googledocs" | "googlesheets" | "googlemeet" | "googlesearchconsole" | "googleanalytics" | "googlebusiness", string[]> = {
   googlecalendar: [`${AUTH}calendar`],
   googledocs: [`${AUTH}documents`, `${AUTH}drive.file`],
   googlesheets: [`${AUTH}spreadsheets`, `${AUTH}drive.file`],
   googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.readonly`, `${AUTH}meetings.space.settings`],
+  // the one scope behind every Business Profile API; Google classes it sensitive, not restricted
+  googlebusiness: [`${AUTH}business.manage`],
   googlesearchconsole: [`${AUTH}webmasters`],
   googleanalytics: [`${AUTH}analytics.readonly`, `${AUTH}analytics.edit`, `${AUTH}analytics.manage.users`],
 };
