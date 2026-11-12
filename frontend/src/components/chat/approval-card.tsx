@@ -1,6 +1,6 @@
 "use client";
 
-import type { Approval } from "@emplio/shared";
+import { actionTitle, type Approval } from "@emplio/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, ChevronRightIcon, PaperclipIcon, XIcon } from "lucide-react";
 import { createContext, useContext, useState } from "react";
@@ -25,6 +25,8 @@ const fileName = (v: unknown) =>
   v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).join() === "file" && typeof (v as { file: unknown }).file === "string"
     ? (v as { file: string }).file.split("/").pop()!
     : undefined;
+// cards asked before actions had readable names carry the code name ("github.create_a_pull_request") as their title
+const titleOf = (a: Approval) => (a.title === a.action ? actionTitle(a.action) : a.title);
 const simple = (v: unknown) => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 
 // "to: priya@acme.com", the simple fields of the input, files as their names and lists of those joined; the rest
@@ -113,7 +115,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
       <div className="flex shrink-0 items-center gap-3">
         <AppLogo src={approval.logo} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{approval.title}</div>
+          <div className="truncate text-sm font-medium">{titleOf(approval)}</div>
           <div className="truncate text-xs text-muted-foreground">{approval.appName} · wants your OK</div>
         </div>
       </div>
@@ -161,7 +163,7 @@ export function ApprovalCard({ approval: card, waiting }: { approval: Approval; 
     <div className="flex w-full max-w-md flex-col rounded-xl border bg-card text-sm">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left">
         <AppLogo src={approval.logo} className="size-5" />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">{approval.title}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">{titleOf(approval)}</span>
         <span className={`flex shrink-0 items-center gap-1 text-xs ${allowed && !failed ? "text-primary" : failed ? "text-destructive" : "text-muted-foreground"}`}>
           {!approval.decision ? (
             <>

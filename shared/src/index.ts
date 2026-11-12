@@ -82,6 +82,11 @@ export const DEFAULT_LOGIN_FIELDS = ["Email or username", "Password"];
 // a field typed in hidden (password, PIN, security answer), and never shown back
 export const isSecretField = (label: string) => /pass|pin\b|secret|security|answer|passcode|mpin/i.test(label);
 export type ActionInfo = { action: string; description: string };
+// "github.create_a_pull_request" as people read it, "Create a pull request": for actions whose provider has no name for them
+export const actionTitle = (action: string) => {
+  const words = action.slice(action.indexOf(".") + 1).replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 // title: the provider's own name for it ("Send Email"); readOnly: only looks things up, so it runs without asking
 export type ActionDetail = ActionInfo & {
   app: string;
