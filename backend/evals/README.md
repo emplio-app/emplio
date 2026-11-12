@@ -12,6 +12,8 @@ evals/
                             stand-in computer that answers commands without running them
   next-step-card/           the card under a reply (src/next-step.ts)
   hand-off/                 does it do the work itself or hand it off, and to whom (src/jobs.ts MANAGER_PROMPT)
+  manager/                  Emplio as manager: every job to an agent, carry on its job or --new, no browser of its
+                            own, the person's words kept, reports checked (src/jobs.ts MANAGER_PROMPT)
   skills/                   does it read the skill that fits, and save one when a job is repeatable (src/sandbox.ts)
   reader/                   what the reader notices in a finished chat (src/reader.ts)
   background-round/         where the background agent puts what the reader noticed (src/heartbeat.ts)
@@ -37,6 +39,8 @@ EVAL_MODEL=google/gemini-3.8-flash bun run eval evals/next-step-card   # try ano
 bun run eval evals --no-send-logs              # no Braintrust account: scores print here only
 bun run eval evals/reader                      # the cheapest one, to try things out
 bun evals/failures.ts <experiment name>        # what failed, and what the model wrote
+EVAL_DUMP=a.jsonl bun run eval evals/manager --no-send-logs   # keep each answer on disk
+bun evals/manager/report.ts a.jsonl b.jsonl    # two runs side by side, by category, then what failed in b
 ```
 
 Everything runs on the Save money models (Haiku) unless `EVAL_MODEL` says otherwise: what holds on the cheapest holds on the dearer ones. The card keeps its own small model, as in the app.

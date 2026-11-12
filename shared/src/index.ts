@@ -499,6 +499,8 @@ export type JobInfo = {
     error?: boolean;
     done: boolean;
     saved?: { url: string; filename: string }[];
+    // it used the job's browser: the person can watch it from the job's line
+    browser?: boolean;
     connect?: ConnectCard[];
     logins?: SaveLoginCard[];
     approvals?: Approval[];

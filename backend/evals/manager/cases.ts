@@ -309,7 +309,7 @@ export const cases = (): Case[] => [
     name: "change the wording before posting",
     category: "relay",
     source: "written",
-    business: asking("- 5d2e91c4 · Community Manager · Post one approved reply on r/homedecor · asking, 10 Nov, 4:50 pm"),
+    business: asking("- 5d2e91c4 · Community Manager · Reply on the r/pune curtains thread · asking, 10 Nov, 4:50 pm"),
     chat: [
       person("post a reply on the r/pune thread asking where to buy curtains"),
       emplio('Here\'s the draft: "Kaveri in Aundh has a good range, try them." Post it?'),

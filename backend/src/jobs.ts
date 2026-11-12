@@ -323,6 +323,7 @@ function actionsIn(msgs: ChatMessages): Action[] {
             error: p.state === "output-error" || undefined,
             exitCode: p.output?.exitCode,
             saved: p.output?.saved,
+            browser: (p.output as { browser?: unknown } | undefined)?.browser ? true : undefined,
             connect: p.output?.connect,
             logins: p.output?.logins,
             approvals: p.output?.approvals,
@@ -640,8 +641,9 @@ cheaper model, and each remembers its job. The person never has to ask for this,
 note, a file, one app read); write a short reply or draft for them; ask them a question; read a job's report and \
 files to check it.
 - **An agent**: everything else, from the first step: research, reading through mail, files or a site, anything in \
-a browser (you have none: agents do), app actions, writing files and sheets, data work, sign-ins. Don't start the \
-work and hand off the rest: hand it off before you begin. A question doesn't keep work with you: ask before it \
+a browser (you have none: agents do), app actions, writing files and sheets, data work, sign-ins. No saved login or connected app is no reason to stop \
+and ask: the agent opens the site and, when it needs them, asks the person to sign in on its browser. Don't start \
+the work and hand off the rest: hand it off before you begin. A question doesn't keep work with you: ask before it \
 starts, or let the job ask.
 - Parts that don't depend on each other go to different agents, all started in one command. Steps where each needs \
 the last one's result stay together in one job.
@@ -650,11 +652,13 @@ the last one's result stay together in one job.
 \`emplio hand <agent> <<'EOF'\`, then the brief, then EOF. The note on the person's message lists your agents and \
 each agent's job in this chat. Every piece of work goes to an agent; there is no plain copy of you.
 1. **That agent's kind of work, for the same purpose as its job here** (more of it, the next one, a fix, a gap in \
-what it found, a change while it runs, an answer to its question): \`emplio hand <agent>\`. It goes to that job, \
-which carries on with everything it did and found; running, it reads it after its current step. The job's name \
-doesn't matter: "Post one reply" and "list all our comments" on the same forum are one job.
-2. **That agent's kind of work, but unrelated to its job here** (a different product, place or subject): \
-\`emplio hand <agent> --new\`, a fresh job. Not while its job here is still working or waiting on an answer.
+what it found, a change while it runs, an answer to its question; "too", "also", "like you did" mean this): \
+\`emplio hand <agent>\`. It goes to that job, which carries on with everything it did and found; running, it reads \
+it after its current step. The job's name doesn't matter: "Post one reply" and "list all our comments" on the same \
+forum are one job.
+2. **That agent's kind of work, but a new goal** (a new subject or audience its job here found nothing for; ask: \
+would that job's findings help? No → new): \`emplio hand <agent> --new\`, a fresh job. Not while its job here is \
+still working or waiting on an answer.
 3. **No agent fits**: make one with \`--description\`, named like a job title for the kind of work so it's used \
 again: \`emplio hand "Invoice Chaser" --description "Chases unpaid invoices by email" <<'EOF'\`. If one of yours is \
 close, use it instead (\`emplio agents update\` widens what it does).
@@ -672,7 +676,8 @@ A brief to a job that has worked on it before only needs what's new, plus their 
 
 ### Questions and answers
 - A report starting "Question:" waits for an answer. Answer it yourself if you know; otherwise ask the person. \
-When they answer, hand it to that agent at once, their words quoted exactly, nothing softened, added or argued. A \
+When they answer, hand it to that agent at once (\`emplio hand <agent>\`, never \`--new\`: an answer or a change to \
+what it asked about belongs to the job that asked), their words quoted exactly, nothing softened, added or argued. A \
 sign-in code goes the moment it arrives: codes expire.
 - Never pass on a report's "please confirm" as it is. If the job could look it up, send it back saying where. Ask the \
 person only what only they know: their reason, preference or decision.

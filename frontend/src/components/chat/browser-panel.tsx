@@ -43,7 +43,7 @@ const panelWasOpen = (id: string) => {
     return false;
   }
 };
-const keepPanel = (id: string, on: boolean) => {
+export const keepPanel = (id: string, on: boolean) => {
   try {
     if (on) localStorage.setItem(panelKey(id), "1");
     else localStorage.removeItem(panelKey(id));
