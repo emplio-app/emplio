@@ -2,6 +2,7 @@
 // job, pass the person's words on, check reports) or do the work itself. `bun run eval evals/manager` in backend.
 import { MODEL_SETS } from "@emplio/shared";
 import { Eval } from "braintrust";
+import { appendFileSync } from "node:fs";
 import type { Case } from "./cases";
 import { scorers, staysEmplio, type Input, type Output } from "./scorers";
 
@@ -30,19 +31,26 @@ async function decide({ business, chat, world, carriesOn }: Input): Promise<Outp
   return { ...said, byHand };
 }
 
+// EVAL_DUMP=<file>: each try's input name, answer and expectation, one JSON line each, for report.ts (no Braintrust needed)
+async function task(input: Input & { name: string; category: string; expect: Case["expect"] }): Promise<Output> {
+  const output = await decide(input);
+  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: input.name, category: input.category, input: { business: input.business, carriesOn: input.carriesOn }, expected: input.expect, output })}\n`);
+  return output;
+}
+
 Eval<Input, Output, Case["expect"]>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "manager",
   data: async () => {
     const { THREADS_HEADING } = await import("../../src/jobs");
     const carriesOn = THREADS_HEADING.includes("--new");
     return (await import("./cases")).cases().map((c) => ({
-      input: { business: c.business ?? {}, chat: c.chat, world: c.world ?? [], carriesOn },
+      input: { business: c.business ?? {}, chat: c.chat, world: c.world ?? [], carriesOn, name: c.name, category: c.category, expect: c.expect },
       expected: c.expect,
       metadata: { name: c.name, category: c.category, source: c.source },
       tags: [c.category],
     }));
   },
-  task: decide,
+  task,
   scores: [...scorers, staysEmplio],
   trialCount: 3,
   maxConcurrency: 6,
