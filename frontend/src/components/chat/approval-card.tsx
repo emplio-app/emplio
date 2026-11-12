@@ -43,22 +43,43 @@ const fields = (input: unknown) =>
 export const ApprovalsContext = createContext<Map<string, Approval>>(new Map());
 export const stillWaiting = (a: Approval) => !a.decision && (!a.expiresAt || Date.parse(a.expiresAt) > Date.now());
 
-function Fields({ approval, clamp = true }: { approval: Approval; clamp?: boolean }) {
+// a value past 4 lines (an email or PR body) shows its first 4, open on a tap
+const long = (v: string) => v.length > 240 || v.split("\n").length > 4;
+
+function Fields({ approval }: { approval: Approval }) {
   const [details, setDetails] = useState(false);
-  const shown = fields(approval.input);
+  const [opened, setOpened] = useState<string[]>([]);
+  // short ones first (to, subject, repo), so the whole ask reads at a glance and the long text comes last
+  const shown = fields(approval.input)
+    .slice(0, 8)
+    .sort((a, b) => +long(a.v) - +long(b.v));
   return (
     <>
       {!!shown.length && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          {shown.slice(0, 8).map(({ k, v, file }) => (
-            <div key={k} className="contents">
-              <dt className="text-muted-foreground">{k.replaceAll("_", " ")}</dt>
-              <dd className={`min-w-0 break-words whitespace-pre-wrap ${clamp ? "max-h-80 overflow-auto" : ""}`}>
-                {file && <PaperclipIcon className="mr-1 inline size-3 align-[-2px]" />}
-                {v}
-              </dd>
-            </div>
-          ))}
+          {shown.map(({ k, v, file }) => {
+            const folded = long(v) && !opened.includes(k);
+            return (
+              <div key={k} className="contents">
+                <dt className="text-muted-foreground">{k.replaceAll("_", " ")}</dt>
+                <dd className="min-w-0 break-words whitespace-pre-wrap">
+                  <div className={folded ? "line-clamp-4" : undefined}>
+                    {file && <PaperclipIcon className="mr-1 inline size-3 align-[-2px]" />}
+                    {v}
+                  </div>
+                  {long(v) && (
+                    <button
+                      type="button"
+                      onClick={() => setOpened((o) => (folded ? [...o, k] : o.filter((x) => x !== k)))}
+                      className="mt-0.5 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      {folded ? "Show all" : "Show less"}
+                    </button>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       )}
       <button
@@ -98,7 +119,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
       </div>
       {/* the card shrinks to the room above the chat box: what it'll do scrolls, the buttons stay in view */}
       <div className="-mx-3 flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-3">
-        <Fields approval={approval} clamp={false} />
+        <Fields approval={approval} />
       </div>
       {answer.isPending || answer.isSuccess ? (
         <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
