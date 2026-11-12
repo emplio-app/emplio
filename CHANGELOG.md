@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.15 (2026-11-13)
+
+### What's new
+
+- Everything in Emplio now moves a little more smoothly: buttons, menus and switches ease between colours, and bars fill gently.
+- A window that opens on top of another window now dims the one behind it too.
+
+### For developers
+
+- Global soft transitions in `globals.css` (zero-specificity `:where`, colour/opacity/shadow only, off under reduced motion), `interpolate-size`, animated `<details>`.
+- Dialog and alert-dialog backdrops use `forceRender` so nested dialogs dim what is behind them.
+
 ## 1.2.14 (2026-11-13)
 
 ### What's new
