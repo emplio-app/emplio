@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.11 (2026-11-12)
+
+### What's new
+
+- When Emplio asks for your OK, the card names the action in plain words, like "Create a pull request".
+- The Reply button on text you select stays with it while you scroll, and slides over when you select more or something else.
+
+### For developers
+
+- Own-provider actions get a `title` from their name (`actionTitle`, shared); cards saved with the code name show it too (#82).
+- Quote button follows the selection on scroll (page-wide captured listener, once a frame), hides only while it's out of the chat's view, and fades in place so the next selection glides; no glide while scrolling (#83).
+
 ## 1.2.10 (2026-11-12)
 
 ### What's new
