@@ -7,10 +7,12 @@ The newest version is at the top, and its heading is where Emplio's version numb
 ### What's new
 
 - When Emplio asks for your OK on something long, like an email or a pull request, the Allow and Deny buttons now always stay on screen. The details scroll above them.
+- In spreadsheets, double-click the edge of a column heading to make the column fit its longest text, like in Excel.
 
 ### For developers
 
 - Waiting approval card: header and buttons don't shrink, the fields scroll between them; the per-field height cap is dropped there so there's one scroll area (#75).
+- Sheet viewer: double-clicking a column's resize handle fits it to its longest shown value, capped at 1000px; rows keep double-click to reset (#77).
 
 ## 1.2.7 (2026-11-12)
 
