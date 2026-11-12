@@ -1073,7 +1073,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       const seen = isWatched(id);
       void store(responseMessage)
         .then(async () => {
-          if (seen) return;
+          // a reply that says nothing ([SILENT], after a job's report) neither marks the chat nor buzzes their phone
+          if (seen || answer.includes(SILENT)) return;
           await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
           // they left before it finished; background work speaks up through post(), Telegram replies arrive on Telegram
           if (answer && !automation && !job && via !== "telegram" && !stopper.signal.aborted) void pushTo(ctx.userId, answer, id);

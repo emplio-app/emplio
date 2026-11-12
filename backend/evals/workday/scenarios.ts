@@ -10,8 +10,10 @@ export type Step =
 
 // hand: each piece that must be handed off in this reply. agent: any of these is right; left out, any agent but a
 // plain copy. cont: true, to the job that agent already has here; false, a fresh one. say: words (regular
-// expressions) its brief carries. none: nothing handed off. tell: words the reply to the person carries.
-export type Expect = { hand?: { agent?: string[]; cont?: boolean; say?: string[] }[]; none?: true; tell?: string[] };
+// expressions) its brief carries. none: nothing handed off. tell: words the reply to the person carries. silent: the
+// reply is [SILENT] (true) or says something (false). own: at most this many commands of its own. anyOf: right if
+// any one of these is.
+export type Expect = { hand?: { agent?: string[]; cont?: boolean; say?: string[] }[]; none?: true; tell?: string[]; silent?: boolean; own?: number; anyOf?: Expect[] };
 
 export type Scenario = { name: string; steps: Step[] };
 
@@ -26,7 +28,8 @@ export const scenarios = (): Scenario[] => [
       },
       {
         report: { from: "Supplier Finder", text: "Found 3 in Surat for 200 m of cotton: Shree Textiles ₹142/m, Laxmi Fab ₹155/m, Om Weaves ₹138/m. Sheet: /work/out/surat-cotton.xlsx" },
-        expect: { none: true, tell: ["138|om weaves"] },
+        // of use on its own while the invoices still run: told now
+        expect: { none: true, tell: ["138|om weaves"], silent: false },
       },
       { person: "also get their minimum order quantity", expect: { hand: [{ agent: ["Supplier Finder"], cont: true, say: ["minimum"] }] } },
       {
@@ -41,7 +44,18 @@ export const scenarios = (): Scenario[] => [
           apps: "gmail.send_email ok, 12 Nov, 11:02 am; gmail.send_email ok, 12 Nov, 11:03 am; gmail.send_email failed (invalid address: accounts@greenleaf.example), 12 Nov, 11:03 am",
         },
         // the failed send is caught: sent back to the job to find the right address, or the person is asked for it
-        expect: { tell: ["green ?leaf"] },
+        expect: { anyOf: [{ hand: [{ agent: ["Invoice Chaser"], cont: true }] }, { tell: ["green ?leaf"] }] },
+      },
+      {
+        report: { from: "Supplier Finder", text: "Added each one's minimum order: Shree Textiles 300 m, Laxmi Fab 500 m, Om Weaves 200 m. Sheet updated: /work/out/surat-cotton.xlsx" },
+        expect: { none: true, tell: ["300|500|200"] },
+      },
+      // answered in the chat from the reports it has, without opening the sheet
+      { person: "which one is cheapest per metre?", expect: { none: true, tell: ["om weaves"], own: 0 } },
+      // a new file is work, even a summary of the jobs' own results
+      {
+        person: "make a one-page summary document comparing the three suppliers, with your pick",
+        expect: { hand: [{ agent: ["Supplier Finder", "Report Maker"] }], own: 1 },
       },
     ],
   },
@@ -54,7 +68,8 @@ export const scenarios = (): Scenario[] => [
       },
       {
         report: { from: "latest", text: "Compared 14 of the 40 so far; stopped at the step limit. Partial sheet: /work/out/curtain-prices.xlsx (14 rows)." },
-        expect: { hand: [{ agent: ["Price Checker", "Report Maker"], cont: true }] },
+        // sent back, and nothing to tell the person yet: they see the job at work again
+        expect: { hand: [{ agent: ["Price Checker", "Report Maker"], cont: true }], silent: true },
       },
       {
         report: {

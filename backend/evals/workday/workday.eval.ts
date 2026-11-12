@@ -112,13 +112,20 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
     chat = [...chat, person(message), ...(said.messages ?? [{ role: "assistant", content: said.text }])];
     // what the person sees: its words, and the questions it put on cards
     const shown = [said.text, ...said.commands.filter((c) => /\bemplio ask\b/.test(c))].join("\n");
-    steps.push({ step: i + 1, ...check(step.expect, routes, shown), routes, byHand, browser, said: shown.slice(0, 400), usage: said.usage });
+    steps.push({ step: i + 1, ...check(step.expect, routes, shown, said.text, byHand), routes, byHand, browser, said: shown.slice(0, 400), usage: said.usage });
   }
   return { steps };
 }
 
-export function check(expect: Expect, routes: Route[], shown: string) {
+export function check(expect: Expect, routes: Route[], shown: string, text = shown, own = 0): { ok: boolean; why: string[] } {
+  if (expect.anyOf) {
+    const tries = expect.anyOf.map((e) => check(e, routes, shown, text, own));
+    return tries.find((t) => t.ok) ?? { ok: false, why: [tries.map((t) => t.why.join("; ")).join(" | or | ")] };
+  }
   const why: string[] = [];
+  const silent = !text.replace("[SILENT]", "").trim() || text.includes("[SILENT]");
+  if (expect.silent !== undefined && silent !== expect.silent) why.push(expect.silent ? "spoke when it had nothing to tell" : "stayed silent with a result to tell");
+  if (expect.own !== undefined && own > expect.own) why.push(`ran ${own} commands itself (at most ${expect.own})`);
   if (expect.none && routes.length) why.push(`handed off (${routes.map((r) => r.agent).join(", ")}) when it should answer`);
   const left = [...routes];
   for (const want of expect.hand ?? []) {
