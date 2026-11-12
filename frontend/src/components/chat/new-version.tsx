@@ -97,7 +97,10 @@ export function JustUpdated() {
     try {
       seen = localStorage.getItem(SEEN);
     } catch {}
-    const fresh = seen ? data.filter((r) => newer(r.version, seen)).flatMap((r) => r.changes.filter((c) => c.image)) : [];
+    // newest first, at most 10: someone back after many updates gets the latest, not a long queue
+    const fresh = seen
+      ? data.filter((r) => newer(r.version, seen)).flatMap((r) => r.changes.filter((c) => c.image)).slice(0, 10)
+      : [];
     if (fresh.length) setCard({ version: data[0]!.version, slides: fresh });
     else remember(data[0]!.version);
   }, [data]);
