@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.10 (2026-11-12)
+
+### What's new
+
+- After an update, a short card shows what's new, with a picture for each change. Swipe or tap Next to go through it, or Skip to close it. ![](frontend/public/whats-new/1.2.10-just-updated.webp)
+
+### For developers
+
+- A "What's new" line can end with a picture or GIF, `![](frontend/public/whats-new/x.gif)`. `GET /changelog` now returns `changes` as `{ text, image? }`, and each device shows one slide per new pictured line after an update. GitHub release notes link pictures to the raw file.
+
 ## 1.2.9 (2026-11-12)
 
 ### What's new
