@@ -808,15 +808,22 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       [TASK_PREFIX, "Task started"],
     ];
     // and a skill review's note of what it saved, as one line
+    // which work: each report opens `<id> "<name>" (<agent>): <status>, N actions` (backend jobs.ts)
+    const finished = text.startsWith(JOBS_DONE_PREFIX) ? [...text.matchAll(/^[0-9a-f]{4,} "(.+)"(?: \((.+?)\))?: \w+, \d+ actions$/gm)].map(([, name, agent]) =>
+          // a job that carried on keeps its first name, so the agent says whose it was
+          agent ? `${agent.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}: ${name}` : name,
+        ) : [];
     const divider =
       message.role === "user"
-        ? (DIVIDERS.find(([p]) => text.startsWith(p!))?.[1] ?? null)
+        ? finished.length
+          ? `Work finished: ${finished.join(", ")}`
+          : (DIVIDERS.find(([p]) => text.startsWith(p!))?.[1] ?? null)
         : text.startsWith(LEARNED_PREFIX) && `Learned: ${text.slice(LEARNED_PREFIX.length).split("\n")[0]}`;
     const line = (label: string, key?: string, id?: string) => (
       <div key={key} id={id} className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        {label}
-        <span className="h-px flex-1 bg-border" />
+        <span className="h-px min-w-6 flex-1 bg-border" />
+        <span className="max-w-[80%] truncate">{label}</span>
+        <span className="h-px min-w-6 flex-1 bg-border" />
       </div>
     );
     if (divider) return line(stamp ? `${divider} · ${stamp}` : divider, message.id, `m-${message.id}`);

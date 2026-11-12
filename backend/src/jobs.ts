@@ -466,6 +466,11 @@ async function carryOn(who: Who, conversationId: string, w: Row, brief: string):
   if (!w.chatId) return { text: `error: ${short(w.id)} is from before jobs had their own chat and can't carry on; hand it off with --new` };
   const busy = live.has(w.id);
   if (busy) steer(w.chatId);
+  else {
+    // finished, it takes the new work's name (as a fresh job would), so its line and report say what it's on now
+    w.name = brief.split("\n")[0]!.trim().slice(0, 80) || w.name;
+    await db.update(jobs).set({ name: w.name }).where(eq(jobs.id, w.id));
+  }
   track(w.id);
   const run = generateId();
   void send(w, brief, run);
