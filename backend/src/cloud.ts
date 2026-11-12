@@ -34,6 +34,15 @@ export const cloud = {
   },
   // a fixed sign-in code for this address instead of an emailed one, or null
   fixedCode: (_email: string): string | null => null,
+  // a person just made a business (signing up, or "New business"): the cloud gives a first one its free trial
+  onBusinessCreated: async (_workspaceId: string, _userId: string) => {},
+  // a finished piece of work someone can use (a file made, an app action done, an agent's job done, a repeating task
+  // set up): the cloud counts a business's first one
+  onWork: (_workspaceId: string, _userId: string | null, _kind: "file" | "app" | "agent" | "automation") => {},
+  // models a business may run: a Quality choice it's held to (with why, for Settings), or null for any
+  models: {
+    lock: async (_workspaceId: string): Promise<{ modelSet: string; why: string } | null> => null,
+  },
   routes: [] as ((app: FastifyInstance) => Promise<void>)[],
   // started once the server is listening
   jobs: [] as (() => void)[],

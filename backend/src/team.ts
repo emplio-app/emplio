@@ -5,6 +5,7 @@ import { context, normalizeEmail, type Ctx } from "./auth";
 import { db } from "./db";
 import { record } from "./activity";
 import { users, workspaceMembers } from "./db/schema";
+import { esc } from "./integrations";
 import { sendEmail } from "./mail";
 
 const canManage = (ctx: Pick<Ctx, "role">) => ctx.role === "owner" || ctx.role === "admin";
@@ -39,16 +40,15 @@ export async function addMember(
   // an invited person without a name yet gets the one the inviter gave
   if (name && !user.name) await db.update(users).set({ name }).where(eq(users.id, user.id));
 
-  const emailed = await sendEmail(
-    email,
-    `${ctx.userName} added you to ${ctx.workspaceName}`,
-    [
-      `Hi${name ? ` ${name.split(" ")[0]}` : ""},`,
-      "",
-      `${ctx.userName} added you to ${ctx.workspaceName} on Emplio, the team's AI employee.`,
-      `Log in with this email address (${email}) at ${process.env.FRONTEND_URL ?? "http://localhost:3000"}/login`,
-    ].join("\n"),
-  );
+  const login = `${process.env.FRONTEND_URL ?? "http://localhost:3000"}/login`;
+  const hi = `Hi${name ? ` ${name.split(" ")[0]}` : ""},`;
+  const said = `${ctx.userName} added you to ${ctx.workspaceName} on Emplio. Emplio works for the whole team: give it a job and it gets it done.`;
+  const emailed = await sendEmail(email, `${ctx.userName} added you to ${ctx.workspaceName} on Emplio`, [hi, "", said, `Open Emplio and sign in with ${email}: ${login}`].join("\n"), {
+    html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#262521;max-width:480px">
+<p>${esc(hi)}</p><p>${esc(said)}</p>
+<p style="margin:24px 0"><a href="${esc(login)}" style="background:#1f6b4e;color:#fff;text-decoration:none;padding:11px 20px;border-radius:10px;font-weight:600;display:inline-block">Open Emplio</a></p>
+<p style="color:#77756f;font-size:13px">Sign in with this email address, ${esc(email)}.</p></div>`,
+  });
 
   record({ workspaceId: ctx.workspaceId, userId: ctx.userId, kind: "team", summary: `Added ${name ?? user.name ?? email} <${email}> as ${role}` });
   return { ok: true, member: { id: user.id, name: name ?? user.name, email, role, reportsTo: null }, emailed };

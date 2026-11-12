@@ -7,7 +7,11 @@ import type { OwnAction, OwnApp } from "../index";
 import { call, rest, type Send, specActions } from "../openapi";
 
 const api = googleApi("Google Calendar", "https://www.googleapis.com/calendar/v3");
-const actions = await specActions(new URL("./actions.json", import.meta.url), api);
+// Asked for: calendar.events (events) and calendar.readonly (calendars, free time, settings), not full calendar.
+// So nothing that makes, changes, clears, deletes, shares or hands over a whole calendar, or edits the calendar
+// list: Google's review wants the narrowest scopes, and admin on a person's calendars isn't Emplio's work.
+const ADMIN = /^(acl_|calendar_list_(insert|patch|update|delete)$|calendars_|create_calendar$|patch_calendar$|clear_calendar$)/;
+const actions = Object.fromEntries(Object.entries(await specActions(new URL("./actions.json", import.meta.url), api)).filter(([name]) => !ADMIN.test(name)));
 
 const EVENTS = "/calendars/{calendarId}/events";
 const calendarId = z.string().default("primary").describe('Which calendar: its id, or "primary" for the person\'s main one (default)');
@@ -157,6 +161,6 @@ export const googlecalendar: OwnApp = {
   logo: "/logos/googlecalendar.svg",
   check: googleCheck,
   oauth: googleOAuth("Google Calendar", "googlecalendar"),
-  // Composio had these twice under another name; saved automations keep working
-  actions: { ...actions, ...helpers, duplicate_calendar: actions.create_calendar!, list_settings: actions.settings_list! },
+  // Composio had this twice under another name; saved automations keep working
+  actions: { ...actions, ...helpers, list_settings: actions.settings_list! },
 };

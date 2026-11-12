@@ -87,6 +87,8 @@ export type OwnApp = {
     noConsentScreen?: boolean;
     // for apps whose logins run out: the next one. Throws AppsError(…, true) when the person has to sign in again
     refresh?(refreshToken: string): Promise<OAuthTokens>;
+    // tells the app the person took Emplio's access away (disconnecting), so the token stops working there too
+    revoke?(token: string): Promise<void>;
   };
   actions: Record<string, OwnAction>;
   // events the app tells us about the moment they happen

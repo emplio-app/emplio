@@ -32,6 +32,7 @@ import { eventData, triggersFor, watchId, webhookSecret as razorpayWebhookSecret
 import { ensureWebhook } from "./integrations/composio";
 import { AppsError } from "./integrations/types";
 import { DEFAULT_ZONE, timezoneOf } from "./time";
+import { cloud } from "./cloud";
 
 const REPO = "company";
 const FOLDER = "automations";
@@ -172,6 +173,7 @@ export function syncAutomations(workspaceId: string): Promise<void> {
       if (old && old.sha === f.sha && !old.error) continue;
       const values = await build(workspaceId, name, f.sha, old);
       await db.insert(automations).values(values).onConflictDoUpdate({ target: [automations.workspaceId, automations.name], set: values });
+      if (!old) cloud.onWork(workspaceId, null, "automation");
       if (old?.externalId && old.externalId !== values.externalId) await stopWatching(old);
     }
   });

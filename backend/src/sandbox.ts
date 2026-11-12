@@ -15,6 +15,7 @@ import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
 import { http, loginsCommand } from "./logins";
 import { setupCommand } from "./setup";
+import { settingsCommand } from "./settings";
 import { isReport, type Approval, type AskCard, type ConnectCard, type PlanStep, type SaveLoginCard, type Settings } from "@emplio/shared";
 import { appsCommand } from "./integrations";
 import { askToAllow, automationsCommand, syncAutomations } from "./automations";
@@ -408,6 +409,7 @@ usage() {
   echo "       emplio logins                                  saved passwords and keys, used by name: emplio logins help"
   echo "       emplio sites list [site]                       requests saved from browser work; emplio sites forget <site> [METHOD /path]"
   echo "       emplio setup                                   day-one setup: status, done, skip, redo (owner/admin chats)"
+  echo "       emplio settings                                see and change this business's settings and name (owner/admin chats): emplio settings help"
   echo "       emplio notes [words] [--since YYYY-MM-DD]       what readers noted in everyone's chats (background agent only)"
   echo "       emplio person <email> [prefer|profile <line>]  a teammate's preferences and profile, or add a line (background agent only)"
   echo "       emplio http [-X M] <url> [-H h] [-d body]      a web request with {{NAME}} for a saved key"
@@ -703,6 +705,9 @@ PY
   setup)
     shift
     req SETUP "$@" ;;
+  settings)
+    shift
+    req SETTINGS "$@" ;;
   notes)
     shift
     req NOTE "$@" ;;
@@ -1601,6 +1606,14 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const read = (f: string) => box.readText(`${WORK}/company/${f}`).catch(() => null);
       lines.push(await setupCommand({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, args, read));
     }
+    else if (line.startsWith(`SETTINGS:${key}\t`)) {
+      const args = Buffer.from(line.slice(`SETTINGS:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
+      lines.push(
+        await settingsCommand({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, args, (title, input, run) =>
+          approve(s, "emplio.settings", input, { own: { title, readOnly: false, appName: "Emplio", alwaysAsk: true, run } }),
+        ),
+      );
+    }
     else if (line.startsWith(`NOTE:${key}\t`) || line.startsWith(`PERSON:${key}\t`)) {
       const note = line.startsWith("NOTE:");
       const args = Buffer.from(line.slice(line.indexOf("\t") + 1), "base64").toString().split("\0").slice(0, -1);
@@ -1645,7 +1658,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.

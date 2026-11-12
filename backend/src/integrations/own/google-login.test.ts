@@ -8,7 +8,7 @@ const AUTH = "https://www.googleapis.com/auth/";
 // restricted per each API's scopes page, checked 2026-11-09
 const RESTRICTED = [`${AUTH}drive`, `${AUTH}drive.readonly`, `${AUTH}drive.metadata`, `${AUTH}drive.metadata.readonly`, `${AUTH}drive.activity`, `${AUTH}drive.activity.readonly`, `${AUTH}drive.scripts`, `${AUTH}drive.meet.readonly`, "https://mail.google.com/"];
 const EXPECTED: Record<keyof typeof GOOGLE_SCOPES, string[]> = {
-  googlecalendar: [`${AUTH}calendar`],
+  googlecalendar: [`${AUTH}calendar.events`, `${AUTH}calendar.readonly`],
   googledocs: [`${AUTH}documents`, `${AUTH}drive.file`],
   googlesheets: [`${AUTH}spreadsheets`, `${AUTH}drive.file`],
   googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.readonly`, `${AUTH}meetings.space.settings`],
@@ -87,3 +87,16 @@ for (const app of Object.keys(EXPECTED) as (keyof typeof EXPECTED)[]) {
     await expect(own.startSignIn!(app, "o", BACK)).rejects.toThrow();
   });
 }
+
+test("disconnecting a Google app revokes Emplio's access at Google", async () => {
+  const sent: string[] = [];
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    sent.push(`${url} ${init?.body}`);
+    return new Response(null, { status: sent.length === 1 ? 200 : 400 });
+  }) as typeof fetch;
+  for (const app of Object.keys(GOOGLE_SCOPES)) expect(APPS[app]!.oauth!.revoke, app).toBeFunction();
+  await APPS.googlecalendar!.oauth!.revoke!("refresh-1");
+  // already revoked in Google's own settings: not an error
+  await APPS.googledocs!.oauth!.revoke!("refresh-2");
+  expect(sent).toEqual(["https://oauth2.googleapis.com/revoke token=refresh-1", "https://oauth2.googleapis.com/revoke token=refresh-2"]);
+});

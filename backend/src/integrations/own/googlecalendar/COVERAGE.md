@@ -8,10 +8,11 @@ Google sign-in only (no key), shared with Docs, Sheets and Meet: one OAuth clien
 
 | Scope | Google's class |
 | --- | --- |
-| `calendar` | Sensitive (Calendar's scopes page doesn't print the class; Google's verification list has it as sensitive) |
+| `calendar.events` | Sensitive: events on the person's calendars |
+| `calendar.readonly` | Sensitive: read calendars, free/busy, settings |
 | `openid`, `email` | Non-sensitive |
 
-`calendar` covers every method; the narrower ones (`calendar.events`, `calendar.acls`, ...) would take six scopes for the same reach. Only scopes Google classes as sensitive or non-sensitive are asked for. The test in `own/google-login.test.ts` fails if a restricted one appears (`drive`, `drive.readonly`, `drive.metadata`, `drive.meet.readonly`...). Tokens last an hour and renew with the refresh token (`offline`, `prompt=consent`).
+Narrowed for Google's review (Nov 12): no calendar admin (making, changing, clearing, deleting, sharing or handing over whole calendars, editing the calendar list); those actions are left out. Only scopes Google classes as sensitive or non-sensitive are asked for. The test in `own/google-login.test.ts` fails if a restricted one appears (`drive`, `drive.readonly`, `drive.metadata`, `drive.meet.readonly`...). Tokens last an hour and renew with the refresh token (`offline`, `prompt=consent`).
 
 ## Left out
 
@@ -23,7 +24,7 @@ Google sign-in only (no key), shared with Docs, Sheets and Meet: one OAuth clien
 
 - Input names are Google's (`calendarId`), since the generated actions take them straight from the API; `eventId` etc. come from Google's own lists.
 - `reads`: `free_busy_query` runs without asking.
-- Composio's duplicates kept as aliases: `duplicate_calendar` (its create calendar), `list_settings`.
+- Composio's duplicate kept as an alias: `list_settings`.
 - `batch_events` runs one event at a time, up to 100. Composio's used Google's batch endpoint for up to 1000; the batch endpoint if a bulk move ever needs it.
 - `find_free_slots` works out gaps itself from `freeBusy`. `get_current_user` reads the main calendar, not the Google profile.
 

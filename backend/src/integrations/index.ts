@@ -15,12 +15,14 @@ import { context, currentUser, type Ctx } from "../auth";
 import { db } from "../db";
 import { actionRuns, connections } from "../db/schema";
 import { composio } from "./composio";
-import { freshSecret, own } from "./own";
+import { APPS, freshSecret, own } from "./own";
+import { GOOGLE_SCOPES } from "./own/google-login";
 import { listPolls, pollConfig, pollDetail, pollTrigger } from "./polls";
 import { decrypt, encrypt } from "../secrets";
 import { basename } from "node:path";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { AppFile, AppsError, mapDeep, type Provider } from "./types";
+import { cloud } from "../cloud";
 
 type Who = Pick<Ctx, "workspaceId" | "userId">;
 
@@ -290,6 +292,9 @@ export async function disconnect(who: Who, app: string, account?: string, connec
   if (!existing) throw new AppsError(`${app} isn't connected`);
   // best effort: a provider outage mustn't block removing it here
   await providerOf(existing).removeSignIn(existing.externalId).catch((error) => console.warn("removing sign-in failed", error));
+  const revoke = existing.provider === own.name ? APPS[existing.app]?.oauth?.revoke : undefined;
+  const token = existing.refreshToken ?? existing.secret;
+  if (revoke && token) await revoke(decrypt(token)).catch((error) => console.warn("revoking access failed", existing.app, error));
   await db.delete(connections).where(eq(connections.id, existing.id));
   record({ ...who, kind: "connection", summary: `Disconnected ${appName(app)}${existing.label ? ` (${existing.label})` : ""}` });
 }
@@ -368,6 +373,7 @@ export async function runAction(
     error: message,
     ms: Date.now() - started,
   });
+  if (run.ok && !quiet) cloud.onWork(who.workspaceId, who.userId, "app");
   if (run.ok) return run.output;
   if (run.error instanceof AppsError && run.error.expired && connection)
     await db.update(connections).set({ status: "expired", updatedAt: new Date() }).where(eq(connections.id, connection.id));
@@ -622,6 +628,30 @@ button,.b{display:block;box-sizing:border-box;text-align:center;text-decoration:
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
 }
 
+// What Emplio does with each Google app, said on our own page right before Google's (Google's Workspace user data
+// policy asks for this in the app, next to the button that agrees; the privacy page has the long version).
+const GOOGLE_USES: Record<keyof typeof GOOGLE_SCOPES, string[]> = {
+  googlecalendar: ["See your calendars and when you're free", "Add, change and remove events when you or your team ask"],
+  googledocs: ["Read and edit the Google Docs you ask it to work on", "Make new documents for you"],
+  googlesheets: ["Read and edit the Google Sheets you ask it to work on", "Make new spreadsheets for you"],
+  googlemeet: ["Set up Google Meet calls", "See your past calls: who joined, recordings and transcripts"],
+  googlebusiness: ["Read and update your Business Profile: details, posts, reviews and replies"],
+  googlesearchconsole: ["See how your website does in Google Search, and manage its sitemaps"],
+  googleanalytics: ["Read your Google Analytics reports", "Change properties and who has access, when you ask"],
+};
+function googlePage(app: keyof typeof GOOGLE_SCOPES, name: string, logo: string | undefined, next: string) {
+  const li = GOOGLE_USES[app].map((u) => `<li>${esc(u)}</li>`).join("");
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Connect ${esc(name)}</title>
+<style>body{font:15px/1.5 system-ui;max-width:440px;margin:0 auto;padding:24px 16px;color:#111;background:#fff}h1{font-size:18px;display:flex;gap:10px;align-items:center}h1 img{width:28px;height:28px;object-fit:contain}
+ul{padding-left:20px;margin:6px 0 14px}.m{color:#555;font-size:13px}a{color:inherit}
+.b{display:block;box-sizing:border-box;text-align:center;text-decoration:none;margin-top:16px;width:100%;padding:11px;border-radius:8px;background:#111;color:#fff}
+@media(prefers-color-scheme:dark){body{background:#111;color:#eee}.b{background:#eee;color:#111}.m{color:#aaa}}</style>
+<h1>${logo ? `<img src="${esc(new URL(logo, FRONTEND_URL()).href)}" alt="">` : ""}Connect ${esc(name)}</h1>
+<p>Emplio will be able to:</p><ul>${li}</ul>
+<p class="m">Your Google data is used only to do what you or your team ask Emplio. To do it, the AI model doing the work reads it; that model isn't allowed to keep it or train on it. Emplio never sells it, never uses it for ads, and never uses it to train AI models. Disconnect any time in Integrations, which also removes Emplio's access in your Google account. <a href="https://emplio.app/privacy#google" target="_blank" rel="noopener">How Emplio handles Google data</a></p>
+<a class="b" href="${esc(next)}">I agree, continue to Google</a>`;
+}
+
 // Marks this browser as the one that started the sign-in. Only we can set a cookie on this address.
 const startCookie = (id: string) => `oauth_${id}=1; Path=/oauth; HttpOnly; SameSite=Lax; Max-Age=900${process.env.WEBHOOK_URL?.startsWith("https") ? "; Secure" : ""}`;
 export const startedHere = (cookies: string | undefined, id: string) => (cookies ?? "").split(/;\s*/).includes(`oauth_${id}=1`);
@@ -718,10 +748,17 @@ export async function integrationRoutes(app: FastifyInstance) {
   // A Connect button opened: start the sign-in for whoever is logged in, then off to the provider's page.
   // popup=1: opened in a small window from the app, which closes itself when done
   // connection: reconnect that account; otherwise it adds one
-  app.get<{ Params: { app: string }; Querystring: { chat?: string; popup?: string; connection?: string; t?: string; signin?: string } }>("/connect/:app", async (req, reply) => {
+  app.get<{ Params: { app: string }; Querystring: { chat?: string; popup?: string; connection?: string; t?: string; signin?: string; agreed?: string } }>("/connect/:app", async (req, reply) => {
     // a link from a channel: signs in for its person, and ends on a "you can close this" page
     const link = req.query.t ? fromLink(req.query.t) : null;
     if (req.query.t && !link) return reply.type("text/html").send(`<!doctype html><meta charset="utf-8"><p style="font:15px system-ui;padding:24px">This link has expired. Ask for a new one.</p>`);
+    // Google apps: what Emplio will do with the data first, then on to Google once they agree
+    const appId = req.params.app.toLowerCase();
+    if (appId in GOOGLE_SCOPES && req.query.agreed !== "1") {
+      const info = await offered(appId).catch(() => null);
+      const next = new URLSearchParams({ ...req.query, agreed: "1" } as Record<string, string>);
+      return reply.type("text/html").send(googlePage(appId as keyof typeof GOOGLE_SCOPES, info?.name ?? "Google", info?.logo, `/connect/${encodeURIComponent(appId)}?${next}`));
+    }
     const linked = link ? await offered(req.params.app.toLowerCase()).catch(() => null) : null;
     // an app that takes both: the page offers both, and its button comes back here with signin=1
     if (linked?.keyField && !(linked.signIn && req.query.signin === "1")) return reply.type("text/html").send(await keyPage(req.params.app.toLowerCase(), null, undefined, req.query.t));

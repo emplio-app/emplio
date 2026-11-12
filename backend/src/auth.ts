@@ -107,6 +107,29 @@ export async function contextOf(req: FastifyRequest): Promise<Ctx | "Not logged 
 }
 
 
+// A new person's name, once, which also makes their first business, unless someone already added them to one.
+// The cloud then gives that business its free trial.
+async function nameAndFirstBusiness(userId: string, name: string) {
+  const made = await db.transaction(async (tx) => {
+    await tx.update(users).set({ name }).where(eq(users.id, userId));
+    const existing = await tx.select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
+    if (existing.length) return null;
+    const [w] = await tx.insert(workspaces).values({ name: `${name}'s workspace` }).returning();
+    await tx.insert(workspaceMembers).values({ workspaceId: w!.id, userId, role: "owner" });
+    return w!.id;
+  });
+  if (made) await cloud.onBusinessCreated(made, userId).catch((error) => console.error("free trial failed", made, error));
+}
+
+// Signing in with Google: the same Google app as the Calendar, Sheets and Docs connections (integrations/own/google-login.ts),
+// asking only for the name and email. Off until both are set; the login page asks /auth/options.
+// its own switch: the same keys serve Google apps, and the button must wait for the sign-in redirect URI to be registered
+const googleSignIn = () => (process.env.GOOGLE_SIGN_IN === "1" && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET } : null);
+const googleCallback = () => `${process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`}/auth/google/callback`;
+const GOOGLE_STATE = "google_state";
+// where to go after: only a page of this app (no "//", "/\\" or tabs and spaces a browser would turn into another site)
+export const safeNext = (next: string | undefined) => (next && /^\/(?![/\\])[^\\\s]*$/.test(next) ? next : "/home");
+
 // Sign-in limits, on top of the tries each code gets. By address, so one machine can't work through many people;
 // by email, so many machines can't work through one person, and asking for a new code doesn't buy more guesses.
 const HOUR = 3_600_000;
@@ -230,6 +253,71 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.redirect(frontend);
   });
 
+  // what the login page can offer besides the emailed code
+  app.get("/auth/options", async () => ({ google: !!googleSignIn() }));
+
+  app.get<{ Querystring: { next?: string } }>("/auth/google", async (req, reply) => {
+    const g = googleSignIn();
+    const frontend = process.env.FRONTEND_URL ?? "http://localhost:3000";
+    if (!g) return reply.redirect(`${frontend}/login`);
+    const state = randomBytes(24).toString("base64url");
+    // ten minutes to pick an account; lax so it comes back on Google's redirect
+    reply.setCookie(GOOGLE_STATE, JSON.stringify({ state, next: safeNext(req.query.next) }), {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production" && !process.env.FRONTEND_URL?.startsWith("http:"),
+      maxAge: 600,
+    });
+    const params = new URLSearchParams({ client_id: g.id, redirect_uri: googleCallback(), response_type: "code", scope: "openid email profile", state, prompt: "select_account" });
+    return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+  });
+
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>("/auth/google/callback", async (req, reply) => {
+    const frontend = process.env.FRONTEND_URL ?? "http://localhost:3000";
+    const g = googleSignIn();
+    let saved: { state?: string; next?: string } = {};
+    try {
+      saved = JSON.parse(req.cookies[GOOGLE_STATE] ?? "{}");
+    } catch {}
+    reply.clearCookie(GOOGLE_STATE, { path: "/" });
+    // a code the login page turns into words; next kept, so a job typed on the homepage still goes after an email sign-in
+    const fail = (error: "cancelled" | "failed" | "no-email" | "invite-only") =>
+      reply.redirect(`${frontend}/login?${new URLSearchParams({ error, next: safeNext(saved.next) })}`);
+    if (req.query.error) return fail("cancelled");
+    if (!g || !req.query.code || !saved.state || saved.state !== req.query.state) return fail("failed");
+
+    const token = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ code: req.query.code, client_id: g.id, client_secret: g.secret, redirect_uri: googleCallback(), grant_type: "authorization_code" }),
+      signal: AbortSignal.timeout(15_000),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<{ access_token?: string }>) : null))
+      .catch(() => null);
+    const info = token?.access_token
+      ? await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(15_000) })
+          .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; email_verified?: boolean; name?: string }>) : null))
+          .catch(() => null)
+      : null;
+    if (!info?.email || !info.email_verified) return fail("no-email");
+
+    const email = normalizeEmail(info.email);
+    let user = await findUser(email);
+    if (!user && process.env.SIGNUPS_CLOSED === "1" && (await db.query.users.findFirst({ columns: { id: true } })))
+      return fail("invite-only");
+    if (!user) {
+      await db.insert(users).values({ email }).onConflictDoNothing();
+      user = (await findUser(email))!;
+    }
+    // a new person, or one the owner added without a name: Google's name, else the start of the email
+    const joined = !user.name;
+    if (joined) await nameAndFirstBusiness(user.id, (info.name?.trim() || email.split("@")[0]!).slice(0, 100));
+    await startSession(reply, user.id);
+    const next = safeNext(saved.next);
+    return reply.redirect(`${frontend}/login?${new URLSearchParams({ next, ...(joined ? { joined: "1" } : {}) })}`);
+  });
+
   app.get("/auth/me", async (req, reply) => {
     const user = await currentUser(req);
     if (!user) return reply.code(401).send({ error: "Not logged in" });
@@ -253,18 +341,7 @@ export async function authRoutes(app: FastifyInstance) {
       if (!user) return reply.code(401).send({ error: "Not logged in" });
       const name = req.body.name.trim();
       if (!name) return reply.code(400).send({ error: "Name is required" });
-
-      await db.transaction(async (tx) => {
-        await tx.update(users).set({ name }).where(eq(users.id, user.id));
-        const existing = await tx
-          .select()
-          .from(workspaceMembers)
-          .where(eq(workspaceMembers.userId, user.id))
-          .limit(1);
-        if (existing.length) return;
-        const [w] = await tx.insert(workspaces).values({ name: `${name}'s workspace` }).returning();
-        await tx.insert(workspaceMembers).values({ workspaceId: w!.id, userId: user.id, role: "owner" });
-      });
+      await nameAndFirstBusiness(user.id, name);
       return { ok: true };
     },
   );
@@ -285,6 +362,7 @@ export async function authRoutes(app: FastifyInstance) {
         await tx.update(sessions).set({ workspaceId: w!.id }).where(eq(sessions.tokenHash, user.tokenHash));
         return w!;
       });
+      await cloud.onBusinessCreated(w.id, user.id).catch((error) => console.error("free trial failed", w.id, error));
       return { id: w.id };
     },
   );

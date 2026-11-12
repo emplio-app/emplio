@@ -23,7 +23,7 @@ const login = { externalId: "c1", secret: "tok" };
 const run = (a: string, i: unknown) => own.run(a, i, login, "o");
 
 test("reads run unasked, writes ask, every input is a usable schema", async () => {
-  for (const r of ["events_list", "events_get", "list_calendars", "free_busy_query", "find_event", "find_free_slots", "get_current_user", "settings_list", "acl_list", "events_list_all_calendars", "get_current_date_time"]) expect((await own.getAction(`googlecalendar.${r}`))?.readOnly, r).toBe(true);
+  for (const r of ["events_list", "events_get", "list_calendars", "free_busy_query", "find_event", "find_free_slots", "get_current_user", "settings_list", "events_list_all_calendars", "get_current_date_time"]) expect((await own.getAction(`googlecalendar.${r}`))?.readOnly, r).toBe(true);
   for (const w of ["create_event", "update_event", "patch_event", "delete_event", "quick_add", "events_move", "remove_attendee", "batch_events", "acl_insert", "calendars_delete", "clear_calendar"]) expect((await own.getAction(`googlecalendar.${w}`))?.readOnly, w).toBeFalsy();
   for (const a of Object.values(googlecalendar.actions)) z.toJSONSchema(a.input, { io: "input" });
 });
@@ -112,4 +112,10 @@ test("polled: a guest's new answer is reported once; an invitation not yet answe
   items = [event("accepted")];
   const later = await pollOnce("googlecalendar.attendee_response_changed_trigger", { calendar_id: "primary" }, first.seen, run);
   expect(later.fresh.map((f: any) => f.attendee.email)).toEqual(["a@b.co"]);
+});
+
+test("only what calendar.events + calendar.readonly allow: no calendar admin", async () => {
+  for (const a of ["create_calendar", "calendars_delete", "clear_calendar", "acl_insert", "acl_list", "calendar_list_insert", "calendars_transfer_ownership", "duplicate_calendar"])
+    expect(await own.getAction(`googlecalendar.${a}`), a).toBeNull();
+  for (const a of ["create_event", "patch_event", "delete_event", "events_move", "list_calendars", "free_busy_query"]) expect(await own.getAction(`googlecalendar.${a}`), a).not.toBeNull();
 });

@@ -23,6 +23,7 @@ import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agen
 import { canReopen, liveView } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
+import { cloud } from "./cloud";
 
 type Action = JobInfo["actions"][number];
 
@@ -243,6 +244,7 @@ async function began(w: Row, stop: () => void) {
     const report = unfinished + (answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)"));
     const status = unfinished ? "failed" : outcome === "completed" ? (asks(report) ? "asking" : "done") : outcome;
     await db.update(jobs).set({ status, report, finishedAt: new Date() }).where(eq(jobs.id, w.id));
+    if (status === "done") cloud.onWork(w.workspaceId, w.userId, "agent");
     live.delete(w.id);
     e.end();
     const goes = reportGoes({ depth: w.depth, stopped: outcome === "stopped", owed: owed.has(w.id), interrupted });

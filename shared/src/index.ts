@@ -529,7 +529,8 @@ export type DbTable = { name: string; type: string; rows: number | null; private
 export type DbRows = { columns: string[]; rows: (string | number | null)[][]; total: number; offset: number; limit: number };
 
 // GET /settings; PUT /settings takes Partial<Record<key, value | null>>, null putting it back to the default
-export type SettingsResponse = { values: Settings; defaults: Settings; canEdit: boolean };
+// modelLock: why the business runs on other models than these for now (the free trial), shown above Quality
+export type SettingsResponse = { values: Settings; defaults: Settings; canEdit: boolean; modelLock?: string };
 
 // Tasks for people and for the AI (assigneeId null).
 export const TASK_STATUSES = ["todo", "doing", "waiting", "done", "cancelled"] as const;

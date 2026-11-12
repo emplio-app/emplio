@@ -11,9 +11,10 @@ import {
   type SettingsResponse,
   type SetupStatus,
 } from "@emplio/shared";
-import { BrainIcon, CalendarClockIcon, ChevronRightIcon, MessagesSquareIcon, MonitorIcon, SunMoonIcon } from "lucide-react";
+import { BrainIcon, Building2Icon, CalendarClockIcon, ChevronRightIcon, MessagesSquareIcon, MonitorIcon, SunMoonIcon, UserIcon } from "lucide-react";
+import { BusinessTab, YouTab } from "@/components/chat/settings-people";
 import { useRouter } from "next/navigation";
-import { DangerZone } from "@cloud/client";
+import { SeePlans } from "@cloud/client";
 import { SAY_TEXT } from "@/components/chat/attachments";
 import { useDraft } from "@/components/chat/draft";
 import { Fragment, useState } from "react";
@@ -146,6 +147,9 @@ export function SettingsDialog({
   // only what was edited and not saved yet; everything else shows as saved
   const [draft, setDraft] = useState<Partial<Record<string, Value>>>({});
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Business, You and Appearance save on their own: the Save bar is for the agent's settings only
+  const [tab, setTab] = useState<string>(SETTING_SECTIONS[0].key);
+  const agentTab = SETTING_SECTIONS.some((s) => s.key === tab);
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -191,7 +195,8 @@ export function SettingsDialog({
         )}
         {data && (
           <Tabs
-            defaultValue={SETTING_SECTIONS[0].key}
+            value={tab}
+            onValueChange={(v) => setTab(String(v))}
             orientation="vertical"
             className="min-h-0 flex-1 flex-col gap-0 sm:flex-row"
           >
@@ -212,6 +217,14 @@ export function SettingsDialog({
                   </TabsTrigger>
                 );
               })}
+              <TabsTrigger value="business" className={TAB}>
+                <Building2Icon />
+                Business
+              </TabsTrigger>
+              <TabsTrigger value="you" className={TAB}>
+                <UserIcon />
+                You
+              </TabsTrigger>
               <TabsTrigger
                 value="appearance"
                 className={TAB}
@@ -228,6 +241,13 @@ export function SettingsDialog({
               >
                 <h3 className="font-medium">{s.label}</h3>
                 <p className="mb-4 text-sm text-muted-foreground">{s.help}</p>
+                {/* the free trial runs the fast AI whatever Quality says (backend settingsFor) */}
+                {data.modelLock && SETTING_FIELDS.some((f) => f.section === s.key && f.key === "modelSet") && (
+                  <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm">
+                    <span className="min-w-0 flex-1">{data.modelLock}</span>
+                    {data.canEdit && <SeePlans size="sm" label="See plans" />}
+                  </div>
+                )}
                 {s.key === "work" && (
                   <>
                     <SetupCard canEdit={data.canEdit} onStarted={() => onOpenChange(false)} />
@@ -302,14 +322,19 @@ export function SettingsDialog({
                 {s.key === "work" && <AlwaysAllowed />}
               </TabsContent>
             ))}
+            <TabsContent value="business" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+              <BusinessTab />
+            </TabsContent>
+            <TabsContent value="you" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+              <YouTab />
+            </TabsContent>
             <TabsContent value="appearance" className="min-h-0 overflow-y-auto p-4 sm:p-6">
               <Appearance />
-              <DangerZone />
             </TabsContent>
           </Tabs>
         )}
 
-        {data?.canEdit && (
+        {data?.canEdit && agentTab && (
           <DialogFooter className="m-0 flex-row items-center justify-end rounded-b-xl border-t p-4 sm:px-6">
             {save.error && (
               <p className="mr-auto text-sm text-destructive">
