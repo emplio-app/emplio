@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary } from "@emplio/shared";
+import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -780,20 +780,29 @@ export async function jobRoutes(app: FastifyInstance) {
     return { id: w.id, name: w.name, agent: agentName(w.agent), chatId: w.chatId, ...(await runOf(w, req.query.run)) } satisfies JobInfo;
   });
 
-  // the live browsers of the agents at work for this chat: tabs in its browser panel, so the person watches them
-  // from where they asked (Emplio has none of its own). Polled while the chat is open.
-  app.get<{ Params: { id: string } }>("/conversations/:id/agent-browsers", { schema: { params } }, async (req, reply) => {
+  // the agents at work for this chat, or waiting on an answer: a strip over its message box, so the person sees what's
+  // still going however far up it was asked; and their live browsers, a tab each in its browser panel (Emplio has none
+  // of its own). Polled while the chat is open.
+  app.get<{ Params: { id: string } }>("/conversations/:id/working", { schema: { params } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const rows = await db
-      .select({ chatId: jobs.chatId, agent: jobs.agent, usedAt: conversations.browserUsedAt })
+      .select({ id: jobs.id, name: jobs.name, chatId: jobs.chatId, agent: jobs.agent, status: jobs.status, usedAt: conversations.browserUsedAt })
       .from(jobs)
       .innerJoin(conversations, eq(conversations.id, jobs.chatId))
-      .where(and(eq(jobs.conversationId, req.params.id), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId), eq(jobs.status, "working"), isNull(jobs.parentId)))
+      .where(and(eq(jobs.conversationId, req.params.id), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId), inArray(jobs.status, ["working", "asking"]), isNull(jobs.parentId)))
       .orderBy(asc(jobs.createdAt));
-    // ponytail: one browser-service look per agent browsing now, every poll; a few at most
-    const live = await Promise.all(rows.filter((r) => canReopen(r.usedAt)).map(async (r) => ((await liveView(r.chatId!)) ? [{ chatId: r.chatId!, name: agentName(r.agent) ?? "Emplio" }] : [])));
-    return live.flat();
+    // ponytail: one browser-service look per job at work, every poll; a few at most
+    return Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        chatId: r.chatId!,
+        name: r.name,
+        agent: agentName(r.agent) ?? "Emplio",
+        status: r.status as "working" | "asking",
+        browser: r.status === "working" && canReopen(r.usedAt) && !!(await liveView(r.chatId!)),
+      }) satisfies WorkingJob),
+    );
   });
 
   // the jobs the person opened as their own chat, nested in the sidebar under the chat they came from until closed

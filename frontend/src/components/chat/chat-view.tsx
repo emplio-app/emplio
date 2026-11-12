@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -11,6 +11,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
   PaperclipIcon,
@@ -21,6 +22,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -41,6 +43,7 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Spinner } from "@/components/ui/spinner";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
@@ -342,13 +345,15 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   useEffect(() => {
     if (job) void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   }, [job, status, queryClient]);
-  // Emplio has no browser of its own: its agents' browsers show here, a tab each, the first time each opens
-  const { data: agentBrowsers = [] } = useQuery({
-    queryKey: ["agent-browsers", id],
-    queryFn: () => api<BrowserTab[]>(`/conversations/${id}/agent-browsers`),
+  // its agents at work (a strip over the message box) and their browsers: Emplio has none of its own, so theirs show
+  // here, a tab each, the first time each opens
+  const { data: working = [] } = useQuery({
+    queryKey: ["working", id],
+    queryFn: () => api<WorkingJob[]>(`/conversations/${id}/working`),
     enabled: !job,
-    refetchInterval: 10_000,
+    refetchInterval: 5_000,
   });
+  const agentBrowsers = useMemo<BrowserTab[]>(() => working.filter((w) => w.browser).map((w) => ({ chatId: w.chatId, name: w.agent })), [working]);
   const [tab, setTab] = useState<string | null>(null);
   const seenTabs = useRef<Set<string> | null>(null);
   useEffect(() => {
@@ -1002,6 +1007,26 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const composer = (
     <div className="relative">
       {skillMenu.menu ?? mentionMenu.menu}
+      {/* what's still going, however far up it was asked: each opens its chat */}
+      {working.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1">
+          {working.map((w) => (
+            <Link
+              key={w.id}
+              href={`/chat/${w.chatId}`}
+              className="flex min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
+              <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
+              {w.status === "working" ? (
+                <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
+              ) : (
+                <span className="min-w-0 flex-1 truncate">· has a question about {w.name}</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
     <PromptInput
       onSubmit={({ text }) => send(text)}
       className="rounded-2xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
