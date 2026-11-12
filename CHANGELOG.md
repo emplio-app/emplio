@@ -2,6 +2,25 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.14 (2026-11-13)
+
+### What's new
+
+- A new chat now offers real jobs to start with, like checking competitors' websites, drafting replies to enquiries, or a price list made from your website. Tap one and Emplio starts. ![](frontend/public/whats-new/1.2.14-jobs.webp)
+- Before you connect Google Calendar, Docs, Sheets, Meet or Analytics, Emplio shows what it will do and how your data is used. Your Google data is never used to train AI, and disconnecting also removes Emplio's access in your Google account. ![](frontend/public/whats-new/1.2.14-google.webp)
+- Emplio now only uses AI services that don't keep or learn from your data.
+- Google Calendar asks for less: Emplio can see your calendars and manage events, but can't create, delete or share whole calendars.
+- Ask Emplio to change a setting or rename your business in the chat. It always asks for your OK first.
+- Settings has new Business and You tabs for your business name and your own name, email, phone and Telegram.
+- Sign in with Google, and new businesses get a free trial to try Emplio with.
+
+### For developers
+
+- First-run flow (#85, cloud #14): free trial lot per person (ref = sha256 of the normalised email), Haiku lock while on it, console kill switch and `FREE_TRIALS_PER_DAY` cap; welcome dialog, job cards, Telegram offer after the second message; plans dialog in the app.
+- Google sign-in at `/auth/google` (needs `GOOGLE_SIGN_IN=1` plus keys); `safeNext` keeps sign-in redirects on this app's own pages.
+- `emplio settings` (list, `set <setting> <value>`, `set name`, `set my-name`): every change waits for an Allow card with no "Always allow"; API keys refused.
+- Google verification: Calendar scopes are `calendar.events` + `calendar.readonly`, admin actions (`acl_*`, `calendars_*`, calendar list writes) dropped; `GET /connect/:app` shows a disclosure page for Google apps until `agreed=1`; disconnect revokes the token at Google (`oauth.revoke`); every OpenRouter call sends `provider.data_collection: "deny"`. Privacy policy has a "Google user data" section (`/privacy#google`).
+
 ## 1.2.13 (2026-11-13)
 
 ### What's new
