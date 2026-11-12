@@ -56,7 +56,8 @@ const note = (b: Business) =>
   )!.text;
 
 // messages: the reply as the chat keeps it (its commands and their results), for chats that go on (workday)
-export type Said = { text: string; commands: string[]; messages?: ModelMessage[] };
+// usage: what the reply took, all its steps (cost: what OpenRouter charged, in dollars)
+export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number } };
 
 // One command Emplio already ran in this reply, for chats that start mid-work.
 let calls = 0;
@@ -172,5 +173,10 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
     },
     stopWhen: [stepCountIs(maxSteps), () => stop],
   });
-  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages };
+  const usage = {
+    input: steps.reduce((n, s) => n + (s.usage.inputTokens ?? 0), 0),
+    output: steps.reduce((n, s) => n + (s.usage.outputTokens ?? 0), 0),
+    cost: steps.reduce((n, s) => n + Number((s.usage.raw as { cost?: number } | undefined)?.cost ?? 0), 0),
+  };
+  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage };
 }

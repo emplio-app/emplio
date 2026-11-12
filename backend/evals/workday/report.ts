@@ -14,6 +14,10 @@ console.log(`steps right\t${cols((rows) => pct(steps(rows).filter((s) => s.ok).l
 console.log(`whole chats right\t${cols((rows) => `${rows.filter((r) => r.output.steps.every((s) => s.ok)).length}/${rows.length}`)}`);
 console.log(`used a browser itself\t${cols((rows) => `${steps(rows).filter((s) => s.browser).length} steps`)}`);
 console.log(`own commands per step\t${cols((rows) => (steps(rows).reduce((n, s) => n + s.byHand, 0) / (steps(rows).length || 1)).toFixed(1))}`);
+const sum = (rows: Row[], k: "input" | "output" | "cost") => steps(rows).reduce((n, s) => n + (s.usage?.[k] ?? 0), 0) / (rows.length || 1);
+console.log(`Emplio's tokens in, per chat\t${cols((rows) => Math.round(sum(rows, "input")).toLocaleString())}`);
+console.log(`Emplio's tokens out, per chat\t${cols((rows) => Math.round(sum(rows, "output")).toLocaleString())}`);
+console.log(`Emplio's cost per chat\t${cols((rows) => `$${sum(rows, "cost").toFixed(4)}`)}`);
 for (const name of [...new Set(runs.flat().map((r) => r.name))])
   console.log(`  ${name}\t${cols((rows) => pct(steps(rows.filter((r) => r.name === name)).filter((s) => s.ok).length, steps(rows.filter((r) => r.name === name)).length))}`);
 console.log(`\nWrong in ${files.at(-1)}:`);
