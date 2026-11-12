@@ -55,7 +55,8 @@ const note = (b: Business) =>
     [],
   )!.text;
 
-export type Said = { text: string; commands: string[] };
+// messages: the reply as the chat keeps it (its commands and their results), for chats that go on (workday)
+export type Said = { text: string; commands: string[]; messages?: ModelMessage[] };
 
 // One command Emplio already ran in this reply, for chats that start mid-work.
 let calls = 0;
@@ -152,7 +153,7 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
   const commands: string[] = [];
   let stop = false;
-  const { steps } = await generateText({
+  const { steps, response } = await generateText({
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
     system: system(b, round).map((content, i) => ({ role: "system" as const, content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
@@ -171,5 +172,5 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
     },
     stopWhen: [stepCountIs(maxSteps), () => stop],
   });
-  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands };
+  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages };
 }
