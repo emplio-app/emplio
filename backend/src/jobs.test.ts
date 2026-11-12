@@ -80,11 +80,11 @@ test("hand-offs and the checklist aren't counted as work done by hand", () => {
   for (const work of ["emplio web read https://x.com", "python go.py", "emplio browser open https://x.com", "cat handoff.md"]) expect(notCounted(work)).toBe(false);
 });
 
-test("reports say what's still running, and let Emplio hold back only then", () => {
-  expect(reportsNote(["r"], [], false)).not.toContain(SILENT);
+test("reports say what's still running; Emplio may stay quiet after sending work back, or while the rest is coming", () => {
+  expect(reportsNote(["r"], [], false)).toContain(`send work back to a job (it isn't done) or answer its question, there's nothing new for them: write no words before or after the command, just end with exactly ${SILENT}`);
   const note = reportsNote(["r"], ["find-invoices"], false);
   expect(note).toContain("Still running: find-invoices");
-  expect(note).toContain(SILENT);
+  expect(note).toContain(`only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT}`);
 });
 
 // against the local database, with no model: a throwaway business and a job's reply starting and ending
