@@ -593,3 +593,31 @@ html[data-desktop="darwin"] [data-slot="sidebar-header"] {
 html[data-desktop="darwin"] [data-slot="sidebar-wrapper"]:has([data-slot="sidebar"][data-state="collapsed"]) [data-slot="sidebar-inset"] header:not(aside header) {
   padding-left: 5.25rem;
 }
+
+/* A quiet, app-wide softness: colours, fades and open/close eases on things that change, so nothing snaps.
+   Zero-specificity (:where), so any component's own transition still wins. Colour/opacity/shadow only (no layout
+   properties), so it costs next to nothing; none of it runs for people who asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  :root {
+    interpolate-size: allow-keywords; /* height: auto can be animated, where a component transitions it */
+  }
+  :where(a, button, input, textarea, select, summary, [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [data-slot]) {
+    transition-property: color, background-color, border-color, box-shadow, opacity, fill, stroke;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  /* bars that fill and drain glide instead of jumping */
+  :where([data-slot="progress-indicator"]) {
+    transition-property: width, transform;
+    transition-duration: 300ms;
+  }
+  /* native <details> opens and closes with a smooth height */
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition: block-size 200ms cubic-bezier(0.32, 0.72, 0, 1), content-visibility 200ms allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+  }
+}
