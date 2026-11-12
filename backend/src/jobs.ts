@@ -470,6 +470,7 @@ async function carryOn(who: Who, conversationId: string, w: Row, brief: string):
     // finished, it takes the new work's name (as a fresh job would), so its line and report say what it's on now
     w.name = brief.split("\n")[0]!.trim().slice(0, 80) || w.name;
     await db.update(jobs).set({ name: w.name }).where(eq(jobs.id, w.id));
+    await db.update(conversations).set({ title: w.agent ? `${agentName(w.agent)}: ${w.name}` : w.name }).where(eq(conversations.id, w.chatId));
   }
   track(w.id);
   const run = generateId();
