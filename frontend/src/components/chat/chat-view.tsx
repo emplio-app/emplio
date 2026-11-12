@@ -44,7 +44,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
-import { Suggestion } from "@/components/ai-elements/suggestion";
+import { JobCards, TelegramOffer, WelcomeDialog } from "@/components/chat/first-run";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing } from "@/components/chat/tool-calls";
@@ -61,7 +61,7 @@ import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
 import { AttachmentTray, MessageAttachments, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
 import { QuoteButton, QuoteChips, QuotedText, addQuote, withQuotes, type Quote } from "@/components/chat/quote";
 import { Button } from "@/components/ui/button";
-import { pausedNote, useCreditStatus } from "@cloud/client";
+import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
@@ -74,13 +74,6 @@ import {
   useMe,
   useRenameConversation,
 } from "@/lib/api";
-
-const SUGGESTIONS = [
-  "Draft a project update for my team",
-  "Summarize the key points of a meeting",
-  "Write a polite follow-up email",
-  "Help me plan my week",
-];
 
 // px: space above a pinned prompt, and the message list's bottom padding (py-8)
 const PIN_GAP = 16;
@@ -983,6 +976,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     <TriangleAlertIcon className="size-4 shrink-0 text-destructive" />
                     <span className="flex-1">{paused ? pausedNote(error.message) : "Something went wrong while generating a reply."}</span>
                     {/* what it did before failing is saved: carry on from there instead of redoing it */}
+                    {paused && me?.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
                     {!paused && messages.at(-1)?.role === "assistant" && (
                       <Button size="sm" variant="outline" onClick={() => handlers.current.dispatch({ text: "Continue", files: [] })}>
                         Continue
@@ -1171,11 +1165,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </h2>
                 <p className="mb-8 text-center text-muted-foreground">What can I take off your plate today?</p>
                 {composer}
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <Suggestion key={s} suggestion={s} onClick={send} className="bg-card text-muted-foreground" />
-                  ))}
-                </div>
+                {!job && <JobCards onPick={send} />}
               </div>
             </div>
           ) : (
@@ -1259,11 +1249,19 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     </div>
                   )
                 )}
-                {onTelegram ? <TelegramOnly /> : composer}
+                {onTelegram ? (
+                  <TelegramOnly />
+                ) : (
+                  <>
+                    {!job && <TelegramOffer messages={messages} />}
+                    {composer}
+                  </>
+                )}
               </div>
             </>
           )}
         </div>
+        {!job && <WelcomeDialog onTry={send} busy={busy} />}
         <BrowserPanel tabs={agentBrowsers} active={shownTab} onPick={pickTab} />
         <FilePanel file={browser.open ? null : openFile} onClose={() => setOpenFile(null)} />
       </div>

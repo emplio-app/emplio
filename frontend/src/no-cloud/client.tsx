@@ -1,6 +1,8 @@
 // Stands in for Emplio Cloud's client parts (cloud/frontend/client.tsx) in a copy without the private cloud/ folder:
 // no billing, no analytics. Emplio is never paused.
 export const Analytics = () => null;
+export const track = (_event: string, _props?: Record<string, unknown>) => {};
+export const SeePlans = (_: { size?: "sm" | "default"; onOpen?: () => void; label?: string }) => null;
 export const CreditMeter = () => null;
 export const BillingMenuItem = (_: { role: string | undefined }) => null;
 export const useCreditStatus = () => ({ data: undefined as { paused: boolean } | undefined });

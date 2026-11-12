@@ -76,7 +76,11 @@ async function catalogue() {
 
 // Hosts the free router may not use: Google AI Studio's free pool is nearly always rate-limited, and
 // AtlasCloud's preview models break off mid-reply. ponytail: hand-kept; revisit when free replies fail again
-const FREE_SKIP = { provider: { ignore: ["google-ai-studio", "atlas-cloud"] } };
+const FREE_SKIP = ["google-ai-studio", "atlas-cloud"];
+// Only hosts that neither keep nor train on what we send: chats can hold the business's Google data, which
+// Google's Limited Use rules say may never train AI models (privacy page says so too). This can leave the
+// free router with fewer, slower hosts.
+const routing = (id: string) => ({ provider: { data_collection: "deny" as const, ...(id === "openrouter/free" ? { ignore: FREE_SKIP } : {}) } });
 
 // What OpenRouter charged for one call (its usage.cost, in dollars), taken from the business's credit (credit.ts).
 const costOf = (usage: { raw?: unknown }) => Number((usage.raw as { cost?: number } | undefined)?.cost ?? 0);
@@ -110,7 +114,7 @@ const ours = createOpenRouter(attribution);
 // charged to `bill`'s business.
 export const model = (settings: Pick<Settings, "openrouterKey">, id: string, bill: Bill) =>
   wrapLanguageModel({
-    model: (settings.openrouterKey ? createOpenRouter({ apiKey: settings.openrouterKey, ...attribution }) : ours)(id, id === "openrouter/free" ? FREE_SKIP : {}),
+    model: (settings.openrouterKey ? createOpenRouter({ apiKey: settings.openrouterKey, ...attribution }) : ours)(id, routing(id)),
     middleware: metering(bill, id, !!settings.openrouterKey),
   });
 

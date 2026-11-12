@@ -1,12 +1,13 @@
 // A business's settings for how its AI employee behaves (the list is SETTING_FIELDS in shared). Stored on
 // the workspace as only what was changed; read once per reply, so a change applies from the next message.
 import { KEY_MASK, SETTING_FIELDS, type Settings, type SettingsResponse } from "@emplio/shared";
+import { cloud } from "./cloud";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context } from "./auth";
 import { db } from "./db";
 import { record } from "./activity";
-import { workspaces } from "./db/schema";
+import { users, workspaces } from "./db/schema";
 import { customModelProblem, listModels } from "./models";
 import { decrypt, encrypt } from "./secrets";
 
@@ -36,6 +37,8 @@ const check = (key: string, value: unknown): string | null => {
 };
 
 const KEYS = new Set<string>(SETTING_FIELDS.filter((f) => f.type === "key").map((f) => f.key));
+// the per-job model picks, which a Quality choice puts back on Auto
+const MODEL_FIELD_KEYS = SETTING_FIELDS.filter((f) => f.type === "model").map((f) => f.key);
 
 // A key that won't decrypt (ENCRYPTION_KEY changed) counts as not set.
 const opened = (k: string, v: unknown) => {
@@ -47,13 +50,21 @@ const opened = (k: string, v: unknown) => {
   }
 };
 
-// With keys in the clear: for the server's own use only, never sent anywhere (forPeople masks them).
-export async function settingsFor(workspaceId: string): Promise<Settings> {
+// As saved, with keys in the clear: what Settings shows and changes.
+async function savedSettings(workspaceId: string): Promise<Settings> {
   const row = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId), columns: { settings: true } });
   const saved = Object.entries(row?.settings ?? {})
     .map(([k, v]) => [k, opened(k, v)] as const)
     .filter(([k, v]) => v !== undefined && !check(k, v));
   return { ...DEFAULTS, ...Object.fromEntries(saved) };
+}
+
+// What the business runs on: as saved, unless the cloud holds it to a Quality choice (the free trial) and it isn't
+// paying for its AI with its own key. For the server's own use only, never sent anywhere (forPeople masks keys).
+export async function settingsFor(workspaceId: string): Promise<Settings> {
+  const s = await savedSettings(workspaceId);
+  const lock = s.openrouterKey ? null : await cloud.models.lock(workspaceId);
+  return lock ? { ...s, modelSet: lock.modelSet, ...Object.fromEntries(MODEL_FIELD_KEYS.map((k) => [k, "auto"])) } : s;
 }
 
 const masked = (k: string, v: unknown) => (KEYS.has(k) && v ? `${KEY_MASK}${String(v).slice(-4)}` : v);
@@ -99,13 +110,20 @@ export async function changeSettings(who: { workspaceId: string; userId: string 
   return null;
 }
 
-export const settingsForPeople = async (workspaceId: string) => forPeople(await settingsFor(workspaceId));
+export const settingsForPeople = async (workspaceId: string) => forPeople(await savedSettings(workspaceId));
+
+// what the Settings dialog gets, after a read or a save
+async function settingsResponse(workspaceId: string, role: string): Promise<SettingsResponse> {
+  const saved = await savedSettings(workspaceId);
+  const lock = saved.openrouterKey ? null : await cloud.models.lock(workspaceId);
+  return { values: forPeople(saved), defaults: DEFAULTS, canEdit: canEdit(role), modelLock: lock?.why };
+}
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get("/settings", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return { values: forPeople(await settingsFor(ctx.workspaceId)), defaults: DEFAULTS, canEdit: canEdit(ctx.role) } satisfies SettingsResponse;
+    return settingsResponse(ctx.workspaceId, ctx.role);
   });
 
   // body: the settings to change; null (or the default) puts one back to the default
@@ -115,6 +133,95 @@ export async function settingsRoutes(app: FastifyInstance) {
     if (!canEdit(ctx.role)) return reply.code(403).send({ error: "Only the owner or an admin can change settings." });
     const problem = await changeSettings(ctx, req.body);
     if (problem) return reply.code(400).send({ error: problem });
-    return { values: forPeople(await settingsFor(ctx.workspaceId)), defaults: DEFAULTS, canEdit: true } satisfies SettingsResponse;
+    return settingsResponse(ctx.workspaceId, ctx.role);
   });
+}
+
+// `emplio settings`: Emplio reads and changes the business's settings and name (owner and admin chats: what they could
+// change in Settings themselves) and the person's own name (anyone's chat). Every change waits for a tap on an Allow
+// card (`allow`, which never offers "Always allow"), so nothing it read in an email or on a page can change them, and
+// runs nobody is watching can't. Keys only ever in Settings.
+const SETTINGS_USAGE = `usage: emplio settings                          every setting: its value and what it can be
+       emplio settings set <setting> <value>    change one ("default" puts it back); they tap Allow first
+       emplio settings set name "<name>"        rename the business (e.g. once you learn its real name in setup)
+       emplio settings set my-name "<name>"     the person's own name, as the team sees it`;
+
+const shownValue = (k: string, v: unknown) => (KEYS.has(k) ? (v ? "(set)" : "(none)") : typeof v === "boolean" ? (v ? "on" : "off") : String(v));
+
+function parseValue(f: (typeof SETTING_FIELDS)[number], raw: string): unknown {
+  if (raw === "default") return null;
+  if (f.type === "number") return Number(raw.replace(/[,_]/g, ""));
+  if (f.type === "toggle") return /^(on|true|yes)$/i.test(raw) ? true : /^(off|false|no)$/i.test(raw) ? false : raw;
+  return raw;
+}
+
+type Allow = (title: string, input: unknown, run: () => Promise<unknown>) => Promise<string | null>;
+// asks, then does it: what to tell the agent
+async function asked(allow: Allow, title: string, input: unknown, run: () => Promise<unknown>, done: string) {
+  const refused = await allow(title, input, run);
+  if (refused) return refused;
+  try {
+    await run();
+  } catch (e) {
+    return `error: ${(e as Error).message}`;
+  }
+  return done;
+}
+
+type Who = { workspaceId: string; userId: string; role: string };
+export async function settingsCommand(who: Who, args: string[], allow: Allow) {
+  const [sub, key, ...rest] = args;
+  const [w, me] = await Promise.all([
+    db.query.workspaces.findFirst({ where: eq(workspaces.id, who.workspaceId), columns: { name: true } }),
+    db.query.users.findFirst({ where: eq(users.id, who.userId), columns: { name: true } }),
+  ]);
+  if (!sub || sub === "list") {
+    const s = forPeople(await savedSettings(who.workspaceId));
+    const lock = s.openrouterKey ? null : await cloud.models.lock(who.workspaceId);
+    const lines = SETTING_FIELDS.map((f) => {
+      const can = f.type === "choice" ? f.options.map((o) => o.value).join(" | ") : f.type === "number" ? `${f.min}–${f.max} ${f.unit}` : f.type === "toggle" ? "on | off" : f.type === "model" ? "auto | <provider/model>" : "set in Settings only";
+      return `${f.key}: ${shownValue(f.key, s[f.key as keyof Settings])}   ${f.label}. ${f.help} (${can})`;
+    });
+    return [
+      `my-name: ${me?.name}   This person's own name (they can change it)`,
+      `name: ${w?.name}   The business's name`,
+      ...lines,
+      ...(canEdit(who.role) ? [] : ["Only the owner or an admin can change the business's settings and name."]),
+      ...(lock ? [`Note: ${lock.why} Until then the models run as "save", whatever these say.`] : []),
+    ].join("\n");
+  }
+  if (sub !== "set" || !key || !rest.length) return SETTINGS_USAGE;
+  const raw = rest.join(" ").trim();
+  const text = raw.replace(/^["']|["']$/g, "").trim().slice(0, 100);
+
+  if (key === "my-name") {
+    if (!text) return "error: give the name";
+    const run = async () => {
+      await db.update(users).set({ name: text }).where(eq(users.id, who.userId));
+      record({ workspaceId: who.workspaceId, userId: who.userId, kind: "settings", summary: `Changed their name from ${me?.name} to ${text}` });
+    };
+    return asked(allow, `Change your name to ${text}`, { "your name": `${me?.name} → ${text}` }, run, `Their name is now ${text}.`);
+  }
+  if (!canEdit(who.role)) return "error: only the owner or an admin can change the business's settings. Tell them what you'd change and why.";
+  if (key === "name") {
+    if (!text) return "error: give the business's name";
+    const run = async () => {
+      await db.update(workspaces).set({ name: text }).where(eq(workspaces.id, who.workspaceId));
+      record({ workspaceId: who.workspaceId, userId: who.userId, kind: "settings", summary: `Renamed the business from ${w?.name} to ${text}` });
+    };
+    return asked(allow, `Rename the business to ${text}`, { business: `${w?.name} → ${text}` }, run, `The business is now called ${text}.`);
+  }
+  const f = SETTING_FIELDS.find((f) => f.key === key);
+  if (!f) return `error: there's no setting called "${key}". emplio settings lists them.`;
+  if (f.type === "key") return `error: ${f.label} is pasted in Settings by the owner, never in a chat.`;
+  const value = parseValue(f, raw);
+  const bad = value === null ? null : check(key, value);
+  if (bad) return `error: ${bad}`;
+  const to = value === null ? `default (${shownValue(key, DEFAULTS[key as keyof Settings])})` : shownValue(key, value);
+  const from = shownValue(key, (await savedSettings(who.workspaceId))[key as keyof Settings]);
+  const run = async () => {
+    const problem = await changeSettings(who, { [key]: value });
+    if (problem) throw new Error(problem);
+  };
+  return asked(allow, `Change ${f.label} to ${to}`, { setting: f.label, from, to }, run, `${f.label} is now ${to}. It applies from the next message.`);
 }

@@ -15,6 +15,7 @@ import { conversations, madeFiles } from "./db/schema";
 import { isOwnFile, removeStored, storedLink, storedSize } from "./files";
 import { toQuery } from "./search";
 import { listTeam } from "./team";
+import { cloud } from "./cloud";
 
 type Who = { workspaceId: string; userId: string; role: Role };
 type Row = typeof madeFiles.$inferSelect;
@@ -88,6 +89,7 @@ export async function recordMade(w: Who, conversationId: string, f: Saved, size:
     return same.id;
   }
   const [row] = await db.insert(madeFiles).values({ ...values, workspaceId: w.workspaceId, userId: w.userId, conversationId, name: f.filename }).returning({ id: madeFiles.id });
+  cloud.onWork(w.workspaceId, w.userId, "file");
   return row!.id;
 }
 
