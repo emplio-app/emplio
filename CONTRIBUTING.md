@@ -56,4 +56,12 @@ Add a section at the top of `CHANGELOG.md`, in the same pull request as the chan
 - The technical detail. This part only appears on GitHub.
 ```
 
+A "What's new" line can end with a picture or GIF of the change, kept in `frontend/public/whats-new/`:
+
+```md
+- Approval cards keep their buttons on screen. ![](frontend/public/whats-new/1.3.0-approval.gif)
+```
+
+After an update, everyone gets a short card with one slide for each new line that has a picture. Lines without one only appear under What's new in the account menu, and an update with no pictures shows no card.
+
 That heading is the only place the version number lives. Once it's merged, CI publishes the GitHub release and version-tagged images, and once it's running, open screens offer a refresh. CI fails if the format is wrong.

@@ -1,6 +1,8 @@
 export type HealthResponse = { ok: boolean; version: string };
-// GET /changelog: one version's "What's new" (backend changelog.ts), newest first
-export type Release = { version: string; date: string; changes: string[] };
+// GET /changelog: one version's "What's new" (backend changelog.ts), newest first. image: a picture or GIF of the
+// change, a path on the website; only changes with one become slides in the card shown after an update.
+export type Change = { text: string; image?: string };
+export type Release = { version: string; date: string; changes: Change[] };
 
 export type User = { id: string; email: string; name: string | null };
 export type Workspace = { id: string; name: string; role: "owner" | "admin" | "member" };
