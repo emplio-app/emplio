@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.15 (2026-11-13)
+
+### What's new
+
+- Sign in with Google now works on emplio.app.
+
+### For developers
+
+- Google sign-in's callback falls back to `WEBHOOK_URL` when `PUBLIC_API_URL` isn't set, as live has only that; it was sending Google back to `localhost`.
+
 ## 1.2.14 (2026-11-13)
 
 ### What's new

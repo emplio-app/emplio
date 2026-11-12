@@ -125,7 +125,8 @@ async function nameAndFirstBusiness(userId: string, name: string) {
 // asking only for the name and email. Off until both are set; the login page asks /auth/options.
 // its own switch: the same keys serve Google apps, and the button must wait for the sign-in redirect URI to be registered
 const googleSignIn = () => (process.env.GOOGLE_SIGN_IN === "1" && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET } : null);
-const googleCallback = () => `${process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`}/auth/google/callback`;
+// live has only WEBHOOK_URL as its public address (same rule as made.ts)
+const googleCallback = () => `${process.env.PUBLIC_API_URL ?? process.env.WEBHOOK_URL ?? `http://localhost:${process.env.PORT ?? 4000}`}/auth/google/callback`;
 const GOOGLE_STATE = "google_state";
 // where to go after: only a page of this app (no "//", "/\\" or tabs and spaces a browser would turn into another site)
 export const safeNext = (next: string | undefined) => (next && /^\/(?![/\\])[^\\\s]*$/.test(next) ? next : "/home");
