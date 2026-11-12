@@ -53,6 +53,12 @@ const unseen = new Set<string>();
 // ponytail: in memory like the two above; a restart reports what was working (markOrphanedJobs) and "asking" is saved
 const owed = new Set<string>();
 const untold = new Set<string>();
+// A job that used up a run's steps carries on in a fresh run: when its time (JOB_MINUTES from the run it carries on
+// from) runs out. In memory: a restart ends the job anyway (markOrphanedJobs).
+const carryUntil = new Map<string, number>();
+const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
+export const CARRY_ON =
+  "That run used up its steps, so this is a fresh one: carry on from where you stopped. What you found is in your files; keep building the result as you go.";
 // What happens to a report when a job's reply ends: wake Emplio, keep it for its next reply, or nothing.
 // interrupted: a message is waiting to go into the job's chat, so it hasn't finished.
 export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; interrupted: boolean }) =>
@@ -62,7 +68,7 @@ const MAX_RUNNING = 10; // per chat at once, every level: a runaway plan can't f
 const CONTINUE_MS = 24 * 3_600_000; // a thread quiet for longer than this takes new work as a new thread, unless it's waiting on an answer
 const LISTED = 8; // threads on Emplio's list
 const SIDEBAR_DAYS = 7;
-export const JOB_MINUTES = 30; // per reply in a job's chat (chat.ts), where a person's reply gets 15
+export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
 const WAIT_MS = 10 * 60_000;
 
 export const RULES = (depth: number) => `## You have one piece of work
@@ -78,7 +84,12 @@ each time is your report, which goes back to whoever started you, and the person
     ? "You may hand big or independent parts of your task off with `emplio hand`, the way the sections above describe; do anything small yourself. If one of them comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
     : "You can't hand off: ignore the Handing off section above and do the task yourself."
 }
-Do the task and check the result. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you:
+Do the task and check the result. Long reading goes into files, not your chat: your chat gets folded into short \
+notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
+chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
+small file in your folder (every item with its page, say), and work from that file; never print a whole document \
+to read it. When the task makes something (a sheet, a document, a list), start the file early and add to it as you \
+go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you:
 - What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
 - Files you made (saved to /work/out to offer them to the person).
 - Anything you couldn't do and why, with the exact error, and what a person would need to decide or provide.
@@ -184,6 +195,7 @@ export async function jobReply(chatId: string) {
     agent: agent?.name,
     startedIn: w.conversationId,
     unattended: await unattended(w.conversationId),
+    until: deadline(w.id),
     began: (stop: () => void) => began(w, stop),
   };
 }
@@ -204,15 +216,31 @@ export async function startedIn(chatId: string): Promise<string> {
 }
 
 async function began(w: Row, stop: () => void) {
+  const until = deadline(w.id);
+  carryUntil.delete(w.id);
   const e = track(w.id);
   Object.assign(e, { stop, began: true });
   // it asked a question: whoever answers it here, Emplio is still waiting on the result
   if (w.depth === 1 && w.status === "asking") owed.add(w.id);
   await db.update(jobs).set({ status: "working", report: null, finishedAt: null }).where(eq(jobs.id, w.id));
   // its last words are its report: a question waits for an answer
-  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false) => {
-    const report = answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)");
-    const status = outcome === "completed" ? (asks(report) ? "asking" : "done") : outcome;
+  // capped: the run ended on the step limit, mid-work
+  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false) => {
+    const timeLeft = Date.now() < until - 60_000;
+    if (capped && outcome === "completed" && !interrupted && timeLeft) {
+      // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
+      carryUntil.set(w.id, until);
+      live.delete(w.id);
+      track(w.id).done.then(e.end);
+      const told = owed.has(w.id);
+      void send(w, CARRY_ON);
+      if (!told) owed.delete(w.id);
+      return;
+    }
+    const unfinished =
+      outcome === "failed" && !timeLeft ? "Ran out of time, not finished. " : capped && !interrupted ? "Stopped at the step limit, not finished. " : "";
+    const report = unfinished + (answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)"));
+    const status = unfinished ? "failed" : outcome === "completed" ? (asks(report) ? "asking" : "done") : outcome;
     await db.update(jobs).set({ status, report, finishedAt: new Date() }).where(eq(jobs.id, w.id));
     live.delete(w.id);
     e.end();

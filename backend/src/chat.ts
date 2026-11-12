@@ -45,7 +45,7 @@ import { slashCommand } from "./skills";
 import { allowedIn } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { EMPLIO, JOB_MINUTES, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -981,7 +981,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     },
   });
 
-  const until = Date.now() + (job ? JOB_MINUTES * 60_000 : REPLY_MS);
+  const until = job ? job.until : Date.now() + REPLY_MS;
   untils.set(id, until);
   const guard = failureGuard();
   // a thread stops with Stop in the chat that started it, and with \`emplio threads stop\`
@@ -1079,7 +1079,19 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           settle(id, live);
           release();
           // a job's last words are its report
-          void jobEnded?.(answer, stopper.signal.aborted ? "stopped" : outcome.status === "failed" ? "failed" : "completed", interrupted || steered(id)).catch((error) => log.error(error, "ending the job failed"));
+          // capped: it stopped on the step limit while still working, so it carries on (jobs.ts)
+          void Promise.resolve(result.steps)
+            .catch(() => [])
+            .then((steps) =>
+              jobEnded?.(
+                answer,
+                // aborted without Stop: its time ran out
+                stopper.signal.aborted ? "stopped" : outcome.status === "failed" || outcome.status === "aborted" ? "failed" : "completed",
+                interrupted || steered(id),
+                steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === "tool-calls",
+              ),
+            )
+            .catch((error) => log.error(error, "ending the job failed"));
           // people's chats are read for the background agent, and threads for what they teach (reader.ts); automations,
           // tasks and check-ins are its own doing
           if (!automation) void readLater(id, settings.readAfter).catch((error) => log.error(error, "scheduling a read failed"));
