@@ -5,6 +5,8 @@ export const COMPUTER_USD_PER_SECOND: number = 0;
 export type RunOptions = { cwd: string; env?: Record<string, string>; timeoutMs: number; signal?: AbortSignal };
 export type Box = {
   id: string;
+  // the person's own computer, through the desktop app (devices.ts): nothing to meter, and a different system than the cloud's
+  local?: boolean;
   // stdout and stderr interleaved as result; a timeout is exit code 124; signal kills it
   run(command: string, o: RunOptions): Promise<{ exitCode: number; result: string }>;
   write(path: string, bytes: Uint8Array | string): Promise<unknown>;

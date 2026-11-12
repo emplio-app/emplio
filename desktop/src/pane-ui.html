@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Browser</title>
+<style>
+  /* the same look as the cloud browser's window: grey dots, a tab like a pill, a round address bar, in the dark whatever the app's theme */
+  :root { --strip: #1d1d1f; --bar: #2c2c2e; --line: #3a3a3c; --text: #f2f2f4; --mute: #98989d; --accent: #5bb98a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 13px system-ui, -apple-system, sans-serif; user-select: none; overflow: hidden; }
+  .card { height: 100%; background: var(--strip); border-radius: 14px 14px 0 0; overflow: hidden; }
+  .tabs { display: flex; align-items: flex-end; gap: 4px; height: 44px; padding: 10px 12px 0 16px; }
+  .dots { display: flex; gap: 9px; align-self: center; margin-right: 16px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: #5c5c60; }
+  .tab { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 190px; height: 34px; padding: 0 8px 0 12px; border-radius: 12px 12px 0 0; color: var(--mute); cursor: default; }
+  .tab.on { background: var(--bar); color: var(--text); }
+  .tab span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .fav { width: 16px; height: 16px; flex: none; border-radius: 50%; background: #5c5c60; object-fit: cover; }
+  .spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--mute); border-top-color: transparent; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+  .x { width: 20px; height: 20px; border-radius: 50%; color: var(--mute); display: grid; place-items: center; }
+  .x:hover, .icon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+  .icon { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--text); }
+  .icon:disabled { color: #5c5c60; cursor: default; }
+  .plus { align-self: center; }
+  svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .bar { display: flex; align-items: center; gap: 6px; height: 48px; padding: 0 12px; background: var(--bar); }
+  input { flex: 1; min-width: 0; height: 34px; padding: 0 18px; border: 1px solid transparent; border-radius: 17px; background: var(--strip); color: var(--text); font: 14px system-ui, -apple-system, sans-serif; user-select: text; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .chrome { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--line); color: var(--mute); white-space: nowrap; font-size: 12px; }
+  .chrome:hover { color: var(--text); }
+  .chrome.hint { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+<div class="card">
+  <div class="tabs" id="tabs"></div>
+  <div class="bar">
+    <button class="icon" id="back" title="Back"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" /></svg></button>
+    <button class="icon" id="forward" title="Forward"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7" /></svg></button>
+    <button class="icon" id="reload" title="Reload"></button>
+    <input id="address" spellcheck="false" autocomplete="off" placeholder="Search or enter a web address" />
+    <button class="chrome" id="cancel" hidden>Cancel</button>
+    <button class="chrome" id="chrome" title="Opens Chrome for the sign-in, then brings you back here signed in">Sign in with Chrome</button>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const send = (action, value) => window.emplioPane.act(action, value);
+  const RELOAD = '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" /></svg>';
+  const STOP = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>';
+  let typing = false;
+  $("address").addEventListener("focus", () => ((typing = true), $("address").select()));
+  $("address").addEventListener("blur", () => (typing = false));
+  $("address").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") (send("go", $("address").value), $("address").blur());
+    if (e.key === "Escape") $("address").blur();
+  });
+  $("back").onclick = () => send("back");
+  $("forward").onclick = () => send("forward");
+  $("chrome").onclick = () => send("signin");
+  $("cancel").onclick = () => send("cancel-signin");
+  window.emplioPane.onState((s) => {
+    const tabs = $("tabs");
+    tabs.textContent = "";
+    const dots = document.createElement("div");
+    dots.className = "dots";
+    dots.innerHTML = "<i></i><i></i><i></i>";
+    tabs.append(dots);
+    for (const t of s.tabs) {
+      const el = document.createElement("div");
+      el.className = "tab" + (t.active ? " on" : "");
+      el.title = t.url;
+      el.onmousedown = () => send("activate", t.id);
+      if (t.loading) el.append(Object.assign(document.createElement("i"), { className: "spin" }));
+      else if (t.favicon) el.append(Object.assign(document.createElement("img"), { className: "fav", src: t.favicon }));
+      else el.append(Object.assign(document.createElement("i"), { className: "fav" }));
+      el.append(Object.assign(document.createElement("span"), { textContent: t.title || t.url || "New tab" }));
+      const x = Object.assign(document.createElement("button"), { className: "x", title: "Close tab", innerHTML: '<svg viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M6 6l12 12M18 6L6 18" /></svg>' });
+      x.onmousedown = (e) => (e.stopPropagation(), send("close", t.id));
+      el.append(x);
+      tabs.append(el);
+    }
+    const add = Object.assign(document.createElement("button"), { className: "icon plus", title: "New tab", innerHTML: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>' });
+    add.onclick = () => send("new");
+    tabs.append(add);
+    $("back").disabled = !s.canBack;
+    $("forward").disabled = !s.canForward;
+    $("reload").innerHTML = s.loading ? STOP : RELOAD;
+    $("reload").onclick = () => send(s.loading ? "stop" : "reload");
+    if (!typing) $("address").value = s.url === "about:blank" ? "" : s.url;
+    // Google refuses sign-ins here: the button that gets around it says so
+    $("chrome").classList.toggle("hint", s.signingIn || /(^|\.)accounts\.google\.com$/.test(s.host));
+    $("chrome").textContent = s.signingIn ? "Done signing in" : "Sign in with Chrome";
+    $("cancel").hidden = !s.signingIn;
+  });
+</script>

@@ -33,6 +33,7 @@ import { useState } from "react";
 import { useDraft } from "@/components/chat/draft";
 import { AutomationsDialog } from "@/components/chat/automations-dialog";
 import { ChannelNudge, ChannelsDialog } from "@/components/chat/channels-dialog";
+import { MacNudge } from "@/components/chat/mac-nudge";
 import { BillingMenuItem, CreditMeter } from "@cloud/client";
 import { SearchResults } from "@/components/chat/chat-search";
 import { IntegrationsDialog } from "@/components/chat/integrations-dialog";
@@ -437,6 +438,7 @@ export function AppSidebar() {
       <SidebarFooter className="p-3">
         <CreditMeter />
         <ChannelNudge />
+        <MacNudge />
         <UserMenu />
       </SidebarFooter>
       <SidebarRail />

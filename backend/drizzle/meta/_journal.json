@@ -43,6 +43,20 @@
       "when": 1794372467256,
       "tag": "20261111044747_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794487749381,
+      "tag": "20261112124909_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794507370334,
+      "tag": "20261112181610_web_push_devices",
+      "breakpoints": true
     }
   ]
 }

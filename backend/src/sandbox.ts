@@ -7,6 +7,8 @@ import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
+import { deviceFor, localBox, type Conn } from "./devices";
+import { browserKindFor, isDeviceBrowser } from "./device-browser";
 import { browserFor, browserLocal, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
@@ -361,10 +363,13 @@ else: sys.exit(calls(args[1:]))
 export const EZ = `#!/bin/bash
 # A request for the server. Kept in a file, so a pipe (| head -c, | grep) can't cut or drop it; the output
 # only gets a short marker where its result goes (see withRequests).
+# one line of base64, on Linux and on a Mac (GNU base64 wraps lines; the Mac's has no -w)
+b64() { base64 | tr -d '\\n'; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 req() {
   local t="$1" f; shift
   f="$(mktemp "/tmp/emplio-req.$EZ_KEY.$t.XXXXXX")"
-  printf '%s\\0' "$@" | base64 -w0 > "$f"
+  printf '%s\\0' "$@" | b64 > "$f"
   printf '%s:%s\\t@%s\\n' "$t" "$EZ_KEY" "$f"
 }
 # n: how many words a command has, its --agent/--level/--name/--description/--skills flags and their values
@@ -426,9 +431,9 @@ case "$1" in
     # the words in a document, for reading and searching (uploads keep this beside them: sandbox.ts)
     f="$2"
     [ -f "$f" ] || { echo "usage: emplio text <file>   the words in a PDF, Word, Excel, PowerPoint or OpenDocument file" >&2; exit 2; }
-    case "\${f,,}" in
+    case "$(lower "$f")" in
       *.pdf)
-        command -v pdftotext >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils; } >/dev/null 2>&1
+        command -v pdftotext >/dev/null || { command -v apt-get >/dev/null && sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils; } >/dev/null 2>&1
         pdftotext -layout "$f" - ;;
       *.docx) unzip -p "$f" word/document.xml | sed -e 's/<\\/w:p>/\\n/g' -e 's/<[^>]*>//g' ;;
       *.xlsx) unzip -p "$f" xl/sharedStrings.xml 'xl/worksheets/*.xml' | sed -e 's/<\\/si>/\\n/g; s/<\\/row>/\\n/g; s/<\\/c>/\\t/g' -e 's/<[^>]*>//g' ;;
@@ -442,7 +447,7 @@ case "$1" in
     for f in "$@"; do
       # a stored file's .media note works too: the server opens the file it points to
       g="\${f%.media}"
-      case "\${g,,}" in *.png|*.jpg|*.jpeg|*.gif|*.webp|*.pdf) ;; *) echo "emplio view: $f: only images and PDFs" >&2; exit 2;; esac
+      case "$(lower "$g")" in *.png|*.jpg|*.jpeg|*.gif|*.webp|*.pdf) ;; *) echo "emplio view: $f: only images and PDFs" >&2; exit 2;; esac
       [ -f "$f" ] || { echo "emplio view: $f: no such file" >&2; exit 1; }
       printf 'VIEW:%s\\t%s\\n' "$EZ_KEY" "$(realpath "$f")"
     done ;;
@@ -457,8 +462,8 @@ case "$1" in
     if [ ! -x "$ab" ]; then
       # the program, and its guides (they aren't in the program)
       mkdir -p "$HOME/.local/bin" "$guides" \
-        && curl -fsSL "https://codeload.github.com/vercel-labs/agent-browser/tar.gz/refs/tags/v0.41.2" | tar -xz -C "$guides" --strip-components=2 --wildcards '*/skill-data/*' \
-        && curl -fsSL "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.2/agent-browser-linux-x64" -o "$ab.tmp" && chmod +x "$ab.tmp" && mv "$ab.tmp" "$ab" \
+        && curl -fsSL "https://codeload.github.com/vercel-labs/agent-browser/tar.gz/refs/tags/v0.41.2" | tar -xz -C "$guides" --strip-components=2 $(tar --version 2>/dev/null | grep -q GNU && echo --wildcards) '*/skill-data/*' \
+        && curl -fsSL "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.2/agent-browser-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed -e s/aarch64/arm64/ -e s/x86_64/x64/)" -o "$ab.tmp" && chmod +x "$ab.tmp" && mv "$ab.tmp" "$ab" \
         || { echo "emplio browser: installing the browser tool failed" >&2; exit 1; }
     fi
     run() { AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" "$ab" --cdp "$BROWSER_CDP_URL" --session "$BROWSER_SESSION" "$@"; }
@@ -496,9 +501,9 @@ case "$1" in
           run eval "window.__emplioUp=[];1" >/dev/null || exit 1
           while read -r piece; do
             printf 'window.__emplioUp.push("%s");1' "$piece" | run eval --stdin >/dev/null || exit 1
-          done < <(base64 -w0 "$f" | fold -w 1000000; echo)
+          done < <(b64 < "$f" | fold -w 1000000; echo)
           type="$(file -b --mime-type "$f" 2>/dev/null)"
-          printf '%s' "(() => { const parts = window.__emplioUp.map(p => Uint8Array.from(atob(p), c => c.charCodeAt(0))); delete window.__emplioUp; const file = new File(parts, decodeURIComponent(escape(atob('$(printf '%s' "$n" | base64 -w0)'))), { type: '\${type:-application/octet-stream}' }); window.__emplioFiles.push(file); const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; (document.body || document.documentElement).appendChild(a); a.click(); a.remove(); return 1; })()" | run eval --stdin >/dev/null || exit 1
+          printf '%s' "(() => { const parts = window.__emplioUp.map(p => Uint8Array.from(atob(p), c => c.charCodeAt(0))); delete window.__emplioUp; const file = new File(parts, decodeURIComponent(escape(atob('$(printf '%s' "$n" | b64)'))), { type: '\${type:-application/octet-stream}' }); window.__emplioFiles.push(file); const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; (document.body || document.documentElement).appendChild(a); a.click(); a.remove(); return 1; })()" | run eval --stdin >/dev/null || exit 1
         done
         # the download takes a moment to land: try until the browser finds it
         for i in $(seq 1 $tries); do
@@ -772,7 +777,7 @@ export function sandboxPrompt(s: Session) {
   // a check-in, automation or task: nobody is watching, so nothing that needs them to click or answer
   const bg = !!(s.automation || s.task);
   return `## Your computer
-Your own Linux computer, through the bash tool. It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
+${deviceFor(s.user.id) ? `Your own computer, through the bash tool: ${name}'s own Mac right now (macOS, not Linux: bash 3.2, the Mac versions of sed, date, stat and find, no apt-get or sudo; \`brew\` only if it is installed). Everything you do happens inside /work: never change anything outside it, and never look through ${name}'s other files unless they ask. When their Mac is closed or asleep your commands run on a cloud Linux computer instead, with the same /work files as of the last save.` : "Your own Linux computer, through the bash tool."} It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
 
 Folders:
 - /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skills/, agents/ (your specialists: change them with emplio agents), tools/, automations/, knowledge/, inbox/
@@ -844,7 +849,7 @@ Tasks: everything to be done later, by anyone, is a task (\`emplio tasks help\`)
 
 Web: \`emplio web search <words>\` (matching passages; \`emplio web help\` for --since, --site, news), \`emplio web read <url>\` (clean text), \`emplio web answer <question>\` (quick, sourced), \`emplio web similar <url>\`. Use these, or curl for plain pages and APIs, before the browser.
 
-Browser: \`emplio browser\` drives ${cloud.browser.BROWSER_KIND} that stays open between commands. First use in a chat: read \`emplio browser skill\`.
+Browser: \`emplio browser\` drives ${browserKindFor(s.user.id, cloud.browser.BROWSER_KIND)} that stays open between commands. First use in a chat: read \`emplio browser skill\`.
 \`\`\`
 emplio browser open https://example.com
 emplio browser snapshot -i                  # buttons, links and boxes with refs (no -i: the text too); blank = still loading
@@ -951,10 +956,12 @@ async function setup(box: Box, s: Session) {
   // from /, since /work doesn't exist yet
   await mustExec(
     box,
-    `sudo mkdir -p ${WORK} && sudo chown "$(id -un)" ${WORK} && mkdir -p ${WORK}/in ${WORK}/out ${WORK}/tmp ${BUNDLES} && ` +
-      `(command -v git >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq git >/dev/null))`,
+    box.local
+      ? `mkdir -p ${WORK}/in ${WORK}/out ${WORK}/tmp ${BUNDLES} && (command -v git >/dev/null || { echo "git is not installed on this computer"; exit 1; })`
+      : `sudo mkdir -p ${WORK} && sudo chown "$(id -un)" ${WORK} && mkdir -p ${WORK}/in ${WORK}/out ${WORK}/tmp ${BUNDLES} && ` +
+          `(command -v git >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq git >/dev/null))`,
     undefined,
-    "/",
+    box.local ? WORK : "/",
   );
   await mustExec(box, `git config --global user.name Emplio && git config --global user.email ${BOX_EMAIL}`);
   for (const r of reposFor(s)) {
@@ -995,7 +1002,28 @@ const BOX_ENV = process.env.BOX_ENV || undefined;
 // how long a woken box gets to answer before it's taken for frozen
 const ANSWER_S = 20;
 
-async function findOrCreate(s: Session): Promise<Box> {
+// The person's own computer, through the desktop app (devices.ts): set up the first time, brought up to date every
+// time it is picked again (the cloud's computer may have been the one working since).
+async function localBoxFor(conn: Conn, s: Session): Promise<Box> {
+  const box = localBox(conn, s.workspaceId, s.workspaceName);
+  const ready = await exec(box, reposFor(s).map((r) => `test -d ${r.dir}/.git`).join(" && "), undefined, 30);
+  if (ready.exitCode) {
+    // a half-made copy (an earlier setup that stopped part-way) is made again from scratch
+    await exec(box, reposFor(s).map((r) => `rm -rf ${r.dir}`).join(" && "), undefined, 60);
+    await setup(box, s);
+  } else for (const r of reposFor(s)) await catchUp(box, s, r);
+  return box;
+}
+
+async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
+  const mine = deviceFor(s.user.id);
+  if (mine) {
+    try {
+      return await localBoxFor(mine, s);
+    } catch (error) {
+      if (!(error instanceof Error && /went offline/.test(error.message))) console.error("the person's computer wasn't usable; using the cloud's:", error);
+    }
+  }
   const listed = await cloud.computer.findBoxes({ employee0User: s.user.id, employee0Workspace: s.workspaceId });
   const found = listed.find((b) => b.labels.employee0Env === BOX_ENV);
   if (found) {
@@ -1007,7 +1035,7 @@ async function findOrCreate(s: Session): Promise<Box> {
     // a box from an older template is swapped for a new one, but only once nothing in it is waiting to be saved
     else if (found.labels.employee0Box === BOX_VERSION || !(await nothingUnsaved(box, s))) {
       // other chats may have pushed while this one slept
-      if (found.asleep) for (const r of reposFor(s)) await catchUp(box, s, r);
+      if (found.asleep || fromLocal) for (const r of reposFor(s)) await catchUp(box, s, r);
       return box;
     }
     await box.kill().catch(() => {});
@@ -1030,10 +1058,17 @@ const serving = new Set<string>();
 async function sandboxFor(s: Session): Promise<Box> {
   const known = live.get(boxKey(s));
   const awakeFor = serving.has(boxKey(s)) ? SERVE_MS : IDLE_MS;
-  if (known && (await known.keepAwake(awakeFor).then(() => true, () => false))) return meter(s, awakeFor), known;
-  const box = await findOrCreate(s);
+  // The person's own computer whenever it's connected, the cloud's whenever it isn't: a box of the other kind is let go
+  // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
+  const mine = deviceFor(s.user.id);
+  const right = known && (known.local ? !!mine && known.id.startsWith(`local:${mine.id}:`) : !mine);
+  if (known && right && (await known.keepAwake(awakeFor).then(() => true, () => false))) {
+    if (!known.local) meter(s, awakeFor);
+    return known;
+  }
+  const box = await findOrCreate(s, !!known?.local);
   live.set(boxKey(s), box);
-  meter(s, IDLE_MS);
+  if (!box.local) meter(s, IDLE_MS);
   return box;
 }
 
@@ -1782,7 +1817,12 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       // every reply, so boxes made before an emplio change get the current one
       await upload(box, `${WORK}/tmp/emplio`, EZ);
       await upload(box, POINTER_PATH, POINTER);
-      await mustExec(box, `sudo install -m 755 tmp/emplio /usr/local/bin/emplio && sudo ln -sf emplio /usr/local/bin/ez && rm tmp/emplio`);
+      await mustExec(
+        box,
+        box.local
+          ? `mkdir -p ../bin && install -m 755 tmp/emplio ../bin/emplio && ln -sf emplio ../bin/ez && rm tmp/emplio`
+          : `sudo install -m 755 tmp/emplio /usr/local/bin/emplio && sudo ln -sf emplio /usr/local/bin/ez && rm tmp/emplio`,
+      );
       if (quiet) caughtUp.add(s);
     }
     await copyAttachments(box, s);
@@ -1800,8 +1840,11 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       const live = await browserFor(s.conversationId, owner);
       await connectionFor(live, owner, command).catch((error) => console.error("browser connection not chosen:", error));
       browserId = live.id;
-      // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one
-      env = { ...env, BROWSER_CDP_URL: live.cdpUrl, BROWSER_SESSION: `chat-${live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
+      // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one. A computer's browser ids all
+      // start dev_<computer>, so its name comes from the browser's own key: chats on one computer must not share a session.
+      // the agent's tool drops the path of an http address, so a browser on someone's computer (its address has one) gets the socket's own
+      const cdp = isDeviceBrowser(live.id) ? await fetch(`${live.cdpUrl}/json/version`).then((r) => r.json()).then((j: any) => String(j.webSocketDebuggerUrl)) : live.cdpUrl;
+      env = { ...env, BROWSER_CDP_URL: cdp, BROWSER_SESSION: `chat-${isDeviceBrowser(live.id) ? `dev-${live.id.split("_")[2]}` : live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
     }
     used.add(boxKey(s));
     // plain git reaches GitHub through this server, which holds the login (git-proxy.ts)
@@ -1820,7 +1863,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       const pid = Number((done.result ?? "").trim());
       serving.add(boxKey(s));
       await box.keepAwake(SERVE_MS);
-      meter(s, SERVE_MS);
+      if (!box.local) meter(s, SERVE_MS);
       const result: BoxResult = {
         pid,
         log,
