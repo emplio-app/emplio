@@ -43,7 +43,7 @@ const fields = (input: unknown) =>
 export const ApprovalsContext = createContext<Map<string, Approval>>(new Map());
 export const stillWaiting = (a: Approval) => !a.decision && (!a.expiresAt || Date.parse(a.expiresAt) > Date.now());
 
-function Fields({ approval }: { approval: Approval }) {
+function Fields({ approval, clamp = true }: { approval: Approval; clamp?: boolean }) {
   const [details, setDetails] = useState(false);
   const shown = fields(approval.input);
   return (
@@ -53,7 +53,7 @@ function Fields({ approval }: { approval: Approval }) {
           {shown.slice(0, 8).map(({ k, v, file }) => (
             <div key={k} className="contents">
               <dt className="text-muted-foreground">{k.replaceAll("_", " ")}</dt>
-              <dd className="max-h-80 min-w-0 overflow-auto break-words whitespace-pre-wrap">
+              <dd className={`min-w-0 break-words whitespace-pre-wrap ${clamp ? "max-h-80 overflow-auto" : ""}`}>
                 {file && <PaperclipIcon className="mr-1 inline size-3 align-[-2px]" />}
                 {v}
               </dd>
@@ -89,20 +89,23 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
   });
   return (
     <Card size="sm" className="gap-3 px-3 shadow-lg animate-in fade-in duration-200">
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <AppLogo src={approval.logo} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{approval.title}</div>
           <div className="truncate text-xs text-muted-foreground">{approval.appName} · wants your OK</div>
         </div>
       </div>
-      <Fields approval={approval} />
+      {/* the card shrinks to the room above the chat box: what it'll do scrolls, the buttons stay in view */}
+      <div className="-mx-3 flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-3">
+        <Fields approval={approval} clamp={false} />
+      </div>
       {answer.isPending || answer.isSuccess ? (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
           <Spinner className="size-3" /> {answer.variables === "deny" ? "Denying…" : "Running…"}
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button size="sm" onClick={() => answer.mutate("once")}>
             Allow
           </Button>
