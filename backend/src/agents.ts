@@ -2,8 +2,8 @@
 // company/agents/<slug>/AGENT.md (name, description, skills, level, then its instructions) and LESSONS.md (dated
 // lines added after its threads, by the reader (reader.ts) or with `emplio agents learn`). A thread handed to one
 // (`emplio hand`, jobs.ts) runs as it: its instructions and lessons go in the thread's prompt, its skills are named
-// up front, and its level picks the model. Only Emplio (not its threads) makes and changes agents, in owner and admin
-// chats, like the company's skills; any thread may add a lesson. Lessons are shown as notes from past work, never as
+// up front, and its level picks the model. Only Emplio (not its threads) makes and changes agents, in anyone's chat
+// with it (staff too: every job has an agent); any thread may add a lesson. Lessons are shown as notes from past work, never as
 // instructions. See docs/agents.md.
 import type { AgentInfo } from "@emplio/shared";
 import type { FastifyInstance } from "fastify";
@@ -148,7 +148,6 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
   const skills = (s?: string) => s?.split(",").map((x) => x.trim().replace(/^(company|me)\/skills\//, "")).filter(Boolean);
   const changing = ["add", "update", "archive", "restore", "remove"].includes(sub ?? "");
   if (changing && who.job) return { text: "error: only Emplio changes agents; say what you'd change in your report" };
-  if (changing && !who.admin) return { text: "error: agents are changed in the owner's or an admin's chat; hand this to an agent you have, or to myself" };
   const save = (slug: string, file: string, content: string | null, message: string) => writeFile(who.workspaceId, REPO, `agents/${slug}/${file}`, content, message, who.author);
   try {
     switch (sub) {

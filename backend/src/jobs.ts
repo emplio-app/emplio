@@ -19,7 +19,7 @@ import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./chan
 import { generateReply, lastWords, loadMessages, quiet, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
-import { agentPrompt, agentsCommand, findAgent, flags } from "./agents";
+import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agents";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
 
@@ -65,7 +65,6 @@ export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; 
   o.depth !== 1 || o.stopped ? "nowhere" : o.owed && !o.interrupted ? "wake" : "untold";
 
 const MAX_RUNNING = 10; // per chat at once, every level: a runaway plan can't fan out forever
-const CONTINUE_MS = 24 * 3_600_000; // a thread quiet for longer than this takes new work as a new thread, unless it's waiting on an answer
 const LISTED = 8; // threads on Emplio's list
 const SIDEBAR_DAYS = 7;
 export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
@@ -81,15 +80,16 @@ each time is your report, which goes back to whoever started you, and the person
     : ""
 }${
   depth < MAX_DEPTH
-    ? "You may hand big or independent parts of your task off with `emplio hand`, the way the sections above describe; do anything small yourself. If one of them comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
-    : "You can't hand off: ignore the Handing off section above and do the task yourself."
+    ? "The sections above on getting work done and handing off are for Emplio, the manager. You are the one who does the work: do it yourself, browser included. Only a big part that doesn't depend on the rest may go off with `emplio hand`, to an agent or to `myself` (a plain copy of you; you can't make agents). If one comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
+    : "The sections above on getting work done and handing off are for Emplio, the manager. You are the one who does the work: do it yourself, browser included; you can't hand off."
 }
 Do the task and check the result. Long reading goes into files, not your chat: your chat gets folded into short \
 notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
 chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
 small file in your folder (every item with its page, say), and work from that file; never print a whole document \
 to read it. When the task makes something (a sheet, a document, a list), start the file early and add to it as you \
-go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you:
+go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you, which is checked against what you were asked:
+- Whether it's all done, and if not, what's left. Never say done for work you've only started.
 - What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
 - Files you made (saved to /work/out to offer them to the person).
 - Anything you couldn't do and why, with the exact error, and what a person would need to decide or provide.
@@ -414,22 +414,21 @@ const full = async (w: Row) => {
 };
 const notFound = (ref?: string) => `error: none of your threads starts with ${ref ?? "(nothing)"}; see emplio threads list`;
 
-// Too long quiet to carry on: new work goes to a new thread then. Waiting on an answer, it always can.
-export const tooOld = (w: Pick<Row, "status" | "finishedAt">, now = Date.now()) =>
-  w.status !== "working" && w.status !== "asking" && !!w.finishedAt && now - w.finishedAt.getTime() > CONTINUE_MS;
-
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
 export const AGENTS_HEADING = "Your agents (`emplio hand <name>`):";
-export const THREADS_HEADING = "Threads you can carry on with `emplio hand <id>`, latest first:";
+export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` carries on its job; `--new` starts a fresh one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
-  const rows = await db
+  // each agent's latest job: the one `emplio hand <agent>` goes to
+  const all = await db
     .select()
     .from(jobs)
-    .where(and(mine(who, conversationId, caller), isNotNull(jobs.chatId), or(inArray(jobs.status, ["working", "asking"]), gt(jobs.finishedAt, new Date(Date.now() - CONTINUE_MS)))))
+    .where(and(mine(who, conversationId, caller), isNotNull(jobs.chatId)))
     .orderBy(desc(sql`coalesce(${jobs.finishedAt}, now())`))
-    .limit(LISTED);
+    .limit(50);
+  const seen = new Set<string>();
+  const rows = all.filter((w) => (w.agent ? !seen.has(w.agent) && !!seen.add(w.agent) : true)).slice(0, LISTED);
   if (!rows.length) return "";
   const tz = await timezoneOf(who.userId);
   return [
@@ -438,16 +437,17 @@ export async function threadsNote(who: Who, conversationId: string, caller: Call
   ].join("\n");
 }
 
-const USAGE = `usage: emplio hand <pick> [--description <what it does>] [--level light|strong] <<'EOF'
+const USAGE = `usage: emplio hand <agent> [--new] [--description <what it does>] [--level light|strong] <<'EOF'
        <brief; its first line names the work in a few words>
        EOF
-<pick> is one of:
-  <thread id>      the same piece of work: it carries on with everything it knew; running, it reads this after its
-                   current step
-  <agent name>     new work for that agent, in a new thread
-  <new job title>  new work of a kind that will come back: give --description too and the agent is made on the spot
-  myself           a one-off nothing like it will come back: a plain copy of you, in a new thread
-A new thread sees nothing of this chat: the brief must say everything it needs.
+Work goes to an agent. In this chat each agent keeps one job going:
+  emplio hand <agent>          to that agent's job here: it carries on with everything it knew (busy, it reads this
+                               after its current step); with no job here yet, its first one starts
+  emplio hand <agent> --new    a fresh job, for work unrelated to the one it has here; not while that one is still
+                               working or waiting on an answer
+  emplio hand "<New Agent>" --description "<the kind of work it does>"
+                               no agent fits: it's made, and its first job starts
+A new job sees nothing of this chat: the brief must say everything it needs.
 
        emplio threads list                      your threads
        emplio threads show <id>                 one thread: what it's doing, or its report
@@ -460,6 +460,36 @@ A new thread sees nothing of this chat: the brief must say everything it needs.
 
 export type JobsReply = { text: string; started?: string[] };
 
+// New work for a job that has one: running, it reads it after its current step; finished, it carries on with everything it knew.
+async function carryOn(who: Who, conversationId: string, w: Row, brief: string): Promise<JobsReply> {
+  if (!w.chatId) return { text: `error: ${short(w.id)} is from before jobs had their own chat and can't carry on; hand it off with --new` };
+  const busy = live.has(w.id);
+  if (busy) steer(w.chatId);
+  track(w.id);
+  const run = generateId();
+  void send(w, brief, run);
+  record({ ...who, conversationId, kind: "job", summary: `Carried on "${w.name}"`, detail: { job: w.id, pick: "carry on", agent: w.agent, brief: brief.slice(0, 4000) } });
+  return busy
+    ? { text: `sent to ${short(w.id)} "${w.name}"${w.agent ? ` (${agentName(w.agent)})` : ""}: it reads it after the step it's on` }
+    : { text: `${short(w.id)} "${w.name}"${w.agent ? ` (${agentName(w.agent)})` : ""} is working on it`, started: [runRef(w.id, run)] };
+}
+
+const activeAgents = async (workspaceId: string) => (await listAgents(workspaceId)).filter((a) => !a.archived);
+
+// An agent that a new one's name would nearly copy ("Fabric Supplier Finder" next to "Supplier Finder"), or null.
+// ponytail: the words of the names; a meaning match if near-copies with other words get through
+const WORDS = (name: string) => new Set(name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["and", "the", "for"].includes(w)));
+export function closeTo(name: string, agents: string[]): string | null {
+  const a = WORDS(name);
+  for (const other of agents) {
+    const b = WORDS(other);
+    const shared = [...a].filter((w) => b.has(w)).length;
+    if (!a.size || !b.size || !shared) continue;
+    if (shared === a.size || shared === b.size || shared / new Set([...a, ...b]).size >= 0.5) return other;
+  }
+  return null;
+}
+
 const THREAD_ID = /^[0-9a-f]{8}$/i;
 // what a chat allows when a hand-off makes an agent; left out, it can't
 type Maker = { admin: boolean; author: { name: string; email: string } };
@@ -471,43 +501,49 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
   const [sub, ...rest] = args;
   switch (sub) {
     case "hand": {
-      const { set, rest: words } = flags(rest, ["description", "level"]);
+      const fresh = rest.includes("--new");
+      const { set, rest: words } = flags(rest.filter((x) => x !== "--new"), ["description", "level"]);
       const [pick, ...text] = words.map((x) => x.trim()).filter((x) => x && x !== "-");
       const brief = text.join("\n\n");
       if (!pick || !brief) break;
-      const picks = async () => (await threadsNote(who, conversationId, caller)) || "You have no threads to carry on.";
+      const yours = async () => {
+        const names = (await activeAgents(who.workspaceId)).map((a) => a.name);
+        return names.length ? `Your agents: ${names.join(", ")}.` : "You have no agents yet.";
+      };
+      const make = 'Or make one: emplio hand "<Agent Name>" --description "<the kind of work it does>".';
+      // a job id still works: that job carries on
       if (THREAD_ID.test(pick)) {
         const w = await find(who, conversationId, caller, pick);
-        if (!w) return { text: `${notFound(pick)}\n${await picks()}` };
-        if (!w.chatId) return { text: `error: ${short(w.id)} is from before threads had their own chat and can't carry on; hand it off as new work` };
-        if (tooOld(w)) return { text: `error: ${short(w.id)} has been quiet for over a day. Nothing was started: hand this to ${w.agent ?? "myself"} as new work, with everything it needs in the brief.` };
-        const busy = live.has(w.id);
-        if (busy) steer(w.chatId);
-        track(w.id);
-        const run = generateId();
-        void send(w, brief, run);
-        record({ ...who, conversationId, kind: "job", summary: `Carried on "${w.name}"`, detail: { job: w.id, pick: "carry on", agent: w.agent, brief: brief.slice(0, 4000) } });
-        return busy
-          ? { text: `sent to ${short(w.id)} "${w.name}": it reads it after the step it's on` }
-          : { text: `${short(w.id)} "${w.name}" is working on it`, started: [runRef(w.id, run)] };
+        if (!w) return { text: `error: no job ${pick} here. Nothing was started: hand it to an agent by name (emplio hand <agent>). ${await yours()}` };
+        return carryOn(who, conversationId, w, brief);
       }
       const level = set.level === "strong" || set.level === "light" ? set.level : null;
       if (set.level && !level) return { text: "error: --level is light or strong" };
       if (caller.depth >= MAX_DEPTH) return { text: "error: threads this deep can't hand off; do it yourself, or say in your report what's left" };
-      const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).where(and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")));
-      if (n! >= MAX_RUNNING) return { text: `error: ${MAX_RUNNING} threads are already running in this chat; wait for some first` };
+      // a plain copy: only for a thread splitting off part of its own work, which can't make agents
       const copy = pick.toLowerCase() === "myself";
+      if (copy && !caller.depth) return { text: `error: work goes to an agent, not to a copy of you. Nothing was started. ${await yours()} ${make}` };
       let agent = copy ? null : await findAgent(who.workspaceId, pick);
       const made = !copy && !agent;
       if (made) {
-        // only Emplio makes agents, in an owner's or admin's chat (agents.ts)
-        if (!maker?.admin || caller.depth) return { text: `error: there's no agent "${pick}", and this chat can't make one. Nothing was started: pick an agent from your list, or myself.` };
-        if (!set.description) return { text: `error: there's no agent "${pick}" yet. Nothing was started. If that's the agent you mean, run it again with --description "<the kind of work it does>" and it's made; otherwise pick an agent from your list, or myself.` };
+        if (!maker || caller.depth) return { text: `error: there's no agent "${pick}", and a thread can't make one. Nothing was started: pick one, or myself. ${await yours()}` };
+        if (!set.description) return { text: `error: there's no agent "${pick}". Nothing was started. ${await yours()} If none of them fits, run it again with --description "<the kind of work it does>" and "${pick}" is made.` };
+        const close = closeTo(pick, (await activeAgents(who.workspaceId)).map((a) => a.name));
+        if (close) return { text: `error: "${pick}" is close to your agent ${close}. Nothing was started: hand it to ${close} (emplio agents update widens what it does), or name the new one for clearly different work.` };
         const added = await agentsCommand({ ...who, admin: true, job: false, author: maker.author }, ["add", pick, "--description", set.description]);
         if (!added.changed) return { text: added.text };
         agent = await findAgent(who.workspaceId, pick);
       }
       if (agent?.archived) return { text: `error: ${agent.name} is archived; emplio agents restore ${agent.slug} first, or pick another` };
+      // the agent's job here: new work goes to it, unless --new
+      const current = agent
+        ? (await db.select().from(jobs).where(and(mine(who, conversationId, caller), eq(jobs.agent, agent.slug), isNotNull(jobs.chatId))).orderBy(desc(jobs.createdAt)).limit(1))[0]
+        : undefined;
+      if (current && !fresh) return carryOn(who, conversationId, current, brief);
+      if (current && (current.status === "working" || current.status === "asking"))
+        return { text: `error: ${agent!.name}'s job "${current.name}" is still ${current.status === "asking" ? "waiting on an answer" : "working"}. Nothing was started: send this to it without --new (it reads it after its current step), or wait for it to finish.` };
+      const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).where(and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")));
+      if (n! >= MAX_RUNNING) return { text: `error: ${MAX_RUNNING} threads are already running in this chat; wait for some first` };
       const name = brief.split("\n")[0]!.trim().slice(0, 80);
       // its own chat, where it works and the person can open it
       const chatId = crypto.randomUUID();
@@ -520,7 +556,7 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       const run = generateId();
       void send(w!, brief, run);
       // which pick it was, to look back on: agents that never get used are the thing to watch
-      record({ ...who, conversationId, kind: "job", summary: `Handed "${w!.name}" to ${agent?.name ?? "a copy of itself"}`, detail: { job: w!.id, depth: w!.depth, pick: made ? "new agent" : copy ? "myself" : "agent", agent: agent?.slug, brief: brief.slice(0, 4000) } });
+      record({ ...who, conversationId, kind: "job", summary: `Handed "${w!.name}" to ${agent?.name ?? "a copy of itself"}`, detail: { job: w!.id, depth: w!.depth, pick: made ? "new agent" : copy ? "myself" : fresh && current ? "fresh" : "agent", agent: agent?.slug, brief: brief.slice(0, 4000) } });
       return { text: `started ${short(w!.id)} "${w!.name}"${agent ? ` with ${agent.name}` : ""}${made ? " (a new agent)" : ""}`, started: [runRef(w!.id, run)] };
     }
     case "notify": {
@@ -597,99 +633,89 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
 
 // What Emplio is told about delegating (added to its system prompt; threads get it too).
 export const MANAGER_PROMPT = `## How to get work done
-Before any piece of work, pick the way to do it. The person never has to ask for a hand-off, and you don't ask them.
-- **Yourself**: quick work, a few commands at most: a look-up, one app action, one file, a short answer. Also \
-work the person is going through with you step by step (each step needs their answer), and signing in to a site.
-- **Code**: the same thing over many items (rename 200 files, total a sheet, check 40 links, sort an \
-export). Write one script and run it; never step through items one command at a time.
-- **Hand it off** (\`emplio hand\`): all long work, always: anything likely to take over a minute or more than about 4 \
-commands, browser work included. Also reading or digging that would fill your context (many emails, long files, \
-several accounts or folders). Parts that don't depend on each other get one hand-off each (research three suppliers; \
-check mail, Drive and the CRM), all started together. Steps where each needs the \
-last one's result stay together: never split a chain, but a whole chain can be one hand-off.
-- **The browser in a thread**: each thread has its own browser, signed in like yours, so several can browse at once. \
-Say in the brief that it should use the browser. If a site needs the person to sign in, get that done first.
-- A question doesn't keep work with you: ask before you start, or let the thread ask.
-Can't tell how long it is? Start it yourself. Once you're more than about 4 commands in, hand off what's left: \
-the brief says what's done, what's left and where the files are (a thread has the same computer and files). In a \
-reply to a person, your commands stop running after 8 until you hand off.
+You are the manager. You work out what the person wants, plan it, hand the doing to your agents, check what comes \
+back and answer the person. Agents do the work: each in its own chat, with its own computer and browser, on a \
+cheaper model, and each remembers its job. The person never has to ask for this, and you don't ask them.
+- **Yourself**: only what needs no doing. Answer from what you already know or from one or two quick look-ups (a \
+note, a file, one app read); write a short reply or draft for them; ask them a question; read a job's report and \
+files to check it.
+- **An agent**: everything else, from the first step: research, reading through mail, files or a site, anything in \
+a browser (you have none: agents do), app actions, writing files and sheets, data work, sign-ins. Don't start the \
+work and hand off the rest: hand it off before you begin. A question doesn't keep work with you: ask before it \
+starts, or let the job ask.
+- Parts that don't depend on each other go to different agents, all started in one command. Steps where each needs \
+the last one's result stay together in one job.
 
 ## Handing off
-One command: \`emplio hand <pick> <<'EOF'\`, then the brief, then EOF. The notes on the person's messages list your \
-agents and the threads you can carry on. Pick the first of these that fits:
-1. **The same work as a thread on your list** (a fix to what it did, more of the same, a follow-up, an answer it asked \
-for): its id. It remembers everything it did and found, so the brief is only what's new. The same site or client \
-isn't enough: it has to be the same piece of work.
-2. **New work an agent on your list does**: the agent's name. A new thread starts for it.
-3. **New work of a kind that will come back, and no agent fits**: a new job title with \`--description\`, and the agent \
-is made on the spot: \`emplio hand "Invoice Chaser" --description "Chases unpaid invoices by email" <<'EOF'\`. Only in \
-an owner's or admin's chat.
-4. **A true one-off, nothing like it will come back**: \`myself\`, a plain copy of you in a new thread.
+\`emplio hand <agent> <<'EOF'\`, then the brief, then EOF. The note on the person's message lists your agents and \
+each agent's job in this chat. Every piece of work goes to an agent; there is no plain copy of you.
+1. **That agent's kind of work, for the same purpose as its job here** (more of it, the next one, a fix, a gap in \
+what it found, a change while it runs, an answer to its question): \`emplio hand <agent>\`. It goes to that job, \
+which carries on with everything it did and found; running, it reads it after its current step. The job's name \
+doesn't matter: "Post one reply" and "list all our comments" on the same forum are one job.
+2. **That agent's kind of work, but unrelated to its job here** (a different product, place or subject): \
+\`emplio hand <agent> --new\`, a fresh job. Not while its job here is still working or waiting on an answer.
+3. **No agent fits**: make one with \`--description\`, named like a job title for the kind of work so it's used \
+again: \`emplio hand "Invoice Chaser" --description "Chases unpaid invoices by email" <<'EOF'\`. If one of yours is \
+close, use it instead (\`emplio agents update\` widens what it does).
 
-You are the manager: threads read and dig, you plan, judge and answer.
-- A new topic while you're in the middle of something: when they write about something unrelated to the work \
-you're on and it needs more than a quick answer, hand it off right away, without asking and without \
-waiting for it, say in a line that you're on it, and carry on with your work in this same reply. They never have to ask for \
-this. Answer it yourself if you can from what you already know, or if it's about the work at hand.
-- Threads keep going when your reply ends; you don't. A message from the person ends your reply after its \
-current command; your next reply answers them, then picks your work back up.
-- In a chat with the person, never sit waiting for threads: start them, end your reply in a line, and they stay free \
-to write. Reports come back to this chat on their own and you carry on from them. Only where nobody is watching \
-(a task, an automation, a check-in) or when you are a thread yourself, finish with \`emplio threads wait\`, because \
-that run ends with your reply. If the person writes during a wait, it ends so you can answer them.
-- When your reply ends, don't say you're working on something or will carry on unless a thread is doing it right \
-now. If you truly can't finish, say what you tried and what's left.
-- A new thread sees nothing of this chat. Brief it like a new colleague: a first line naming the work in a few words, \
-then the goal, every fact it needs (names, ids, dates, accounts, files, the person's preferences, the language and \
-tone of anything it writes), anything you've already worked out so it needn't find it again (a site's exact address, \
-the calls that work, what failed), what's off limits, and exactly what to report (e.g. "each invoice: number, client, \
-amount, due date, link").
-- Start them in one command, so the person sees them working:
-\`\`\`
-emplio hand "Invoice Chaser" <<'EOF'
-<the brief>
-EOF
-emplio hand myself <<'EOF'
-<the brief>
-EOF
-\`\`\`
-- A running thread reads what you hand it after its current step (a correction, something the person just added); a \
-finished one carries on with everything it knew.
-- The person can open a thread's chat from its line and talk to it directly. You aren't woken for that: the thread's \
-latest report comes as a note with your next reply, and a thread sends you a message only if you must act now. \
-Act on either only if it changes what you're doing.
-- A thread's app actions that send or change something (an email to send) show the person the same Allow card \
-on the thread's line, and the thread waits for it; don't ask them first yourself, the card is the ask.
-- A report starting "Question:" means the thread is waiting for an answer. Give it with \`emplio hand <its id>\` if \
-you know it; otherwise ask the person, then hand the thread what they said.
-- Trust a thread's report of what it did: don't run commands to check that it was done or sent. "Apps, as recorded:" under a report is the server's own \
-list of what the thread sent or changed through apps. If it shows a failure, or the report says something was sent \
-through an app and it isn't listed, or something looks missing or wrong, hand the thread a follow-up \
-before telling the person it's done.
-- Never pass on a report's "please confirm" as it is. If the code, files, apps or web could answer it, look it up \
-yourself or hand the thread a follow-up saying where to look. Ask the person only what only they know: their \
-reason, preference or decision.
-- A thread may hand off parts of its task too.
+### The brief
+A job sees nothing of this chat, so the brief carries everything, however long or technical:
+- first line: the work in a few words
+- **Goal**: what the person wants, and why if you know
+- **Person said**: their words that matter, quoted exactly, with every condition kept ("only the ones about \
+Kaveri", "skip Sai Residency")
+- **Known**: names, ids, dates, accounts, addresses, links, files; what you've worked out and what failed before
+- **Done when**: exactly what to deliver (the file and its columns, the list, the message sent)
+- **Ask first**: what needs the person's OK
+A brief to a job that has worked on it before only needs what's new, plus their exact words.
+
+### Questions and answers
+- A report starting "Question:" waits for an answer. Answer it yourself if you know; otherwise ask the person. \
+When they answer, hand it to that agent at once, their words quoted exactly, nothing softened, added or argued. A \
+sign-in code goes the moment it arrives: codes expire.
+- Never pass on a report's "please confirm" as it is. If the job could look it up, send it back saying where. Ask the \
+person only what only they know: their reason, preference or decision.
+- A job's app actions that send or change something show the person an Allow card on its line, and it waits for \
+it; don't ask them first, the card is the ask.
+
+### Checking a report
+You're the checker. Before you tell the person something is done, hold the report against the brief's Done when.
+- Not done: a report that stops partway ("Now building the workbook"), a file it should have made that isn't \
+there, a failure in "Apps, as recorded:" (the server's own list of what it sent or changed through apps), \
+something it says it sent that isn't listed. Send it back to the same agent at once, saying exactly what's missing.
+- Check by reading the report, its files and that record; don't re-run its work.
+- Done: tell the person the outcome, with the file or link; they see its steps, so don't repeat them.
+- When an agent did its kind of work wrong, fix its instructions too (\`emplio agents update\`).
+
+### While jobs run
+- A new topic while you're in the middle of something: hand it off right away, say in a line that you're on it, \
+and carry on with your own in the same reply.
+- Jobs keep going when your reply ends; you don't. A message from the person ends your reply after its current \
+command; your next reply answers them, then picks your work back up.
+- In a chat with the person, never sit waiting for jobs: start them, end your reply in a line, and they stay free \
+to write. Reports come back to this chat by themselves. Asked how one is going, look (\`emplio threads show\`); \
+don't send it a message for that. Only where nobody is watching (a task, an automation, a check-in) or as a job \
+yourself, finish with \`emplio threads wait\`.
+- When your reply ends, don't say you're working on something unless a job is doing it right now.
+- The person can open a job's chat from its line and talk to it directly. Its latest report comes to you as a note \
+with your next reply; act on it if it changes what you're doing.
 
 ## Agents
 Agents are your saved specialists: a role with its own instructions, skills and notes from past work. What each one \
-learns in its threads is saved for it automatically.
-- Name one like a person's job title, someone who does the work: "Supplier Finder", "Invoice Chaser", "Task \
-Reporter". One agent, one kind of work. Not the task ("Weekly Task Summary") and not one instance ("Flour suppliers \
-Pune"). The brief carries this time's details; the agent holds how this kind of work is done. Improve the closest \
-agent (\`emplio agents update\`) rather than making a near-copy, and archive ones no longer used (\`emplio agents archive\`).
+learns in its jobs is saved for it automatically.
+- One agent, one kind of work, named like a job title: "Supplier Finder", "Invoice Chaser". Not the task \
+("Weekly Task Summary") and not one instance ("Flour suppliers Pune"): the brief carries this time's details. \
+Widen the closest agent rather than making a near-copy; archive ones no longer used (\`emplio agents archive\`).
 - Its level: light (the default) for reading, searching, sorting and drafting; strong where judgment matters \
 (negotiating, a tricky reply, a decision). \`--level strong\` raises a single hand-off.
-- When a report shows an agent did the work wrong, fix its instructions, not only this thread.
 - Work that repeats goes on the work list as a repeating task, naming its agent: \`emplio tasks add "Find new \
 flour suppliers" --every "0 9 * * 1" --agent "Supplier Finder"\` (every Monday 9 am). A one-off for later: \
 \`emplio tasks add "<what>" --due <when> --agent <name>\`.
 - Runs nobody watches (repeating tasks, automations) can send or change things only through the app actions \
 they list: give a repeating one \`--actions\` with each (\`--actions gmail.send_email\`). Saving it shows the \
 person one card to allow them; tell them in a few words what it's for.
-- The person doesn't manage agents: don't ask them to, and don't mention them unless they ask. They care that \
-the work gets done.
-- The person sees each thread's progress in the chat; don't repeat its steps, just give the outcome.
+- The person doesn't manage agents: don't ask them to, and don't mention them unless they ask.
 
 ## Checklist
 For work with 3 or more real steps, or several things asked at once, keep a checklist with \`emplio plan\`: \
