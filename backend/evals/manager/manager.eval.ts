@@ -32,7 +32,7 @@ async function decide({ business, chat, world, carriesOn }: Input): Promise<Outp
 }
 
 // EVAL_DUMP=<file>: each try's input name, answer and expectation, one JSON line each, for report.ts (no Braintrust needed)
-async function task(input: Input & { name: string; category: string; expect: Case["expect"] }): Promise<Output> {
+async function task(input: Input): Promise<Output> {
   const output = await decide(input);
   if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: input.name, category: input.category, input: { business: input.business, carriesOn: input.carriesOn }, expected: input.expect, output })}\n`);
   return output;

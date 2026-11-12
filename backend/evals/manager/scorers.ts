@@ -7,7 +7,7 @@ export { staysEmplio } from "../hand-off/scorers";
 
 // carriesOn: the app's `emplio hand <agent>` carries on that agent's job in this chat (the new hand-off); false:
 // it always starts a new one and only a thread id carries on (the old one)
-export type Input = { business: Business; chat: ModelMessage[]; world: [string, string][]; carriesOn: boolean };
+export type Input = { business: Business; chat: ModelMessage[]; world: [string, string][]; carriesOn: boolean; name?: string; category?: string; expect?: Case["expect"] };
 export type Output = Said & { byHand: number };
 type Args = { input: Input; output: Output; expected: Case["expect"] };
 type Score = { name: string; score: number | null; metadata?: Record<string, unknown> };
