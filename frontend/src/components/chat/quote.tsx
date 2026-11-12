@@ -39,26 +39,33 @@ const finger = () => matchMedia("(pointer: coarse)").matches;
 
 // The "Reply" button over text selected in one of the AI's replies, inside `area`.
 export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | null>; onQuote: (text: string) => void }) {
-  const [at, setAt] = useState<{ text: string; x: number; y: number; above: boolean } | null>(null);
+  // shown: off, it fades where it was, so the next selection's button glides over from there; glide: false while
+  // the chat scrolls, so it stays on the text rather than trailing it
+  const [at, setAt] = useState<{ text: string; x: number; y: number; above: boolean; shown: boolean; glide: boolean } | null>(null);
   useEffect(() => {
-    const check = () => {
+    const hide = () => setAt((a) => a && { ...a, shown: false });
+    const place = (glide: boolean) => {
       const sel = window.getSelection();
-      if (!sel?.rangeCount) return setAt(null);
+      if (!sel?.rangeCount) return hide();
       const range = sel.getRangeAt(0).cloneRange();
       const elOf = (n: Node) => (n instanceof Element ? n : n.parentElement);
       // a triple-click, or a drag let go below the reply, ends the selection past it: keep the reply's part
       const msg = elOf(range.startContainer)?.closest(".is-assistant") ?? elOf(range.endContainer)?.closest(".is-assistant");
-      if (!msg || !area.current?.contains(msg)) return setAt(null);
+      if (!msg || !area.current?.contains(msg)) return hide();
       if (!msg.contains(range.startContainer)) range.setStart(msg, 0);
       if (!msg.contains(range.endContainer)) range.setEnd(msg, msg.childNodes.length);
       const text = range.toString().trim();
-      if (!text) return setAt(null);
+      if (!text) return hide();
       const rect = range.getBoundingClientRect();
-      if (!finger()) return setAt({ text, x: rect.left + rect.width / 2, y: rect.top - 8, above: true });
+      // scrolled out of the chat's view: hidden until it's back
+      const view = area.current.getBoundingClientRect();
+      if (rect.bottom < view.top || rect.top > view.bottom) return hide();
+      if (!finger()) return setAt({ text, x: rect.left + rect.width / 2, y: rect.top - 8, above: true, shown: true, glide });
       // below the selection, the phone's own Copy menu being above it; on screen, and clear of the selection's handle
       const below = Math.min(rect.bottom + 20, window.innerHeight - 64);
-      setAt({ text, x: Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56), y: below, above: false });
+      setAt({ text, x: Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56), y: below, above: false, shown: true, glide });
     };
+    const check = () => place(true);
     // A finger's selection has no release to listen for: once it has been still for a moment. The selection handles
     // can be dragged after that, and it follows.
     let settle: ReturnType<typeof setTimeout> | undefined;
@@ -67,26 +74,32 @@ export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | n
       settle = setTimeout(check, 300);
     };
     // on release, not while dragging; and gone once the selection is
-    const clear = () => !window.getSelection()?.toString().trim() && setAt(null);
+    const clear = () => !window.getSelection()?.toString().trim() && hide();
     const changed = () => {
       clear();
       if (finger()) settled();
     };
-    const scroller = area.current;
-    const hide = () => {
-      setAt(null);
-      if (finger()) settled();
+    // it moves with the selection as the chat scrolls, once a frame. Any scroll on the page (captured: scroll doesn't
+    // bubble), as the chat's own scroller can be swapped for another after this ran.
+    let frame = 0;
+    const follow = () => {
+      if (frame || !window.getSelection()?.toString().trim()) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        place(false);
+      });
     };
     document.addEventListener("mouseup", check);
     document.addEventListener("keyup", check);
     document.addEventListener("selectionchange", changed);
-    scroller?.addEventListener("scroll", hide);
+    document.addEventListener("scroll", follow, true);
     return () => {
       clearTimeout(settle);
+      cancelAnimationFrame(frame);
       document.removeEventListener("mouseup", check);
       document.removeEventListener("keyup", check);
       document.removeEventListener("selectionchange", changed);
-      scroller?.removeEventListener("scroll", hide);
+      document.removeEventListener("scroll", follow, true);
     };
   }, [area]);
   if (!at) return null;
@@ -110,7 +123,9 @@ export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | n
       }}
       onClick={reply}
       style={{ left: at.x, top: at.y }}
-      className={`fixed z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border bg-popover px-2.5 py-1.5 text-sm text-popover-foreground shadow-md select-none hover:bg-accent pointer-coarse:min-h-10 pointer-coarse:px-3.5 ${at.above ? "-translate-y-full" : ""}`}
+      aria-hidden={!at.shown}
+      tabIndex={at.shown ? undefined : -1}
+      className={`fixed z-50 flex -translate-x-1/2 duration-150 ease-out animate-in fade-in motion-reduce:transition-none ${at.glide ? "transition-[left,top,opacity]" : "transition-opacity"} ${at.shown ? "" : "pointer-events-none opacity-0"} items-center gap-1.5 rounded-lg border bg-popover px-2.5 py-1.5 text-sm text-popover-foreground shadow-md select-none hover:bg-accent pointer-coarse:min-h-10 pointer-coarse:px-3.5 ${at.above ? "-translate-y-full" : ""}`}
     >
       <CornerDownRightIcon className="size-3.5" />
       Reply
