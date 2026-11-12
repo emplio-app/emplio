@@ -11,6 +11,8 @@ import type { FastifyInstance } from "fastify";
 import { db } from "./db";
 import { conversations, paidSites, workspaceMembers } from "./db/schema";
 import { cloud } from "./cloud";
+import { deviceBrowserFor, isDeviceBrowser, deviceBrowser } from "./device-browser";
+import { onGone } from "./devices";
 import { decrypt, encrypt } from "./secrets";
 import { siteOf } from "./site-calls";
 import { z } from "zod";
@@ -26,6 +28,23 @@ export const canReopen = (usedAt: Date | null, now = Date.now()) => !!usedAt && 
 // owner: whose sign-ins it carries (unknown for one picked up after a restart until a command uses it)
 export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; owner?: Owner; paid?: boolean; signedIn?: Set<string> };
 const open = new Map<string, Promise<LiveBrowser>>();
+
+// Whose browser: the person's own Chrome while their computer is connected (device-browser.ts), else the cloud's.
+const hostOf = (browserId: string) => (isDeviceBrowser(browserId) ? deviceBrowser : cloud.browser);
+// a computer that drops off takes its browsers with it: the next command starts one again (in the cloud, if it's still gone)
+onGone((deviceId) => {
+  for (const [chat, pending] of open) {
+    void pending.then(
+      (live) => {
+        if (live?.id.startsWith(`dev_${deviceId}_`) && open.get(chat) === pending) {
+          clearTimeout(live.timer);
+          open.delete(chat);
+        }
+      },
+      () => {},
+    );
+  }
+});
 
 // One DevTools session on a tab: send a command, wait for its answer.
 export async function devtools(cdpUrl: string) {
@@ -169,7 +188,7 @@ export async function stopBrowser(conversationId: string) {
         return undefined;
       })
     : undefined;
-  await cloud.browser.stopHosted(live.id).catch(() => {});
+  await hostOf(live.id).stopHosted(live.id).catch(() => {});
   await markUsed(conversationId, page);
 }
 
@@ -192,8 +211,8 @@ export const stillRunning = <T extends { id: string; cdpUrl?: string | null; liv
   listed.filter((b) => b.cdpUrl && b.liveUrl && !leaving.has(b.id)).sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
 
 async function find(conversationId: string) {
-  const [newest, ...strays] = stillRunning(await cloud.browser.listHosted(conversationId));
-  for (const b of strays) void cloud.browser.stopHosted(b.id).catch(() => {});
+  const [newest, ...strays] = stillRunning([...(await cloud.browser.listHosted(conversationId)), ...(await deviceBrowser.listHosted(conversationId).catch(() => []))]);
+  for (const b of strays) void hostOf(b.id).stopHosted(b.id).catch(() => {});
   return newest ? toLive(newest) : null;
 }
 
@@ -201,12 +220,26 @@ export type Owner = { workspaceId: string; userId: string };
 
 export type Size = { width: number; height: number };
 
+// The person's own computer first, if it's connected and its Chrome starts; otherwise the cloud's browser.
+async function startOn(conversationId: string, owner: Owner, size?: Size) {
+  const mine = deviceBrowserFor(owner.userId);
+  if (mine) {
+    try {
+      return { started: await mine.startHosted(conversationId, owner), host: mine as { RESTORE_SIGN_INS: boolean } };
+    } catch (error) {
+      console.error("the computer's browser didn't start; using the cloud's:", error);
+    }
+  }
+  return { started: await cloud.browser.startHosted(conversationId, owner, size), host: cloud.browser };
+}
+
 const start = async (conversationId: string, owner: Owner, size?: Size) => {
-  const live = toLive(await cloud.browser.startHosted(conversationId, owner, size));
+  const { started, host } = await startOn(conversationId, owner, size);
+  const live = toLive(started);
   const saved = await savedState(owner).catch(() => null);
   // A browser service's own profile brings back cookies and local storage. Its docs don't promise Indexed DB, so that
   // always goes through, and only databases the browser doesn't already have get written.
-  const toRestore = saved && (cloud.browser.RESTORE_SIGN_INS ? saved : { ...saved, cookies: [], storage: {} });
+  const toRestore = saved && (host.RESTORE_SIGN_INS ? saved : { ...saved, cookies: [], storage: {} });
   if (toRestore && (toRestore.cookies.length || Object.keys(toRestore.storage).length || Object.keys(toRestore.indexedDb ?? {}).length))
     await restoreState(live.cdpUrl, toRestore).catch((e) => console.error("browser state not restored:", e));
   return live;
@@ -254,7 +287,7 @@ export async function browserFor(conversationId: string, owner: Owner): Promise<
 // ponytail: first 100 files only; the seen list lasts while this server runs (a restart hands them over again)
 const seen = new Map<string, Set<string>>();
 export async function newDownloads(browserId: string): Promise<{ name: string; url: string; size: number }[]> {
-  const files = await cloud.browser.hostedDownloads(browserId);
+  const files = await hostOf(browserId).hostedDownloads(browserId);
   const had = seen.get(browserId) ?? new Set();
   seen.set(browserId, had);
   const fresh = files.filter((f) => f.url && !had.has(`${f.path}|${f.size}|${f.lastModified}`));
@@ -340,7 +373,7 @@ async function anyRemembered(workspaceId: string, sites: string[]) {
 // True only when this call moved it.
 async function goPaid(live: LiveBrowser, owner: Owner) {
   if (live.paid) return false;
-  live.paid = await cloud.browser.useProxy(live.id, owner).catch((e) => (console.error("browser connection not switched:", e), false));
+  live.paid = await hostOf(live.id).useProxy(live.id, owner).catch((e) => (console.error("browser connection not switched:", e), false));
   return live.paid;
 }
 

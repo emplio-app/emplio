@@ -112,6 +112,29 @@ export const pushDevices = pgTable("push_devices", {
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index().on(t.sessionHash)]);
 
+// A browser that takes notifications (webpush.ts), for as long as that sign-in lasts.
+export const webPushDevices = pgTable("web_push_devices", {
+  endpoint: text().primaryKey(),
+  sessionHash: text().notNull().references(() => sessions.tokenHash, { onDelete: "cascade" }),
+  p256dh: text().notNull(),
+  auth: text().notNull(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index().on(t.sessionHash)]);
+
+// A computer running the Emplio desktop app, signed in as this person (devices.ts). While it's awake and connected,
+// their commands and browser run on it instead of in the cloud. The app proves itself with a token we keep only the hash of.
+export const devices = pgTable("devices", {
+  id: uuid().primaryKey().defaultRandom(),
+  userId: uuid().notNull().references(() => users.id, { onDelete: "cascade" }),
+  // made by the app on its first run, so signing in again on the same computer is the same device
+  installId: text().notNull(),
+  name: text().notNull(),
+  platform: text().notNull(),
+  tokenHash: text().notNull(),
+  lastSeenAt: timestamp({ withTimezone: true }),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex().on(t.userId, t.installId), index().on(t.tokenHash)]);
+
 export const conversations = pgTable(
   "conversations",
   {

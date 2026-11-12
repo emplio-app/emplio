@@ -8,6 +8,8 @@ import { cloud, loadCloud } from "./cloud";
 import { authRoutes } from "./auth";
 import { chatRoutes } from "./chat";
 import { browserRoutes } from "./browser";
+import { deviceRoutes } from "./device-routes";
+import { deviceLiveRoutes } from "./browser-host";
 import { loginRoutes } from "./logins";
 import { setupRoutes } from "./setup";
 import { fileRoutes } from "./files";
@@ -59,7 +61,8 @@ await app.register(cors, {
   credentials: true,
 });
 await app.register(cookie);
-await app.register(websocket);
+// device files and browser messages travel in these frames
+await app.register(websocket, { options: { maxPayload: 256 * 1024 * 1024 } });
 await app.register(authRoutes);
 await app.register(chatRoutes);
 await app.register(pushRoutes);
@@ -87,6 +90,8 @@ await app.register(taskRoutes);
 await app.register(madeRoutes);
 await app.register(importRoutes);
 await app.register(cloud.browser.browserHostRoutes);
+await app.register(deviceRoutes);
+await app.register(deviceLiveRoutes);
 await app.register(cloud.storage.storageRoutes);
 for (const routes of cloud.routes) await app.register(routes);
 

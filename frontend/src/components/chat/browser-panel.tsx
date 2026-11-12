@@ -150,6 +150,7 @@ export function useLiveBrowser(id: string, messages: UIMessage[]) {
         .catch(() => setMic("blocked"));
     };
     return {
+      chat: id,
       url,
       canReopen,
       reopening,
@@ -217,6 +218,11 @@ type LiveBrowser = ReturnType<typeof useLiveBrowser>;
 const BrowserContext = createContext<LiveBrowser | null>(null);
 export const BrowserProvider = BrowserContext.Provider;
 export const useBrowser = () => useContext(BrowserContext);
+
+// In the Emplio desktop app the browser of the person's own computer isn't streamed into this page: the app draws the
+// real thing over this panel (desktop/src/pane.js), and only needs to be told where the panel is.
+type Spot = { chat: string; x: number; y: number; width: number; height: number; visible: boolean; control: boolean; skin?: Record<string, string> };
+const desktopPane = () => (typeof window === "undefined" ? undefined : (window as unknown as { emplioDesktop?: { pane?: { show: (spot: Spot) => void; onTake?: (listener: () => void) => () => void } } }).emplioDesktop?.pane);
 
 // "Live browser" button: in the header and under a run of commands, whenever the panel is hidden. Once the browser
 // has stopped, it starts it again.
@@ -368,6 +374,39 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
   const inControl = control || !!browser?.showing;
   const hidePointer = browser?.hidePointer;
   const live = !!browser?.url;
+  // the desktop app shows its own computer's browser itself
+  const native = !!desktopPane() && !!browser?.url?.includes("/device-live/");
+  const holder = useRef<HTMLDivElement>(null);
+  const covered = asking || closing;
+  const chat = browser?.chat;
+  const wanted = !!browser?.open && native && !covered;
+  useEffect(() => {
+    const pane = desktopPane();
+    if (!pane || !native || !chat) return;
+    let last = "";
+    const report = () => {
+      // the app's colours, so what the app draws over the panel matches them
+      const css = getComputedStyle(document.documentElement);
+      const skin = Object.fromEntries(["popover", "popover-foreground", "border", "primary", "primary-foreground", "muted-foreground"].map((k) => [k, css.getPropertyValue(`--${k}`).trim()]));
+      const r = holder.current?.getBoundingClientRect();
+      const spot = { chat, x: r?.x ?? 0, y: r?.y ?? 0, width: r?.width ?? 0, height: r?.height ?? 0, visible: wanted && !!r, control: inControl, skin };
+      const text = JSON.stringify(spot);
+      if (text === last) return;
+      last = text;
+      pane.show(spot);
+    };
+    report();
+    // the panel slides in and is dragged wider: look again as it moves
+    const timer = setInterval(report, 200);
+    window.addEventListener("resize", report);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("resize", report);
+      pane.show({ chat, x: 0, y: 0, width: 0, height: 0, visible: false, control: false });
+    };
+  }, [native, chat, wanted, inControl]);
+  // "Take control" pressed on the browser itself (it is drawn over the page while only watching)
+  useEffect(() => (native ? desktopPane()?.onTake?.(() => setControl(true)) : undefined), [native]);
   useEffect(() => {
     if (!live || !hidePointer) return;
     hidePointer(inControl);
@@ -494,6 +533,9 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
       <div className="group relative min-h-0 flex-1 bg-muted/40 p-2 lg:p-3">
         {/* Watching vs control only locks the view (inert): changing the link (readOnly) reloads the live
             view, which reconnects to a blank tab instead of the page the agent was on */}
+        {native ? (
+          <div ref={holder} className="size-full rounded-lg border bg-background" />
+        ) : (
         <iframe
           src={url}
           title="Live browser"
@@ -501,8 +543,9 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
           inert={!inControl}
           className={`size-full rounded-lg border bg-background ${dragging ? "pointer-events-none" : ""}`}
         />
+        )}
         {/* watching: the page can't be clicked, so a click says how to use it instead of doing nothing */}
-        {!inControl && (
+        {!native && !inControl && (
           <div onPointerDown={nudge} onWheel={nudge} className="absolute inset-2 cursor-default lg:inset-3">
             <div
               role="status"

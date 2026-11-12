@@ -575,3 +575,21 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
   }
 }
 
+
+/* The desktop app has no title bar: the window's controls (macOS traffic lights) sit in the top row of the page, so that
+   row is what the window is dragged by, and clears them on the left */
+html[data-desktop] header,
+html[data-desktop] [data-slot="sidebar-header"] {
+  -webkit-app-region: drag;
+}
+html[data-desktop] :is(header, [data-slot="sidebar-header"]) :is(button, a, input, textarea, select, [role="button"], [contenteditable="true"]) {
+  -webkit-app-region: no-drag;
+}
+/* the top of the sidebar is the row the traffic lights sit in */
+html[data-desktop="darwin"] [data-slot="sidebar-header"] {
+  padding-top: 3.5rem;
+}
+/* sidebar closed: the page's top row starts at the window's edge, so it starts after the lights instead */
+html[data-desktop="darwin"] [data-slot="sidebar-wrapper"]:has([data-slot="sidebar"][data-state="collapsed"]) [data-slot="sidebar-inset"] header:not(aside header) {
+  padding-left: 5.25rem;
+}

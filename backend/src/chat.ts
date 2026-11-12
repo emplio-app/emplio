@@ -430,7 +430,7 @@ const closeToolCalls = (message: UIMessage): UIMessage => ({
 
 // The bash tool as the model sees it (the evals offer the same one, without running anything)
 export const BASH_DESCRIPTION =
-  "Run a bash command in this chat's own Linux computer (python, node, curl), starting in /work. " +
+  "Run a bash command in this chat's own computer (python, node, curl), starting in /work. " +
   "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
   "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
   "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +

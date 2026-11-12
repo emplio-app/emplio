@@ -6,6 +6,8 @@ import { AppSidebar } from "@/components/chat/app-sidebar";
 import { BottomTabs } from "@/components/chat/bottom-tabs";
 import { JustUpdated, NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
+import { useDesktopLink } from "@/components/desktop-link";
+import { useWebNotifications } from "@/components/web-notifications";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api, useMe } from "@/lib/api";
@@ -21,6 +23,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useFitToScreen();
   usePhoneNotifications(!!me?.user.name, router.push);
+  useDesktopLink(me?.user.name ? me.user.id : undefined, router.push);
+  const notifyBar = useWebNotifications(!!me?.user.name, router.push);
 
   if (!me?.user.name) return null;
 
@@ -31,6 +35,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden pt-(--safe-top)">
             <NewVersionBar />
+            {notifyBar}
             <JustUpdated />
             {children}
             <BottomTabs />
@@ -71,7 +76,8 @@ function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) 
 function useFitToScreen() {
   useEffect(() => {
     const view = window.visualViewport;
-    if (!view) return;
+    // the desktop app has no on-screen keyboard (and keeps its own top strip): the page stays at its own size
+    if (!view || document.documentElement.hasAttribute("data-desktop")) return;
     const root = document.documentElement.style;
     const fit = () => {
       if (view.scale > 1.01) return; // pinch-zoomed: leave the layout alone
