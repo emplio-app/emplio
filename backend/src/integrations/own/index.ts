@@ -1,7 +1,7 @@
 // Integrations we write ourselves, as a provider like Composio. Each app is connected with a key the person
 // pastes (kept encrypted in our database) and its actions are plain functions. Add one: write it next to
 // indiamart.ts, list it in APPS, and add it to catalog.ts with provider "own".
-import type { ActionDetail, KeyField } from "@emplio/shared";
+import { actionTitle, type ActionDetail, type KeyField } from "@emplio/shared";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -183,6 +183,7 @@ export const own: Provider = {
       action: name,
       app: name.split(".")[0]!,
       description: action.description,
+      title: actionTitle(name),
       readOnly: action.readOnly,
       input: Object.entries(schema.properties ?? {}).map(([field, p]) => ({
         name: field,

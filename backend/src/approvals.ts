@@ -6,7 +6,7 @@
 // allowed (automations.ts); anything else is refused.
 // Each ask is a row (the approvals table): the card, their answer and how the action went. The screens read that;
 // Emplio reads only what its command returned (chat.ts toModelOutput), so to it an allowed action just ran.
-import type { Approval } from "@emplio/shared";
+import { actionTitle, type Approval } from "@emplio/shared";
 import { generateId } from "ai";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -116,7 +116,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     app: action.split(".")[0]!,
     appName: app?.name ?? action.split(".")[0]!,
     logo: app?.logo,
-    title: detail.title ?? action,
+    title: detail.title ?? actionTitle(action),
     input,
     expiresAt: new Date(Date.now() + VALID_MS).toISOString(),
     ...(asks && { oneOff: true }),
