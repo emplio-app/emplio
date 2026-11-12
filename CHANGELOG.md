@@ -2,6 +2,51 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.11 (2026-11-12)
+
+### What's new
+
+- When Emplio asks for your OK, the card names the action in plain words, like "Create a pull request".
+- The Reply button on text you select stays with it while you scroll, and slides over when you select more or something else.
+
+### For developers
+
+- Own-provider actions get a `title` from their name (`actionTitle`, shared); cards saved with the code name show it too (#82).
+- Quote button follows the selection on scroll (page-wide captured listener, once a frame), hides only while it's out of the chat's view, and fades in place so the next selection glides; no glide while scrolling (#83).
+
+## 1.2.10 (2026-11-12)
+
+### What's new
+
+- After an update, a short card shows what's new, with a picture for each change. Swipe or tap Next to go through it, or Skip to close it. ![](frontend/public/whats-new/1.2.10-just-updated.webp)
+
+### For developers
+
+- A "What's new" line can end with a picture or GIF, `![](frontend/public/whats-new/x.gif)`. `GET /changelog` now returns `changes` as `{ text, image? }`, and each device shows one slide per new pictured line after an update. GitHub release notes link pictures to the raw file.
+
+## 1.2.9 (2026-11-12)
+
+### What's new
+
+- The card where Emplio asks for your OK is shorter: it never covers more than half the screen, the short details come first, and long text like an email shows a few lines with "Show all".
+- The card's edges and shadow no longer look cut off in light mode.
+
+### For developers
+
+- Approval card: short fields first, long values (over 4 lines or 240 characters) clamp to 4 lines with Show all / Show less, also in the answered card; holder capped at `min(28rem, 50dvh)` and no longer scrolls, so it doesn't clip the card's ring and shadow (#79).
+
+## 1.2.8 (2026-11-12)
+
+### What's new
+
+- When Emplio asks for your OK on something long, like an email or a pull request, the Allow and Deny buttons now always stay on screen. The details scroll above them.
+- In spreadsheets, double-click the edge of a column heading to make the column fit its longest text, like in Excel.
+
+### For developers
+
+- Waiting approval card: header and buttons don't shrink, the fields scroll between them; the per-field height cap is dropped there so there's one scroll area (#75).
+- Sheet viewer: double-clicking a column's resize handle fits it to its longest shown value, capped at 1000px; rows keep double-click to reset (#77).
+
 ## 1.2.7 (2026-11-12)
 
 ### What's new

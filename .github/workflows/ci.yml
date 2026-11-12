@@ -124,5 +124,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           version: ${{ needs.plan.outputs.version }}
         run: |
-          awk '/^## /{n++} n==1 && !/^## /' CHANGELOG.md > notes.md
+          awk '/^## /{n++} n==1 && !/^## /' CHANGELOG.md \
+            | sed "s#](frontend/public/#](https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/frontend/public/#g" > notes.md
           gh release create "v$version" --title "$version" --notes-file notes.md --target "$GITHUB_SHA"

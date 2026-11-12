@@ -231,7 +231,7 @@ function FilterMenu({
   );
 }
 
-// Dragging a column's or row's edge to resize it, as in Excel (double-click puts it back)
+// Dragging a column's or row's edge to resize it, as in Excel (double-click fits a column, puts a row back)
 function resize(e: React.PointerEvent, from: number, axis: "x" | "y", set: (size: number) => void) {
   e.preventDefault();
   e.stopPropagation();
@@ -284,6 +284,23 @@ function SheetView({ file }: { file: Shown }) {
   const body = passing();
   if (sort) body.sort((a, b) => compareCells(cell(a.r, sort.col), cell(b.r, sort.col)) * (sort.desc ? -1 : 1));
   const rows = all.length ? [all[0]!, ...body] : [];
+  // double-clicking a column's edge fits it to the longest value shown, as in Excel
+  const fit = (j: number) => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return;
+    const font = (ri: number) => {
+      const s = getComputedStyle(document.getElementById(`cell-${ri}-${j}`)!);
+      return `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`;
+    };
+    const fonts = rows.length > 1 ? [font(0), font(1)] : [font(0)]; // the headings are bold
+    let max = 0;
+    rows.forEach(({ r }, ri) => {
+      ctx.font = fonts[Math.min(ri, fonts.length - 1)]!;
+      for (const line of cell(r, j).split("\n")) max = Math.max(max, ctx.measureText(line).width);
+    });
+    // ponytail: capped at 1000px so one long paragraph doesn't make a column wider than the screen
+    setWidths((m) => sized(m, j, Math.min(1000, Math.max(80, Math.ceil(max) + 18)))); // + padding and border
+  };
   const setFilter = (j: number, f: ColFilter | null) => {
     setSel(null);
     setFilters(({ [j]: _, ...rest }) => (f && active(f) ? { ...rest, [j]: f } : rest));
@@ -365,9 +382,9 @@ function SheetView({ file }: { file: Shown }) {
                       </Popover>
                     </div>
                     <div
-                      title="Drag to resize; double-click to reset"
+                      title="Drag to resize; double-click to fit"
                       onPointerDown={(e) => resize(e, e.currentTarget.parentElement!.getBoundingClientRect().width, "x", (w) => setWidths((m) => sized(m, i, w)))}
-                      onDoubleClick={() => setWidths((m) => sized(m, i, null))}
+                      onDoubleClick={() => fit(i)}
                       className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-primary/40"
                     />
                   </th>

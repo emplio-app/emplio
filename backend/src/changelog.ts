@@ -1,7 +1,13 @@
 // CHANGELOG.md is the one place versions live: its newest heading is the version this server is running, and its
 // "What's new" lines are what people see in the app. "For developers" goes to the GitHub release only (ci.yml).
+// A line may end with a picture or GIF, ![](frontend/public/whats-new/x.gif): the website serves it at /whats-new/x.gif.
 import { readFileSync } from "node:fs";
-import type { Release } from "@emplio/shared";
+import type { Change, Release } from "@emplio/shared";
+
+function change(line: string): Change {
+  const [, text, src] = /^(.*?)\s*!\[[^\]]*\]\((\S+)\)$/.exec(line) ?? [];
+  return src ? { text: text!, image: src.replace(/^frontend\/public\//, "/") } : { text: line };
+}
 
 export function parseChangelog(md: string): Release[] {
   return md
@@ -13,7 +19,7 @@ export function parseChangelog(md: string): Release[] {
       if (!version) throw new Error(`CHANGELOG.md: "${heading}" should look like "## 1.2.3 (2026-11-09)"`);
       const lines = /^### What's new\n+((?:- .*\n?)+)/m.exec(section)?.[1];
       if (!lines) throw new Error(`CHANGELOG.md: ${version} needs a "### What's new" list`);
-      return { version, date: date!, changes: lines.trim().split("\n").map((l) => l.slice(2)) };
+      return { version, date: date!, changes: lines.trim().split("\n").map((l) => change(l.slice(2))) };
     });
 }
 
