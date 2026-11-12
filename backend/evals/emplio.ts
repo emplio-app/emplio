@@ -6,6 +6,7 @@ import { MODEL_SETS } from "@emplio/shared";
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote } from "../src/chat";
 import { HEARTBEAT } from "../src/heartbeat";
+import { AGENTS_HEADING, THREADS_HEADING } from "../src/jobs";
 import { sandboxPrompt, type Session } from "../src/sandbox";
 import { DEFAULTS } from "../src/settings";
 
@@ -48,13 +49,15 @@ const note = (b: Business) =>
       channel: "They're in the web app.",
       date: "Today is Tuesday, 10 November 2026 (Asia/Kolkata time).",
       chats: "",
-      agents: ["Your agents (`emplio hand <name>`):", ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
-      threads: b.threads?.length ? ["Threads you can carry on with `emplio hand <id>`, latest first:", ...b.threads].join("\n") : "",
+      agents: [AGENTS_HEADING, ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
+      threads: b.threads?.length ? [THREADS_HEADING, ...b.threads].join("\n") : "",
     },
     [],
   )!.text;
 
-export type Said = { text: string; commands: string[] };
+// messages: the reply as the chat keeps it (its commands and their results), for chats that go on (workday)
+// usage: what the reply took, all its steps (cost: what OpenRouter charged, in dollars)
+export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number } };
 
 // One command Emplio already ran in this reply, for chats that start mid-work.
 let calls = 0;
@@ -151,7 +154,7 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
   const commands: string[] = [];
   let stop = false;
-  const { steps } = await generateText({
+  const { steps, response } = await generateText({
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
     system: system(b, round).map((content, i) => ({ role: "system" as const, content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
@@ -170,5 +173,10 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
     },
     stopWhen: [stepCountIs(maxSteps), () => stop],
   });
-  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands };
+  const usage = {
+    input: steps.reduce((n, s) => n + (s.usage.inputTokens ?? 0), 0),
+    output: steps.reduce((n, s) => n + (s.usage.outputTokens ?? 0), 0),
+    cost: steps.reduce((n, s) => n + Number((s.usage.raw as { cost?: number } | undefined)?.cost ?? 0), 0),
+  };
+  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage };
 }

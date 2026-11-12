@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { FROM_EMPLIO, runRef, splitRef, type Approval } from "@emplio/shared";
 import { eq } from "drizzle-orm";
-import { MAX_BY_HAND, notCounted, remindAt } from "./chat";
+import { notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, tooOld, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -63,22 +63,28 @@ test("a report carries the server's record of what the job sent, and nothing whe
   expect(line).toContain("3:41");
 });
 
-test("the hand-off reminder comes at 4 commands, then every 15", () => {
+test("the hand-off reminder comes at 2 commands, then every 15", () => {
   const at = Array.from({ length: 40 }, (_, i) => i + 1).filter(remindAt);
-  expect(at).toEqual([4, 19, 34]);
+  expect(at).toEqual([2, 17, 32]);
 });
 
-test("handing off stays open at the command limit, other work doesn't", () => {
-  expect(MAX_BY_HAND).toBeGreaterThan(4); // the reminder comes first
+test("Emplio has no browser, but a brief may mention it; nothing else is refused", () => {
+  expect(refusal("emplio browser open https://x.example", 1)).toBeTruthy();
+  expect(refusal("emplio logins list; emplio browser snapshot -i", 1)).toBeTruthy();
+  expect(refusal("emplio hand \"Price Checker\" <<'EOF'\nOpen it with emplio browser\nEOF", 1)).toBeNull();
+  expect(refusal("python go.py", 40)).toBeNull();
+});
+
+test("hand-offs and the checklist aren't counted as work done by hand", () => {
   for (const open of ["emplio hand myself <<'EOF'\nbrief\nEOF", "emplio threads wait", "emplio plan done", "emplio report \"broken\""]) expect(notCounted(open)).toBe(true);
   for (const work of ["emplio web read https://x.com", "python go.py", "emplio browser open https://x.com", "cat handoff.md"]) expect(notCounted(work)).toBe(false);
 });
 
-test("reports say what's still running, and let Emplio hold back only then", () => {
-  expect(reportsNote(["r"], [], false)).not.toContain(SILENT);
+test("reports say what's still running; Emplio may stay quiet after sending work back, or while the rest is coming", () => {
+  expect(reportsNote(["r"], [], false)).toContain(`send work back to a job (it isn't done) or answer its question, there's nothing new for them: write no words before or after the command, just end with exactly ${SILENT}`);
   const note = reportsNote(["r"], ["find-invoices"], false);
   expect(note).toContain("Still running: find-invoices");
-  expect(note).toContain(SILENT);
+  expect(note).toContain(`only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT}`);
 });
 
 // against the local database, with no model: a throwaway business and a job's reply starting and ending
@@ -109,15 +115,6 @@ test("chatting in a job's chat stays quiet until Emplio's next reply; answering 
   }
 });
 
-test("a thread quiet for over a day takes new work as a new thread, unless it's waiting on an answer", () => {
-  const now = Date.now();
-  const old = new Date(now - 25 * 3_600_000);
-  expect(tooOld({ status: "done", finishedAt: old }, now)).toBe(true);
-  expect(tooOld({ status: "failed", finishedAt: old }, now)).toBe(true);
-  expect(tooOld({ status: "asking", finishedAt: old }, now)).toBe(false);
-  expect(tooOld({ status: "done", finishedAt: new Date(now - 3_600_000) }, now)).toBe(false);
-});
-
 // against the local database and Gitea, with no model: nothing here gets as far as starting a thread
 test("a hand-off needs a real pick: nothing starts otherwise, and the list shows what can carry on", async () => {
   const tag = crypto.randomUUID().slice(0, 8);
@@ -136,7 +133,9 @@ test("a hand-off needs a real pick: nothing starts otherwise, and the list shows
     // a name that's no agent yet: said plainly, not guessed at
     expect((await hand(["Bookkeeper", "the brief"], maker)).text).toContain("--description");
     expect((await hand(["Bookkeeper", "--description", "Keeps the books", "the brief"])).text).toContain("can't make one");
-    expect((await hand(["deadbeef", "the brief"])).text).toContain("none of your threads");
+    expect((await hand(["deadbeef", "the brief"])).text).toContain("no job deadbeef");
+    // every job has an agent: no plain copy from Emplio
+    expect((await hand(["myself", "the brief"], maker)).text).toContain("not to a copy of you");
     expect(await started()).toBe(0);
 
     expect(await threadsNote(who, main, EMPLIO)).toBe("");
@@ -155,8 +154,9 @@ test("a hand-off needs a real pick: nothing starts otherwise, and the list shows
     const note = await threadsNote(who, main, EMPLIO);
     expect(note).toContain("Book Keeper · october fixes · done");
     expect(note).toContain("myself · needs an answer · asking");
-    expect(note).not.toContain("old work");
-    expect((await hand([rows[1]!.id.slice(0, 8), "more of it"])).text).toContain("quiet for over a day");
+    // no day's cut-off: an agent's job carries on however long ago it last worked
+    expect(note).toContain("myself · old work · done");
+    expect(rows).toHaveLength(3);
   } finally {
     await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
     await db.delete(users).where(eq(users.id, user!.id));
@@ -184,4 +184,13 @@ test("a plain copy's finished work gets the agent nudge; an agent's, a deeper th
   expect(agentNudge({ status: "done", agent: "invoice-chaser", depth: 1 })).toBe("");
   expect(agentNudge({ status: "done", agent: null, depth: 2 })).toBe("");
   expect(agentNudge({ status: "asking", agent: null, depth: 1 })).toBe("");
+});
+
+test("a new agent that nearly copies one already there is caught; clearly different work isn't", () => {
+  const have = ["Supplier Finder", "Invoice Chaser", "Price Checker"];
+  expect(closeTo("Fabric Supplier Finder", have)).toBe("Supplier Finder");
+  expect(closeTo("supplier-finder", have)).toBe("Supplier Finder");
+  expect(closeTo("Invoice Chasers Team", have)).toBeNull();
+  expect(closeTo("Balance Checker", have)).toBeNull();
+  expect(closeTo("Science Project Researcher", have)).toBeNull();
 });

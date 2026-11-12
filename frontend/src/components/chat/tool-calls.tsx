@@ -16,6 +16,7 @@ import { PlanCard } from "@/components/chat/plan-card";
 
 // a file the command made (backend made.ts); older messages have no id
 type Saved = { id?: string; url: string; filename: string; mediaType?: string };
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 
@@ -223,9 +224,14 @@ function Job({ id, run }: { id: string; run?: string }) {
             <XIcon className="size-3.5 shrink-0 text-destructive" />
           )}
           <span className="shrink-0 text-xs font-medium text-foreground">{w?.agent ?? w?.name ?? "Emplio"}</span>
-          <span className={`min-w-0 flex-1 truncate text-xs ${working ? "animate-pulse" : ""}`}>
-            {working ? `· ${now}` : status === "done" ? `· ${n} ${n === 1 ? "action" : "actions"}` : status === "asking" ? "· has a question" : `· ${status}`}
-          </span>
+          {working ? (
+            // the same shimmer as Emplio's own "thinking" line
+            <Shimmer as="span" className="min-w-0 flex-1 truncate text-xs">{`· ${now}`}</Shimmer>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-xs">
+              {status === "done" ? `· ${n} ${n === 1 ? "action" : "actions"}` : status === "asking" ? "· has a question" : `· ${status}`}
+            </span>
+          )}
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
         {open && (

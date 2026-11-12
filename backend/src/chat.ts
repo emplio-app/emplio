@@ -45,7 +45,7 @@ import { slashCommand } from "./skills";
 import { allowedIn } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -59,15 +59,13 @@ import { z } from "zod";
 // a reply's time limit; waiting on jobs ends before it (jobs.ts), and they pick the chat up when done
 const REPLY_MS = 15 * 60_000;
 // commands the agent runs itself in one reply before it is reminded to delegate, and how often after (longRun below)
-const LONG_RUN = 4;
+const LONG_RUN = 2;
 const LONG_RUN_AGAIN = 15;
 export const remindAt = (commands: number) => commands >= LONG_RUN && (commands - LONG_RUN) % LONG_RUN_AGAIN === 0;
-// In a reply to a person, past this many the server refuses commands until Emplio hands off: reminders alone were
-// ignored (a 15-command report done by hand). Where nobody waits (automations, check-ins, tasks, threads) there's no limit.
-export const MAX_BY_HAND = 8;
-// The reminder a reply done by hand gets at 4 commands, then every 15 (longRun, below)
+// The reminder a reply done by hand gets at 2 commands, then every 15 (longRun, below). Only a reminder: a hard stop
+// at 8 cut work off mid-site (41 times in a week) and split it between Emplio and a job.
 export const longRunNote = (nth: number, automation: boolean) =>
-  `[That's ${nth} commands in this reply, all done by you. Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are; put repeated work into one script. ${automation ? "If little is left, carry on." : `If little is left, or the person is going through it with you step by step, carry on, but after ${MAX_BY_HAND} commands in one reply your commands stop running until you hand off.`}]`;
+  `[That's ${nth} commands in this reply, all done by you. ${automation ? "Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`; if little is left, carry on." : "You're the manager: the doing goes to an agent. Unless you're about to answer, hand it off now with \`emplio hand <agent>\`, the brief saying what you've found so far."}]`;
 // The rule on saving skills (sandbox.ts "Skills:") was skipped in chat, by the cheaper models nearly always
 // (evals/skills), until it was said next to the work: on a reply's first command, and at the two moments it goes
 // wrong: a job's steps being written into the standing instructions, and a script run from tmp as if for the first time.
@@ -85,7 +83,12 @@ export const commandLabel = z.preprocess((label) => label || "Running a command"
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
 export const notCounted = (command: string) => /\bemplio (hand|threads|plan)\b/.test(command) || isReport(command);
-export const TOO_MANY = `[Not run: that's ${MAX_BY_HAND} commands in this reply, the most you get. Hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are. If nothing's left, or you need the person's answer, just write to them.]`;
+// Why a command Emplio runs in a reply to a person isn't run, or null (the evals replay this). The browser is the
+// agents': browsing by hand filled Emplio's chat with pages on its dearer model and broke off mid-site.
+// Only the command itself, not a heredoc's text: a brief may well say "use emplio browser".
+export const refusal = (command: string, _nth: number): string | null => (/\bemplio browser\b/.test(command.split("<<")[0]!) ? NO_BROWSER : null);
+export const NO_BROWSER =
+  "[Not run: you have no browser; your agents do, each in its own one the person can watch. Hand this to an agent now with `emplio hand <agent>`: the brief says which site, what to do there and what to bring back.]";
 
 // How long the provider keeps a cached prompt: 5 minutes, or an hour at a dearer write (2x the input price, not
 // 1.25x). People pause between messages, often past 5 minutes, so their chats pay for the hour (most
@@ -275,8 +278,8 @@ export async function freshStart(workspaceId: string, conversationId: string) {
 
 // Silent compaction. A chat that's gone quiet has lost its prompt cache, so its next message pays full price for
 // everything sent: past IDLE_FOLD_TOKENS, fold it now, but for the last few exchanges (compact.ts recentStart).
-// Not chats quiet for over a day (no burst of notes for old chats nobody may come back to), nor job and
-// background chats, which aren't talked to again.
+// Not chats quiet for over a day (no burst of notes for old chats nobody may come back to), nor background chats,
+// which aren't talked to again. Job chats are: an agent's job carries on with the next piece of its work.
 const IDLE_FOLD_TOKENS = 40_000;
 const IDLE_FOLD_AFTER = 60 * 60_000;
 const IDLE_FOLD_UNTIL = 24 * 60 * 60_000;
@@ -284,7 +287,7 @@ const IDLE_FOLD_UNTIL = 24 * 60 * 60_000;
 const IDLE_FOLD_AT_ONCE = 5;
 export const idleChat = (now: number) =>
   and(
-    inArray(conversations.kind, ["main", "chat"]),
+    inArray(conversations.kind, ["main", "chat", "job"]),
     gte(conversations.contextTokens, IDLE_FOLD_TOKENS),
     lte(conversations.updatedAt, new Date(now - IDLE_FOLD_AFTER)),
     gte(conversations.updatedAt, new Date(now - IDLE_FOLD_UNTIL)),
@@ -775,7 +778,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
     agents: await agentsList(session.workspaceId).then(
-      (list) => ["Your agents (`emplio hand <name>`):", ...(list.length ? list : ["(none yet)"])].join("\n"),
+      (list) => [AGENTS_HEADING, ...(list.length ? list : ["(none yet)"])].join("\n"),
       (error) => (log.error(error, "listing agents failed"), "Your agents: unavailable right now; emplio agents list"),
     ),
     threads: await threadsNote({ workspaceId: ctx.workspaceId, userId: ctx.userId }, id, job?.caller ?? EMPLIO).catch((error) => (log.error(error, "listing threads failed"), "")),
@@ -907,7 +910,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     async *execute({ description, command, background, step }, { abortSignal }) {
       // counted as it starts: several commands in one step run side by side
       const nth = notCounted(command) ? 0 : ++byHand;
-      const refused = !caller.jobId && !automation && nth > MAX_BY_HAND;
+      const refusedWith = !caller.jobId && !automation ? refusal(command, nth) : null;
+      const refused = !!refusedWith;
       if (!refused) steps.push(description);
       record({
         workspaceId: ctx.workspaceId,
@@ -919,9 +923,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       });
       if (refused) {
         // through the failure guard, so a run that keeps pushing against the limit loses its commands and has to write
-        const result = { exitCode: 2, output: TOO_MANY, refused };
+        const result = { exitCode: 2, output: refusedWith, refused };
         const note = guard.check(command, result);
-        yield note ? { ...result, output: `${TOO_MANY}\n\n${note}` } : result;
+        yield note ? { ...result, output: `${refusedWith}\n\n${note}` } : result;
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {
@@ -1069,7 +1073,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       const seen = isWatched(id);
       void store(responseMessage)
         .then(async () => {
-          if (seen) return;
+          // a reply that says nothing ([SILENT], after a job's report) neither marks the chat nor buzzes their phone
+          if (seen || answer.includes(SILENT)) return;
           await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
           // they left before it finished; background work speaks up through post(), Telegram replies arrive on Telegram
           if (answer && !automation && !job && via !== "telegram" && !stopper.signal.aborted) void pushTo(ctx.userId, answer, id);

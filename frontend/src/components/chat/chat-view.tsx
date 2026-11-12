@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -11,6 +11,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
   PaperclipIcon,
@@ -21,6 +22,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -41,13 +43,14 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Spinner } from "@/components/ui/spinner";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing } from "@/components/chat/tool-calls";
 import { ChatSendContext } from "@/components/chat/connect-card";
 import { ReplyContext } from "@/components/chat/ask-card";
-import { BrowserChip, BrowserPanel, BrowserProvider, useLiveBrowser } from "@/components/chat/browser-panel";
+import { BrowserChip, BrowserPanel, BrowserProvider, keepPanel, useLiveBrowser, type BrowserTab } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
@@ -342,7 +345,35 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   useEffect(() => {
     if (job) void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   }, [job, status, queryClient]);
-  const browser = useLiveBrowser(id, messages);
+  // its agents at work (a strip over the message box) and their browsers: Emplio has none of its own, so theirs show
+  // here, a tab each, the first time each opens
+  const { data: working = [] } = useQuery({
+    queryKey: ["working", id],
+    queryFn: () => api<WorkingJob[]>(`/conversations/${id}/working`),
+    enabled: !job,
+    refetchInterval: 5_000,
+  });
+  const agentBrowsers = useMemo<BrowserTab[]>(() => working.filter((w) => w.browser).map((w) => ({ chatId: w.chatId, name: w.agent })), [working]);
+  const [tab, setTab] = useState<string | null>(null);
+  const seenTabs = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    // ponytail: browsers already open when the chat loads don't pop up; a new one does
+    const first = !seenTabs.current;
+    seenTabs.current ??= new Set();
+    for (const b of agentBrowsers) {
+      if (seenTabs.current.has(b.chatId)) continue;
+      seenTabs.current.add(b.chatId);
+      if (first) continue;
+      keepPanel(b.chatId, true);
+      setTab(b.chatId);
+    }
+  }, [agentBrowsers]);
+  const shownTab = agentBrowsers.find((b) => b.chatId === tab)?.chatId ?? agentBrowsers[0]?.chatId;
+  const pickTab = useCallback((chatId: string) => {
+    keepPanel(chatId, true);
+    setTab(chatId);
+  }, []);
+  const browser = useLiveBrowser(shownTab ?? id, messages);
   // a file the AI made, open in the side panel; one panel at a time: the browser showing puts the file away
   const [openFile, setOpenFile] = useState<Shown | null>(null);
   const showFile = useCallback((f: Shown) => {
@@ -782,15 +813,22 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       [TASK_PREFIX, "Task started"],
     ];
     // and a skill review's note of what it saved, as one line
+    // which work: each report opens `<id> "<name>" (<agent>): <status>, N actions` (backend jobs.ts)
+    const finished = text.startsWith(JOBS_DONE_PREFIX) ? [...text.matchAll(/^[0-9a-f]{4,} "(.+)"(?: \((.+?)\))?: \w+, \d+ actions$/gm)].map(([, name, agent]) =>
+          // a job that carried on keeps its first name, so the agent says whose it was
+          agent ? `${agent.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}: ${name}` : name,
+        ) : [];
     const divider =
       message.role === "user"
-        ? (DIVIDERS.find(([p]) => text.startsWith(p!))?.[1] ?? null)
+        ? finished.length
+          ? `Work finished: ${finished.join(", ")}`
+          : (DIVIDERS.find(([p]) => text.startsWith(p!))?.[1] ?? null)
         : text.startsWith(LEARNED_PREFIX) && `Learned: ${text.slice(LEARNED_PREFIX.length).split("\n")[0]}`;
     const line = (label: string, key?: string, id?: string) => (
       <div key={key} id={id} className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span className="h-px flex-1 bg-border" />
-        {label}
-        <span className="h-px flex-1 bg-border" />
+        <span className="h-px min-w-6 flex-1 bg-border" />
+        <span className="max-w-[80%] truncate">{label}</span>
+        <span className="h-px min-w-6 flex-1 bg-border" />
       </div>
     );
     if (divider) return line(stamp ? `${divider} · ${stamp}` : divider, message.id, `m-${message.id}`);
@@ -969,6 +1007,26 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const composer = (
     <div className="relative">
       {skillMenu.menu ?? mentionMenu.menu}
+      {/* what's still going, however far up it was asked: each opens its chat */}
+      {working.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1">
+          {working.map((w) => (
+            <Link
+              key={w.id}
+              href={`/chat/${w.chatId}`}
+              className="flex min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
+              <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
+              {w.status === "working" ? (
+                <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
+              ) : (
+                <span className="min-w-0 flex-1 truncate">· has a question about {w.name}</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
     <PromptInput
       onSubmit={({ text }) => send(text)}
       className="rounded-2xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
@@ -1206,7 +1264,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             </>
           )}
         </div>
-        <BrowserPanel />
+        <BrowserPanel tabs={agentBrowsers} active={shownTab} onPick={pickTab} />
         <FilePanel file={browser.open ? null : openFile} onClose={() => setOpenFile(null)} />
       </div>
     </ApprovalsContext>

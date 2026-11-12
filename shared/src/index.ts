@@ -491,6 +491,9 @@ export const splitRef = (ref: string) => {
   return { id: id!, run };
 };
 
+// A job still at work for a chat, or waiting on an answer (GET /conversations/:id/working)
+export type WorkingJob = { id: string; chatId: string; name: string; agent: string; status: "working" | "asking"; browser: boolean };
+
 export type JobInfo = {
   id: string;
   name: string;
