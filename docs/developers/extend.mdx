@@ -68,13 +68,23 @@ A run is a new chat, as whoever last saved the file, who must be the owner or an
 
 ## An MCP server
 
-Remote servers only, over Streamable HTTP or SSE. Add one in **Integrations**, or have Emplio run:
+Remote servers, over Streamable HTTP or SSE, or a program on your Mac (below). Add one in **Integrations**, or have Emplio run:
 
 ```bash
 emplio mcp add acme https://mcp.example.com/mcp --header "X-Api-Key: {{ACME_KEY}}"
 ```
 
 A header value of `{{NAME}}` is each person's own saved key, so tokens never enter the computer. `--key` asks each person for their own token. A server that wants its own sign-in gets one per person, through a **Sign in** button in the chat. Tools not marked read-only ask for an OK first.
+
+### A program on your Mac
+
+Some servers are programs you install and run yourself. With the Emplio Mac app open, add one with its command:
+
+```bash
+emplio mcp add logic-pro --local "LogicProMCP"
+```
+
+The app starts the program when Emplio needs it and passes its messages along; Emplio's server is still the MCP client. The first time, the app asks you on your Mac before running the command. Only the person who added it can use it, and only while the app is open and connected. It starts fresh for each use.
 
 <Columns cols={2}>
   <Card title="The emplio command" icon="terminal" href="/developers/cli">

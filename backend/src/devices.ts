@@ -34,6 +34,8 @@ export type Conn = {
   pending: Map<number, Waiting>;
   // browser messages going back out, by connection id
   cdp: Map<string, { data: (text: string) => void; closed: () => void }>;
+  // a local MCP server's messages going back out, by key (mcp.ts)
+  mcp: Map<string, { data: (text: string) => void; closed: (reason?: string) => void }>;
   alive: boolean;
   since: number;
 };
@@ -78,13 +80,15 @@ function drop(conn: Conn) {
   conn.pending.clear();
   for (const c of conn.cdp.values()) c.closed();
   conn.cdp.clear();
+  for (const c of conn.mcp.values()) c.closed("the computer went offline");
+  conn.mcp.clear();
   for (const fn of goneListeners) fn(conn.id);
 }
 
 // A device that has connected. A second connection from the same device replaces the first.
 export function attach(device: { id: string; userId: string; name: string; platform?: string }, socket: Socket, now = Date.now()): Conn {
   const old = online.get(device.id);
-  const conn: Conn = { ...device, socket, next: 0, pending: new Map(), cdp: new Map(), alive: true, since: now };
+  const conn: Conn = { ...device, socket, next: 0, pending: new Map(), cdp: new Map(), mcp: new Map(), alive: true, since: now };
   online.set(device.id, conn);
   if (old) {
     drop(old);
@@ -117,6 +121,10 @@ export function attach(device: { id: string; userId: string; name: string; platf
     else if (m.ev === "cdp.closed") {
       conn.cdp.get(m.conn)?.closed();
       conn.cdp.delete(m.conn);
+    } else if (m.ev === "mcp.data") conn.mcp.get(m.key)?.data(String(m.data));
+    else if (m.ev === "mcp.closed") {
+      conn.mcp.get(m.key)?.closed(m.e ? String(m.e) : undefined);
+      conn.mcp.delete(m.key);
     }
   });
   socket.on("close", () => {

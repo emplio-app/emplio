@@ -4,13 +4,14 @@
 import { rmSync, readdirSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { BrowserWindow, Menu, Notification, Tray, app, autoUpdater, ipcMain, nativeImage, powerMonitor, safeStorage, shell } from "electron";
+import { BrowserWindow, Menu, Notification, Tray, app, autoUpdater, dialog, ipcMain, nativeImage, powerMonitor, safeStorage, shell } from "electron";
 import { Boxes } from "./box.js";
 import { Browsers, fetchChrome, findChrome } from "./chrome.js";
 import { Panes } from "./pane.js";
 import { overdue } from "./sweep.js";
 import { loadConfig } from "./config.js";
 import { Link } from "./link.js";
+import { LocalMcp } from "./mcp.js";
 import { Updater } from "./update.js";
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -67,9 +68,27 @@ const whose = (id) => (panes.has(id) ? panes : browsers);
 const appUrl = () => new URL(arg("url") ?? process.env.EMPLIO_URL ?? config.appUrl ?? DEFAULT_URL);
 const appOrigin = () => appUrl().origin;
 
+// local MCP servers: programs the server talks to through this app (mcp.js); a new command needs the person's OK
+const localMcp = new LocalMcp({
+  allowed: () => config?.mcpAllowed ?? [],
+  remember: (command) => ((config.mcpAllowed = [...(config.mcpAllowed ?? []), command]), config.save()),
+  emit: (m) => link.send(m),
+  ask: async (command) =>
+    (
+      await dialog.showMessageBox({
+        type: "question",
+        message: "Emplio wants to run a program on this Mac",
+        detail: `${command}\n\nOnly allow it if you set it up. Emplio will run it again later without asking.`,
+        buttons: ["Don't allow", "Allow"],
+        defaultId: 0,
+        cancelId: 0,
+      })
+    ).response === 1,
+});
+
 // --- what the server may ask of this computer -------------------------------------------------------------
 const link = new Link({
-  onState: (s) => setState(s),
+  onState: (s) => (setState(s), s !== "online" && localMcp.closeAll()),
   // the server gives work only to a computer that says it's a Mac or Windows PC: a PC until its fence holds says otherwise
   platform: () => (boxes.ready ? process.platform : `${process.platform}-getting-ready`),
   handlers: {
@@ -114,6 +133,9 @@ const link = new Link({
     },
     note(method, p) {
       if (method === "cancel") boxes.cancel(p.id);
+      else if (method === "mcp.open") void localMcp.open(p);
+      else if (method === "mcp.send") localMcp.send(p);
+      else if (method === "mcp.close") localMcp.close(p);
       else if (method === "cdp.open") {
         const to = whose(p.key);
         driving.set(p.conn, to);
