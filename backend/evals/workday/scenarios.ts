@@ -52,11 +52,10 @@ export const scenarios = (): Scenario[] => [
       },
       // answered in the chat from the reports it has, without opening the sheet
       { person: "which one is cheapest per metre?", expect: { none: true, tell: ["om weaves"], own: 0 } },
-      // a new file is work, even a summary of the jobs' own results
-      {
-        person: "make a one-page summary document comparing the three suppliers, with your pick",
-        expect: { hand: [{ agent: ["Supplier Finder", "Report Maker"] }], own: 1 },
-      },
+      // a report pulled together from what the jobs reported is Emplio's own, saved in a step or two
+      { person: "make a one-page summary document comparing the three suppliers, with your pick", expect: { none: true, own: 2 } },
+      // a change to a job's file, with something its report doesn't have: back to that job
+      { person: "add each supplier's GST number to the sheet", expect: { hand: [{ agent: ["Supplier Finder"], cont: true, say: ["gst"] }], own: 1 } },
     ],
   },
   {
@@ -78,7 +77,12 @@ export const scenarios = (): Scenario[] => [
         },
         expect: { none: true, tell: ["22|18"] },
       },
-      { person: "on how many are we dearer?", expect: { none: true, tell: ["18"] } },
+      { person: "on how many are we dearer?", expect: { none: true, tell: ["18"], own: 1 } },
+      // new work across the sheet's data: not Emplio's to grind through
+      {
+        person: "for the 18 where we're dearer, work out what price would make us the cheapest, and add it as a column",
+        expect: { hand: [{ agent: ["Price Checker", "Report Maker"] }], own: 1 },
+      },
     ],
   },
   {

@@ -14,7 +14,7 @@ const app = () => (loaded ??= (async () => [await import("../emplio"), await imp
 
 type Job = { id: string; agent: string | null; name: string; status: "working" | "done" | "asking"; brief: string };
 type Route = { agent: string; job: string; cont: boolean; brief: string };
-export type StepResult = { step: number; ok: boolean; why: string[]; routes: Route[]; byHand: number; browser: boolean; said: string; usage?: { input: number; output: number; cost: number } };
+export type StepResult = { step: number; ok: boolean; why: string[]; routes: Route[]; byHand: number; browser: boolean; said: string; commands?: string[]; usage?: { input: number; output: number; cost: number } };
 type Input = { scenario: Scenario; carriesOn: boolean };
 type Output = { steps: StepResult[] };
 
@@ -104,6 +104,8 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
         if (/\bemplio browser\b/.test(command.split("<<")[0]!)) browser = true;
         const refused = refusal(command, nth);
         if (refused) return refused;
+        // what Emplio writes itself is there afterwards too
+        if (/<<|>|open\(|\.save\(/.test(command)) made.push(...(command.match(/\/work\/out\/[\w.-]+\.\w+/g) ?? []));
         const result = [look(command) ?? pretend(command), skillNote(nth, command)].filter(Boolean).join("\n\n");
         return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
       },
@@ -112,7 +114,7 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
     chat = [...chat, person(message), ...(said.messages ?? [{ role: "assistant", content: said.text }])];
     // what the person sees: its words, and the questions it put on cards
     const shown = [said.text, ...said.commands.filter((c) => /\bemplio ask\b/.test(c))].join("\n");
-    steps.push({ step: i + 1, ...check(step.expect, routes, shown, said.text, byHand), routes, byHand, browser, said: shown.slice(0, 400), usage: said.usage });
+    steps.push({ step: i + 1, ...check(step.expect, routes, shown, said.text, byHand), routes, byHand, browser, said: shown.slice(0, 400), commands: said.commands.map((c) => c.slice(0, 200)), usage: said.usage });
   }
   return { steps };
 }
