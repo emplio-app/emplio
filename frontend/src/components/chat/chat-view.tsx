@@ -47,7 +47,7 @@ import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing } from "@/components/chat/tool-calls";
 import { ChatSendContext } from "@/components/chat/connect-card";
 import { ReplyContext } from "@/components/chat/ask-card";
-import { BrowserChip, BrowserPanel, BrowserProvider, useLiveBrowser } from "@/components/chat/browser-panel";
+import { BrowserChip, BrowserPanel, BrowserProvider, keepPanel, useLiveBrowser, type BrowserTab } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
@@ -342,7 +342,33 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   useEffect(() => {
     if (job) void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   }, [job, status, queryClient]);
-  const browser = useLiveBrowser(id, messages);
+  // Emplio has no browser of its own: its agents' browsers show here, a tab each, the first time each opens
+  const { data: agentBrowsers = [] } = useQuery({
+    queryKey: ["agent-browsers", id],
+    queryFn: () => api<BrowserTab[]>(`/conversations/${id}/agent-browsers`),
+    enabled: !job,
+    refetchInterval: 10_000,
+  });
+  const [tab, setTab] = useState<string | null>(null);
+  const seenTabs = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    // ponytail: browsers already open when the chat loads don't pop up; a new one does
+    const first = !seenTabs.current;
+    seenTabs.current ??= new Set();
+    for (const b of agentBrowsers) {
+      if (seenTabs.current.has(b.chatId)) continue;
+      seenTabs.current.add(b.chatId);
+      if (first) continue;
+      keepPanel(b.chatId, true);
+      setTab(b.chatId);
+    }
+  }, [agentBrowsers]);
+  const shownTab = agentBrowsers.find((b) => b.chatId === tab)?.chatId ?? agentBrowsers[0]?.chatId;
+  const pickTab = useCallback((chatId: string) => {
+    keepPanel(chatId, true);
+    setTab(chatId);
+  }, []);
+  const browser = useLiveBrowser(shownTab ?? id, messages);
   // a file the AI made, open in the side panel; one panel at a time: the browser showing puts the file away
   const [openFile, setOpenFile] = useState<Shown | null>(null);
   const showFile = useCallback((f: Shown) => {
@@ -1206,7 +1232,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             </>
           )}
         </div>
-        <BrowserPanel />
+        <BrowserPanel tabs={agentBrowsers} active={shownTab} onPick={pickTab} />
         <FilePanel file={browser.open ? null : openFile} onClose={() => setOpenFile(null)} />
       </div>
     </ApprovalsContext>

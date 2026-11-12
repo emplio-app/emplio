@@ -6,7 +6,7 @@ import type { UIMessage } from "ai";
 import { BotIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, TerminalIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { Fragment, type ReactNode, useState } from "react";
-import { BrowserChip, keepPanel } from "@/components/chat/browser-panel";
+import { BrowserChip } from "@/components/chat/browser-panel";
 import { ApprovalCard } from "@/components/chat/approval-card";
 import { AskCard } from "@/components/chat/ask-card";
 import { ConnectCard } from "@/components/chat/connect-card";
@@ -228,16 +228,6 @@ function Job({ id, run }: { id: string; run?: string }) {
           </span>
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
-        {/* Emplio has no browser of its own: its agents' run in their jobs, watched (and taken over) from here */}
-        {working && w?.chatId && actions.some((a) => a.browser) && (
-          <Link
-            href={`/chat/${w.chatId}`}
-            onClick={() => keepPanel(w.chatId!, true)}
-            className="block border-t px-3 py-1.5 text-xs font-medium text-foreground underline-offset-4 hover:underline"
-          >
-            Watch its browser →
-          </Link>
-        )}
         {open && (
           <div className="flex flex-col gap-1 border-t px-3 py-2 text-xs text-muted-foreground">
             {actions.map((a) => (

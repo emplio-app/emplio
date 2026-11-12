@@ -20,6 +20,7 @@ import { generateReply, lastWords, loadMessages, quiet, replyUntil, steer, steer
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
 import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agents";
+import { canReopen, liveView } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
 
@@ -323,7 +324,6 @@ function actionsIn(msgs: ChatMessages): Action[] {
             error: p.state === "output-error" || undefined,
             exitCode: p.output?.exitCode,
             saved: p.output?.saved,
-            browser: (p.output as { browser?: unknown } | undefined)?.browser ? true : undefined,
             connect: p.output?.connect,
             logins: p.output?.logins,
             approvals: p.output?.approvals,
@@ -772,6 +772,22 @@ export async function jobRoutes(app: FastifyInstance) {
     if (!w) return reply.code(404).send({ error: "Not found" });
     // ponytail: the name from its slug, not AGENT.md (polled every 1.5s); read the file if names drift from slugs
     return { id: w.id, name: w.name, agent: agentName(w.agent), chatId: w.chatId, ...(await runOf(w, req.query.run)) } satisfies JobInfo;
+  });
+
+  // the live browsers of the agents at work for this chat: tabs in its browser panel, so the person watches them
+  // from where they asked (Emplio has none of its own). Polled while the chat is open.
+  app.get<{ Params: { id: string } }>("/conversations/:id/agent-browsers", { schema: { params } }, async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const rows = await db
+      .select({ chatId: jobs.chatId, agent: jobs.agent, usedAt: conversations.browserUsedAt })
+      .from(jobs)
+      .innerJoin(conversations, eq(conversations.id, jobs.chatId))
+      .where(and(eq(jobs.conversationId, req.params.id), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId), eq(jobs.status, "working"), isNull(jobs.parentId)))
+      .orderBy(asc(jobs.createdAt));
+    // ponytail: one browser-service look per agent browsing now, every poll; a few at most
+    const live = await Promise.all(rows.filter((r) => canReopen(r.usedAt)).map(async (r) => ((await liveView(r.chatId!)) ? [{ chatId: r.chatId!, name: agentName(r.agent) ?? "Emplio" }] : [])));
+    return live.flat();
   });
 
   // the jobs the person opened as their own chat, nested in the sidebar under the chat they came from until closed

@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { startVoice } from "./show-voice";
 import { transcribe } from "./voice-input";
@@ -354,7 +355,10 @@ function VoiceWave({ level }: { level: () => number }) {
   );
 }
 
-export function BrowserPanel() {
+// The agents at work for this chat with a browser open (chat-view.tsx): one tab each, the shown one first.
+export type BrowserTab = { chatId: string; name: string };
+
+export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[]; active?: string; onPick?: (chatId: string) => void }) {
   const browser = useBrowser();
   const [control, setControl] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -407,7 +411,7 @@ export function BrowserPanel() {
         ) : (
           <>
             <GlobeIcon className="size-4 text-muted-foreground max-lg:hidden" />
-            <span className="text-sm font-medium">Browser</span>
+            <span className="truncate text-sm font-medium">{tabs.length > 1 ? "Browsers" : (tabs.find((t) => t.chatId === active)?.name ?? "Browser")}</span>
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <LiveDot />
               Live
@@ -459,6 +463,18 @@ export function BrowserPanel() {
           )}
         </div>
       </header>
+      {/* one tab per agent whose browser is open; its own row so the header's buttons never squeeze it */}
+      {tabs.length > 1 && onPick && !browser.showing && (
+        <Tabs value={active} onValueChange={(v) => onPick(String(v))} className="shrink-0 border-b px-3 py-2">
+          <TabsList className="max-w-full overflow-x-auto">
+            {tabs.map((t) => (
+              <TabsTrigger key={t.chatId} value={t.chatId} className="px-2.5 text-xs">
+                {t.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
       {browser.showing ? (
         <p className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {browser.mic === "on"
