@@ -420,6 +420,9 @@ export const tooOld = (w: Pick<Row, "status" | "finishedAt">, now = Date.now()) 
 
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
+// The heading of that list (the evals build the same note: evals/emplio.ts)
+export const AGENTS_HEADING = "Your agents (`emplio hand <name>`):";
+export const THREADS_HEADING = "Threads you can carry on with `emplio hand <id>`, latest first:";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   const rows = await db
     .select()
@@ -430,7 +433,7 @@ export async function threadsNote(who: Who, conversationId: string, caller: Call
   if (!rows.length) return "";
   const tz = await timezoneOf(who.userId);
   return [
-    "Threads you can carry on with `emplio hand <id>`, latest first:",
+    THREADS_HEADING,
     ...rows.map((w) => `- ${short(w.id)} · ${agentName(w.agent) ?? "myself"} · ${w.name} · ${w.status}${w.finishedAt ? `, ${when(w.finishedAt, tz)}` : ""}`),
   ].join("\n");
 }

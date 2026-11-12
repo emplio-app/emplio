@@ -45,7 +45,7 @@ import { slashCommand } from "./skills";
 import { allowedIn } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -85,6 +85,8 @@ export const commandLabel = z.preprocess((label) => label || "Running a command"
 // Handing off, and the checklist and bug reports around it, stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
 export const notCounted = (command: string) => /\bemplio (hand|threads|plan)\b/.test(command) || isReport(command);
+// Why a command Emplio runs in a reply to a person isn't run, or null: the server's limits (the evals replay this)
+export const refusal = (command: string, nth: number): string | null => (nth > MAX_BY_HAND ? TOO_MANY : null);
 export const TOO_MANY = `[Not run: that's ${MAX_BY_HAND} commands in this reply, the most you get. Hand off what's left now with \`emplio hand\`, saying what's done, what's left and where the files are. If nothing's left, or you need the person's answer, just write to them.]`;
 
 // How long the provider keeps a cached prompt: 5 minutes, or an hour at a dearer write (2x the input price, not
@@ -775,7 +777,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
     agents: await agentsList(session.workspaceId).then(
-      (list) => ["Your agents (`emplio hand <name>`):", ...(list.length ? list : ["(none yet)"])].join("\n"),
+      (list) => [AGENTS_HEADING, ...(list.length ? list : ["(none yet)"])].join("\n"),
       (error) => (log.error(error, "listing agents failed"), "Your agents: unavailable right now; emplio agents list"),
     ),
     threads: await threadsNote({ workspaceId: ctx.workspaceId, userId: ctx.userId }, id, job?.caller ?? EMPLIO).catch((error) => (log.error(error, "listing threads failed"), "")),
@@ -907,7 +909,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     async *execute({ description, command, background, step }, { abortSignal }) {
       // counted as it starts: several commands in one step run side by side
       const nth = notCounted(command) ? 0 : ++byHand;
-      const refused = !caller.jobId && !automation && nth > MAX_BY_HAND;
+      const refusedWith = !caller.jobId && !automation ? refusal(command, nth) : null;
+      const refused = !!refusedWith;
       if (!refused) steps.push(description);
       record({
         workspaceId: ctx.workspaceId,
@@ -919,9 +922,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       });
       if (refused) {
         // through the failure guard, so a run that keeps pushing against the limit loses its commands and has to write
-        const result = { exitCode: 2, output: TOO_MANY, refused };
+        const result = { exitCode: 2, output: refusedWith, refused };
         const note = guard.check(command, result);
-        yield note ? { ...result, output: `${TOO_MANY}\n\n${note}` } : result;
+        yield note ? { ...result, output: `${refusedWith}\n\n${note}` } : result;
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {

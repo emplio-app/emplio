@@ -6,6 +6,7 @@ import { MODEL_SETS } from "@emplio/shared";
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote } from "../src/chat";
 import { HEARTBEAT } from "../src/heartbeat";
+import { AGENTS_HEADING, THREADS_HEADING } from "../src/jobs";
 import { sandboxPrompt, type Session } from "../src/sandbox";
 import { DEFAULTS } from "../src/settings";
 
@@ -48,8 +49,8 @@ const note = (b: Business) =>
       channel: "They're in the web app.",
       date: "Today is Tuesday, 10 November 2026 (Asia/Kolkata time).",
       chats: "",
-      agents: ["Your agents (`emplio hand <name>`):", ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
-      threads: b.threads?.length ? ["Threads you can carry on with `emplio hand <id>`, latest first:", ...b.threads].join("\n") : "",
+      agents: [AGENTS_HEADING, ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
+      threads: b.threads?.length ? [THREADS_HEADING, ...b.threads].join("\n") : "",
     },
     [],
   )!.text;
