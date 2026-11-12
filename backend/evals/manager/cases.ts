@@ -113,7 +113,7 @@ export const cases = (): Case[] => [
     category: "follow",
     source: "written",
     business: team,
-    chat: [person("once october is done, chase september's unpaid ones the same way")],
+    chat: [person("chase september's unpaid ones too, the same way")],
     expect: { hand: true, agent: ["Invoice Chaser"], say: ["september"] },
   },
   // fresh
@@ -171,7 +171,8 @@ export const cases = (): Case[] => [
     category: "agent",
     source: "written",
     business: team,
-    chat: [person("our stock sheet has loads of duplicate items, merge them and fix the totals")],
+    chat: [person("our google sheet 'Stock 2026' has loads of duplicate items, merge them and fix the totals")],
+    world: [["googlesheets", "Stock 2026: 1,412 rows (Item, Qty, Updated); saved to /work/tmp/apps/stock.json"], ["stock\\.json", '[["Item","Qty","Updated"],["Cushion cover 16in teal",40,"2026-09-02"],\n… 1,410 more rows']],
     expect: { hand: true, say: ["duplicate"] },
   },
   {
@@ -179,6 +180,7 @@ export const cases = (): Case[] => [
     category: "agent",
     source: "written",
     chat: [person("read the last month of customer emails and list every complaint with what we did about it")],
+    world: [["gmail", '212 emails in the last month. The first 3:\n{"id":"m1","from":"anita@example.com","subject":"Wrong colour delivered"}\n{"id":"m2","from":"orders@delhivery.example","subject":"Pickup scheduled"}\n{"id":"m3","from":"rohan.mehta@example.com","subject":"Cushion covers torn at the seam"}\n(209 more: the next page with {"page": 2}; one mail in full with gmail.get_message)']],
     expect: { hand: true, agent: ["new"], say: ["complaint"] },
   },
   // browser
@@ -311,9 +313,9 @@ export const cases = (): Case[] => [
     chat: [
       person("post a reply on the r/pune thread asking where to buy curtains"),
       emplio('Here\'s the draft: "Kaveri in Aundh has a good range, try them." Post it?'),
-      person("no, say we deliver across pune and add the website link"),
+      person("no, say we deliver across pune and add kaveri.example, then post it"),
     ],
-    expect: { hand: true, agent: ["Community Manager"], cont: true, say: ["across pune", "link|website"] },
+    expect: { hand: true, agent: ["Community Manager"], cont: true, say: ["across pune", "kaveri\\.example"] },
   },
   // quick
   {
