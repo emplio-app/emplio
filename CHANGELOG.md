@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.19 (2026-11-13)
+
+### What's new
+
+- We now count who downloads the Emplio desktop app, and for which computer, so we know where to put our effort next.
+- Groundwork for Emplio on Linux: the app can now be built for Linux. It isn't on the downloads page yet.
+
+### For developers
+
+- `DownloadButton` sends `app_downloaded` (platform, from) to PostHog and `POST /downloads` to the cloud, which keeps an `app_downloads` row with the signed-in user (#101).
+- `/download/[platform]` passes through any desktop app the backend serves (`mac`, `linux`).
+- `desktop`: `npm run linux` packs `out/Emplio-linux-x64.tar.gz`. Only a Mac gets Emplio's commands and browser (`deviceFor(userId, true)`); a Linux computer gets notifications only.
+
 ## 1.2.18 (2026-11-13)
 
 ### What's new

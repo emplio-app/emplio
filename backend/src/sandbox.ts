@@ -782,7 +782,7 @@ export function sandboxPrompt(s: Session) {
   // a check-in, automation or task: nobody is watching, so nothing that needs them to click or answer
   const bg = !!(s.automation || s.task);
   return `## Your computer
-${deviceFor(s.user.id) ? `Your own computer, through the bash tool: ${name}'s own Mac right now (macOS, not Linux: bash 3.2, the Mac versions of sed, date, stat and find, no apt-get or sudo; \`brew\` only if it is installed). Everything you do happens inside /work: never change anything outside it, and never look through ${name}'s other files unless they ask. When their Mac is closed or asleep your commands run on a cloud Linux computer instead, with the same /work files as of the last save.` : "Your own Linux computer, through the bash tool."} It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
+${deviceFor(s.user.id, true) ? `Your own computer, through the bash tool: ${name}'s own Mac right now (macOS, not Linux: bash 3.2, the Mac versions of sed, date, stat and find, no apt-get or sudo; \`brew\` only if it is installed). Everything you do happens inside /work: never change anything outside it, and never look through ${name}'s other files unless they ask. When their Mac is closed or asleep your commands run on a cloud Linux computer instead, with the same /work files as of the last save.` : "Your own Linux computer, through the bash tool."} It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
 
 Folders:
 - /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skills/, agents/ (your specialists: change them with emplio agents), tools/, automations/, knowledge/, inbox/
@@ -1021,7 +1021,7 @@ async function localBoxFor(conn: Conn, s: Session): Promise<Box> {
 }
 
 async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
-  const mine = deviceFor(s.user.id);
+  const mine = deviceFor(s.user.id, true);
   if (mine) {
     try {
       return await localBoxFor(mine, s);
@@ -1065,7 +1065,7 @@ async function sandboxFor(s: Session): Promise<Box> {
   const awakeFor = serving.has(boxKey(s)) ? SERVE_MS : IDLE_MS;
   // The person's own computer whenever it's connected, the cloud's whenever it isn't: a box of the other kind is let go
   // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
-  const mine = deviceFor(s.user.id);
+  const mine = deviceFor(s.user.id, true);
   const right = known && (known.local ? !!mine && known.id.startsWith(`local:${mine.id}:`) : !mine);
   if (known && right && (await known.keepAwake(awakeFor).then(() => true, () => false))) {
     if (!known.local) meter(s, awakeFor);

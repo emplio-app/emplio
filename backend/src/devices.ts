@@ -26,6 +26,9 @@ export type Conn = {
   id: string;
   userId: string;
   name: string;
+  // the app's process.platform. Only a Mac ("darwin") does Emplio's work (commands and browser); a Linux one just shows
+  // notifications, until commands there get a fence like the Mac's (desktop/src/box.js) and its browser's downloads reach the cloud computer
+  platform?: string;
   socket: Socket;
   next: number;
   pending: Map<number, Waiting>;
@@ -51,10 +54,11 @@ const goneListeners: ((deviceId: string) => void)[] = [];
 // told when a device drops off (browser.ts forgets its browsers)
 export const onGone = (fn: (deviceId: string) => void) => void goneListeners.push(fn);
 
-// This person's computer, if one of theirs is connected now (the newest if several).
-export function deviceFor(userId: string): Conn | undefined {
+// This person's computer, if one of theirs is connected now (the newest if several); `work`: one that runs commands and a browser.
+export function deviceFor(userId: string, work = false): Conn | undefined {
   let found: Conn | undefined;
-  for (const c of online.values()) if (c.userId === userId && c.alive && (!found || c.since > found.since)) found = c;
+  for (const c of online.values())
+    if (c.userId === userId && c.alive && (!work || c.platform === "darwin") && (!found || c.since > found.since)) found = c;
   return found;
 }
 export const deviceById = (id: string) => online.get(id);
@@ -76,7 +80,7 @@ function drop(conn: Conn) {
 }
 
 // A device that has connected. A second connection from the same device replaces the first.
-export function attach(device: { id: string; userId: string; name: string }, socket: Socket, now = Date.now()): Conn {
+export function attach(device: { id: string; userId: string; name: string; platform?: string }, socket: Socket, now = Date.now()): Conn {
   const old = online.get(device.id);
   const conn: Conn = { ...device, socket, next: 0, pending: new Map(), cdp: new Map(), alive: true, since: now };
   online.set(device.id, conn);
