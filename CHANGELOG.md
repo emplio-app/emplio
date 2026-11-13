@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.33 (2026-11-13)
+
+### What's new
+
+- When Emplio uses the browser on your Mac or PC, you can now watch it live on the website too, not only in the app.
+- Taking control of that browser from the website now clicks where you point, even while the app is showing the same browser.
+- In the Mac and Windows apps, dialogs, menus, popovers and tooltips now show on top of Emplio's browser instead of hiding behind it.
+
+### For developers
+
+- `liveUrlOf` builds the live view link from the same public address as the rest of the device links (`apiBase`: `PUBLIC_API_URL`, else `WEBHOOK_URL`), so a server with only `WEBHOOK_URL` set no longer hands out a `localhost` link (#111).
+- The live view sends frame sizes in the page's CSS pixels (screencast size divided by `cssVisualViewport.zoom`): the desktop app zooms its browser to fit its panel, and clicks were placed in screen pixels, landing short (#111).
+- `browser-panel.tsx`: the desktop browser steps aside while any open Base UI floating part (`[data-open]`, fixed or absolute) overlaps it, checked at once on open through a MutationObserver. The old check looked for Radix's `data-state="open"`, which Base UI doesn't set (#111).
+
 ## 1.2.32 (2026-11-13)
 
 ### What's new

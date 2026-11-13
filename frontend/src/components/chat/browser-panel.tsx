@@ -364,6 +364,19 @@ function VoiceWave({ level }: { level: () => number }) {
 // The agents at work for this chat with a browser open (chat-view.tsx): one tab each, the shown one first.
 export type BrowserTab = { chatId: string; name: string };
 
+// The desktop app draws its real browser in a layer of its own over the whole page, so nothing in the page can be
+// drawn on top of it: while an open dialog, menu, popover, select or tooltip overlaps it, it steps aside. Base UI
+// marks each open one with data-open; floating ones are fixed or absolute (themselves or the positioner around them),
+// which leaves out open accordions and collapsibles in the page itself.
+const floating = (el: Element | null) => !!el && /^(fixed|absolute)$/.test(getComputedStyle(el).position);
+export function coversBrowser(r: DOMRect) {
+  return [...document.querySelectorAll("[data-open]")].some((el) => {
+    if (!floating(el) && !floating(el.parentElement)) return false;
+    const o = el.getBoundingClientRect();
+    return o.width > 0 && o.height > 0 && o.left < r.right && o.right > r.left && o.top < r.bottom && o.bottom > r.top;
+  });
+}
+
 export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[]; active?: string; onPick?: (chatId: string) => void }) {
   const browser = useBrowser();
   const [control, setControl] = useState(false);
@@ -389,8 +402,7 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
       const css = getComputedStyle(document.documentElement);
       const skin = Object.fromEntries(["popover", "popover-foreground", "border", "primary", "primary-foreground", "muted-foreground"].map((k) => [k, css.getPropertyValue(`--${k}`).trim()]));
       const r = holder.current?.getBoundingClientRect();
-      // a dialog open anywhere in the page: the real browser is drawn over the page, so it steps aside
-      const spot = { chat, x: r?.x ?? 0, y: r?.y ?? 0, width: r?.width ?? 0, height: r?.height ?? 0, visible: wanted && !!r && !document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'), control: inControl, skin };
+      const spot = { chat, x: r?.x ?? 0, y: r?.y ?? 0, width: r?.width ?? 0, height: r?.height ?? 0, visible: wanted && !!r && !coversBrowser(r), control: inControl, skin };
       const text = JSON.stringify(spot);
       if (text === last) return;
       last = text;
@@ -400,8 +412,12 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
     // the panel slides in and is dragged wider: look again as it moves
     const timer = setInterval(report, 200);
     window.addEventListener("resize", report);
+    // a menu or dialog opening: step aside at once, not up to 200ms later with the menu hidden under the browser
+    const opened = new MutationObserver(report);
+    opened.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-open"] });
     return () => {
       clearInterval(timer);
+      opened.disconnect();
       window.removeEventListener("resize", report);
       pane.show({ chat, x: 0, y: 0, width: 0, height: 0, visible: false, control: false });
     };
