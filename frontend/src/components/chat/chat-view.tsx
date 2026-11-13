@@ -1158,12 +1158,13 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           </header>
 
           {empty ? (
-            <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-[10vh]">
-              <div className="w-full max-w-2xl">
-                <h2 className="mb-2 text-center text-3xl font-semibold sm:text-4xl">
+            <div className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-6 sm:pb-[10vh]">
+              {/* my-auto, not justify-center: centred when it fits, scrolls from the top when it doesn't */}
+              <div className="my-auto w-full max-w-2xl">
+                <h2 className="mb-1.5 text-center text-2xl font-semibold sm:mb-2 sm:text-4xl">
                   {greeting()}, {firstName}
                 </h2>
-                <p className="mb-8 text-center text-muted-foreground">What can I take off your plate today?</p>
+                <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
                 {composer}
                 {!job && <JobCards onPick={send} />}
               </div>
