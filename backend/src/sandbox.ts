@@ -731,7 +731,12 @@ PY
   ask)
     shift
     # a heredoc is there to read at once; stdin left open with nothing in it isn't, so this never waits on nothing
-    read -t 0 2>/dev/null && set -- --text "$(timeout 2 cat)" "$@"
+    # ponytail: line reads with a 1 s wait each, not read -t 0 + timeout: a Mac has bash 3.2 and no timeout command
+    if [ ! -t 0 ]; then
+      text=; line=
+      while IFS= read -r -t 1 line || [ -n "$line" ]; do text="$text$line"$'\\n'; line=; done
+      [ -n "$text" ] && set -- --text "$text" "$@"
+    fi
     req ASK "$@" ;;
   history)
     shift
