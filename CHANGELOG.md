@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.18 (2026-11-13)
+
+### What's new
+
+- A new chat on your phone now fits the screen: the starting jobs are a row of topics you swipe through, with three ideas under each, and everything sits centred.
+- The ideas change through the day and from day to day, and "Show other ideas" gives you a fresh set.
+
+### For developers
+
+- `JobCards` in `first-run.tsx` is now category pills plus three jobs from a few per category, ordered by hour and rotated by day of year (#98).
+- The empty chat centres with `my-auto` so tall content scrolls from the top.
+
 ## 1.2.17 (2026-11-13)
 
 ### What's new
