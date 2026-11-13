@@ -123,7 +123,7 @@ Most agents work for one person. Emplio works for a company, and that shows up i
 - **Talk to it:** the web app, a Telegram bot, desktop apps for Mac, Windows and Linux, and an iPhone app for [Emplio Cloud](https://emplio.app). Voice notes are turned into text.
 - **Apps:** our own integrations for GitHub, Slack, Zoom, Notion, HubSpot, Stripe, Razorpay, Google Calendar, Docs, Sheets, Meet, Search Console, Analytics and Business Profile, Zoho Mail, Books and Invoice, and more in [`integrations/own`](backend/src/integrations/own). Gmail, Outlook, Google Drive, OneDrive, Teams, WhatsApp and LinkedIn still go through [Composio](https://composio.dev).
 - **MCP:** any remote MCP server over Streamable HTTP or SSE. A header like `{{ACME_KEY}}` is filled from each person's own saved key on the server, so the token never enters the computer.
-- **Models:** anything on OpenRouter. Settings has three presets (Save money, Default, Best quality), or you pick a model for chat, for agents and for background work yourself.
+- **Models:** anything on OpenRouter. Settings has three presets (Standard, Smarter, Best), or you pick a model for chat, for agents and for background work yourself.
 
 ## Security
 

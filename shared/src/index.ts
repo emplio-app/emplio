@@ -238,12 +238,13 @@ export const SETTING_FIELDS = [
     label: "Quality",
     help: "Better models handle harder jobs but cost more.",
     type: "choice",
-    default: "default",
+    // the values are what's stored, so they keep their old names: "save" is Standard, "default" is Smarter
+    default: "save",
     options: [
       { value: "free", label: "Free", hint: "Free models. Often busy or wrong, and their makers may keep your data." },
-      { value: "save", label: "Save money", hint: "Claude Haiku. Cheapest paid option, fine for simple jobs." },
-      { value: "default", label: "Default", hint: "Claude Sonnet for chats, Haiku for background and handed-off work. Reliable for most work." },
-      { value: "best", label: "Best quality", hint: "Claude Opus for chats, Sonnet for background and handed-off work. About twice the cost of Default." },
+      { value: "save", label: "Standard", hint: "Claude Haiku for everything. Fast, and the cheapest paid option. Fine for most everyday work." },
+      { value: "default", label: "Smarter", hint: "Claude Sonnet for chats, Haiku for background and handed-off work. Better at harder jobs, costs more." },
+      { value: "best", label: "Best", hint: "Claude Opus for chats, Sonnet for background and handed-off work. About twice the cost of Smarter." },
     ],
   },
   {
