@@ -18,6 +18,16 @@ contextBridge.exposeInMainWorld("emplioDesktop", {
       return () => ipcRenderer.removeListener("emplio:pane-take", on);
     },
   },
+  // a new version of the app is downloaded and waiting: the page shows its update bar, and Update restarts into it
+  update: {
+    ready: () => ipcRenderer.invoke("emplio:update-ready"),
+    onReady: (listener) => {
+      const on = () => listener();
+      ipcRenderer.on("emplio:update-ready", on);
+      return () => ipcRenderer.removeListener("emplio:update-ready", on);
+    },
+    restart: () => ipcRenderer.invoke("emplio:update-restart"),
+  },
   // a tapped notification: open this path (a chat) in the page
   onOpen: (listener) => {
     const on = (_event, path) => listener(path);

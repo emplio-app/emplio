@@ -299,6 +299,13 @@ ipcMain.on("emplio:pane", (event, spot) => {
   const n = (v) => (Number.isFinite(v) ? v : 0);
   panes.show({ chat: spot.chat, x: n(spot.x), y: n(spot.y), width: n(spot.width), height: n(spot.height), visible: spot.visible === true, control: spot.control === true, skin: Object.fromEntries(Object.entries(spot.skin ?? {}).filter(([k, v]) => /^[a-z-]+$/.test(k) && typeof v === "string" && v.length < 80 && !/[;{}]/.test(v))) });
 });
+// the app's own update, for the page's update bar (the menu has Restart to update too, for when the window is closed)
+ipcMain.handle("emplio:update-ready", (event) => fromEmplio(event) && !!updater?.ready);
+ipcMain.handle("emplio:update-restart", (event) => {
+  if (!fromEmplio(event) || !updater?.ready) return false;
+  restart(false);
+  return true;
+});
 // the pane is the page's to ask about: is this the desktop app with a browser of its own
 ipcMain.handle("emplio:pane-ready", (event) => fromEmplio(event));
 
@@ -353,7 +360,7 @@ app.whenReady().then(() => {
   }
   // the app keeps itself up to date (update.js): a new version goes in once nothing is going on
   if (app.isPackaged) {
-    updater = new Updater({ api: config.apiUrl ?? "https://api.emplio.app", version: app.getVersion(), onReady: buildMenu, autoUpdater });
+    updater = new Updater({ api: config.apiUrl ?? "https://api.emplio.app", version: app.getVersion(), onReady: () => (buildMenu(), win?.isDestroyed() || win?.webContents.send("emplio:update-ready")), autoUpdater });
     updater.start();
     setInterval(() => updater.ready && idle() && restart(true), 5 * 60_000).unref();
   }
