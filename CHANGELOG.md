@@ -8,11 +8,13 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 - The Emplio Mac app now opens without any "damaged" warning: it is signed and checked by Apple.
 - In the Mac app, Emplio's browser steps aside while a window such as Settings is open, so nothing is hidden behind it.
+- The Mac app has Back and Forward buttons next to the window's red, yellow and green buttons.
 
 ### For developers
 
 - `npm run dmg` in `desktop/` signs with the Developer ID, turns on the hardened runtime, notarizes and staples the app and the DMG (`build/sign-notarize.sh`, `build/entitlements.plist`); credentials come from the `emplio-notary` keychain profile (#88).
 - The browser panel tells the app to hide the pane while a dialog or alert dialog is open (#95).
+- Back and forward buttons beside the traffic lights in the Mac app, from the Navigation API (`components/desktop-history.tsx`).
 
 ## 1.2.15 (2026-11-13)
 
