@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { folderName, localPath, toLocal, toRemote } from "./paths.js";
+import { folderName, localPath, shellPath, toLocal, toRemote } from "./paths.js";
 
 const work = "/Users/me/Emplio/acme-1a2b3c4d/work";
 
@@ -20,6 +20,13 @@ test("a path from the server stays inside the folder", () => {
   expect(() => localPath(work, "/work/../.ssh/id_rsa")).toThrow();
   expect(() => localPath(work, "/etc/passwd")).toThrow();
   expect(() => localPath(work, "/workspace/x")).toThrow();
+  // the real folder's own path, as a command printed it
+  expect(localPath(work, `${work}/out/a.pdf`)).toBe(`${work}/out/a.pdf`);
+  expect(() => localPath(work, `${work}/../x`)).toThrow();
+});
+
+test("a Windows path as Git Bash writes it", () => {
+  expect(shellPath("C:\\Users\\Raj Kumar\\Emplio\\acme-1a2b3c4d\\work")).toBe("/c/Users/Raj Kumar/Emplio/acme-1a2b3c4d/work");
 });
 
 test("a business gets a readable folder name", () => {

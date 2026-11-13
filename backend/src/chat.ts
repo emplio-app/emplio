@@ -33,7 +33,7 @@ import { forModel, isOwnFile, readStored, resolveFiles } from "./files";
 import { recordUploads } from "./made";
 import { listTeam } from "./team";
 import { onboarding } from "./setup";
-import { businessInstructions, personalFiles, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
+import { businessInstructions, computerNote, personalFiles, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
 import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld } from "./compact";
 import { settingsFor } from "./settings";
 import { model, modelForJob } from "./models";
@@ -774,6 +774,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           : `They're on ${channel}: text like a colleague on their phone. Each paragraph you write goes out as its own message, so keep the whole reply to one or two lines, one message; several short messages only when they asked for detail. Plain text with simple **bold** and lists; no tables or headings${visual ? ", and never openui-lang" : ""}. Files you save to /work/out are sent to them there. Several messages from them in a row are one request: answer them together, once.`,
     }),
     date: `Today is ${today} (${tz} time).`,
+    computer: computerNote(session),
     setup,
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read

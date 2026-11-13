@@ -593,6 +593,10 @@ html[data-desktop="darwin"] [data-slot="sidebar-header"] {
 html[data-desktop="darwin"] [data-slot="sidebar-wrapper"]:has([data-slot="sidebar"][data-state="collapsed"]) [data-slot="sidebar-inset"] header:not(aside header) {
   padding-left: 9.75rem;
 }
+/* Windows and Linux: the window's own minimise, maximise and close buttons sit over the right of the page's top row */
+html[data-desktop]:not([data-desktop="darwin"]) [data-slot="sidebar-inset"] header:not(aside header) {
+  padding-right: 9rem;
+}
 
 /* A quiet, app-wide softness: colours, fades and open/close eases on things that change, so nothing snaps.
    Zero-specificity (:where), so any component's own transition still wins. Colour/opacity/shadow only (no layout

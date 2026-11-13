@@ -7,6 +7,8 @@ export type Box = {
   id: string;
   // the person's own computer, through the desktop app (devices.ts): nothing to meter, and a different system than the cloud's
   local?: boolean;
+  // a local one's system, as Node names it: "darwin" (a Mac) or "win32"
+  platform?: string;
   // stdout and stderr interleaved as result; a timeout is exit code 124; signal kills it
   run(command: string, o: RunOptions): Promise<{ exitCode: number; result: string }>;
   write(path: string, bytes: Uint8Array | string): Promise<unknown>;
