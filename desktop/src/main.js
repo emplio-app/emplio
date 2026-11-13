@@ -226,9 +226,14 @@ function openWindow(path = "/login") {
     minHeight: 600,
     title: "Emplio",
     backgroundColor: "#ffffff",
-    // no title bar: the page draws a thin strip to drag the window by (the traffic lights sit in it)
-    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 22 } } : { titleBarStyle: "hidden", titleBarOverlay: { height: 56 } }),
-    webPreferences: { preload: join(import.meta.dirname, "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, partition: "persist:emplio-app" },
+    // Mac: no title bar, the page draws a thin strip to drag the window by (the traffic lights sit in it).
+    // Windows/Linux: keep the native title bar, so its buttons sit in their own row above the page and never
+    // overlap the page's own toolbar.
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 22 } } : {}),
+    // Windows: Electron's renderer sandbox refuses to start when the install folder's ACL lacks an ALL APPLICATION
+    // PACKAGES entry (common on a plain extracted zip outside Program Files); off here, the fence (fence-win.js) is
+    // still what isolates command execution.
+    webPreferences: { preload: join(import.meta.dirname, "preload.cjs"), contextIsolation: true, sandbox: process.platform !== "win32", nodeIntegration: false, partition: "persist:emplio-app" },
   });
   win.webContents.setUserAgent(`${win.webContents.getUserAgent()} EmplioDesktop`);
   // closing the window puts it away: the browser in it, and the agent's work, carry on
