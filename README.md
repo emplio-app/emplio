@@ -250,7 +250,11 @@ Same code, run for you at [emplio.app](https://emplio.app), on paid plans.
 
 ## Why we built it
 
-Every business, from a freelancer to a large company, should have an employee who knows the whole company: what it sells, who does what, and where it's trying to go. One that takes the repetitive work off everyone's plate, keeps pushing toward the goals, and gets better every day, with everything it learns belonging to the business.
+### The vision
+
+Most AI agents are built for one person. Emplio is built for the whole company.
+
+Every business, from a freelancer to an enterprise, should have an employee who knows the whole company: what it sells, who does what, and where it's trying to go. Emplio works alongside every person on the team, takes the repetitive work off everyone's plate so people can spend their time on growth, and keeps pushing the business toward its goals around the clock. It gets better every day, and everything it learns belongs to the business.
 
 ## Community and contributing
 
