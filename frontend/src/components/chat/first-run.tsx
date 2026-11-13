@@ -6,6 +6,7 @@ import { SeePlans, track, useCreditStatus } from "@cloud/client";
 import type { UIMessage } from "ai";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowUpRightIcon,
   CalendarClockIcon,
   FileTextIcon,
   GlobeIcon,
@@ -13,12 +14,13 @@ import {
   MegaphoneIcon,
   SearchIcon,
   SendIcon,
+  ShuffleIcon,
   TableIcon,
   UsersIcon,
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ChannelsDialog, type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
@@ -36,26 +38,106 @@ export const CAPABILITIES: Capability[] = [
   { icon: GlobeIcon, title: "Its own browser", what: "Opens websites, fills forms and checks pages.", job: "Open my website like a customer would, try every page and form, and list what's broken" },
   { icon: UsersIcon, title: "Your whole team", what: "Everyone in the business can give it work.", job: "Help me add my team, then send each of them a to-do list every morning" },
 ];
-// the empty chat's cards
+// the empty chat's categories, each with a few starting jobs (the first is the card's own job)
 const CARDS = CAPABILITIES.slice(0, 6);
+const MORE: Record<string, string[]> = {
+  "Documents and files": [
+    "Write a friendly quote template I can send to customers, as a Word file",
+    "Turn my last week of emails into a short report as a PDF",
+    "Make a one-page flyer for my best-selling product",
+  ],
+  Research: [
+    "Find 5 customers who might need what I sell and tell me how to reach them",
+    "Check what my competitors charge and tell me if I'm too cheap or too dear",
+    "Read the news about my industry this week and give me the 5 things that matter",
+  ],
+  Marketing: [
+    "Write 3 offers I could run this month and the message for each",
+    "Read my Google reviews and write a thank-you reply to each one",
+    "Write a WhatsApp message to bring back customers who haven't ordered in a while",
+  ],
+  Spreadsheets: [
+    "Make a simple expenses sheet and ask me each Friday to fill in the week",
+    "Turn my customer list into a tidy sheet, with duplicates removed",
+    "Build a sheet to track my stock and warn me when something runs low",
+  ],
+  "Email and your apps": [
+    "Connect my Gmail and tell me which emails need a reply today",
+    "Read my unread email and give me a 5-line summary every morning",
+    "Connect Slack and post a daily summary of the day's orders",
+  ],
+  "Repeating work": [
+    "Every evening at 6pm, send me a summary of what happened today",
+    "Every Friday, remind my team to update the tracker",
+    "Every morning at 8am, tell me what's on for the day",
+  ],
+};
+// what's most useful at this hour comes first
+const BY_HOUR = [
+  ["Email and your apps", "Repeating work", "Spreadsheets"], // before noon: start the day
+  ["Marketing", "Documents and files", "Research"], // afternoon: get things made
+  ["Repeating work", "Spreadsheets", "Research"], // evening: set up tomorrow
+];
 
+const dayOfYear = () => Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 864e5);
+
+// ponytail: no per-business learning yet; hour of day, day of year and the shuffle button vary it
 export function JobCards({ onPick }: { onPick: (job: string) => void }) {
+  const [shuffle, setShuffle] = useState(0);
+  const [picked, setPicked] = useState<string | null>(null);
+  const cards = useMemo(() => {
+    const hour = new Date().getHours();
+    const first = BY_HOUR[hour < 12 ? 0 : hour < 18 ? 1 : 2]!;
+    const rank = (t: string) => (first.includes(t) ? first.indexOf(t) : first.length);
+    return [...CARDS].sort((a, b) => rank(a.title) - rank(b.title));
+  }, []);
+  const card = cards.find((c) => c.title === picked) ?? cards[0]!;
+  const jobs = useMemo(() => {
+    const all = [card.job, ...(MORE[card.title] ?? [])];
+    const start = (dayOfYear() + shuffle) % all.length;
+    return [0, 1, 2].map((i) => all[(start + i) % all.length]!);
+  }, [card, shuffle]);
+
   return (
-    <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-      {CARDS.map((c) => (
-        <button
-          key={c.title}
-          type="button"
-          onClick={() => (track("job_card_clicked", { card: c.title }), onPick(c.job))}
-          className="flex items-start gap-3 rounded-xl border bg-card p-3 text-left text-sm transition-colors hover:bg-muted"
-        >
-          <c.icon className="mt-0.5 size-4 shrink-0 text-primary" />
-          <span className="min-w-0">
-            <span className="block font-medium">{c.title}</span>
-            <span className="block text-muted-foreground">{c.job}</span>
-          </span>
-        </button>
-      ))}
+    <div className="mt-5">
+      <div className="-mx-4 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
+        {cards.map((c) => {
+          const on = c === card;
+          return (
+            <button
+              key={c.title}
+              type="button"
+              aria-pressed={on}
+              onClick={() => (setPicked(c.title), setShuffle(0))}
+              className={`flex shrink-0 snap-start items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-colors active:scale-[0.97] ${on ? "border-primary/50 bg-primary/10 text-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+            >
+              <c.icon className="size-4 text-primary" />
+              {c.title}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-3 overflow-hidden rounded-2xl border bg-card">
+        {jobs.map((job) => (
+          <button
+            key={job}
+            type="button"
+            onClick={() => (track("job_card_clicked", { card: card.title }), onPick(job))}
+            className="flex w-full items-start gap-3 border-b px-4 py-3.5 text-left text-sm transition-colors last:border-b-0 hover:bg-muted active:bg-muted"
+          >
+            <span className="min-w-0 flex-1">{job}</span>
+            <ArrowUpRightIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => setShuffle((n) => n + 1)}
+        className="mx-auto mt-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ShuffleIcon className="size-3.5" />
+        Show other ideas
+      </button>
     </div>
   );
 }
