@@ -2,6 +2,21 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.21 (2026-11-13)
+
+### What's new
+
+- The Mac app now runs on Intel Macs as well as Apple silicon, from macOS 11 (Big Sur). Macs on macOS 11 or 12 get their own download, linked under the main button.
+- Talking to Emplio with your voice now works in the Mac app: it asks for the microphone the first time.
+- The Mac app can ask to use your Documents and Downloads folders, as it already could for Desktop.
+
+### For developers
+
+- `desktop`: `npm run dmg` builds a universal app (Electron 45, macOS 13+); `npm run dmg:older` builds it on Electron 37.10.3 for macOS 11 and 12. Mac app 0.1.1 (#104).
+- Entitlement `com.apple.security.device.audio-input`; microphone, Documents and Downloads prompts in `info.plist`.
+- Chrome for Testing is fetched for the Mac's own chip, and only on macOS 12 or newer.
+- `/download/mac-older` serves the older-Mac DMG; `DownloadButton` and `POST /downloads` know `mac-older`.
+
 ## 1.2.20 (2026-11-13)
 
 ### What's new
