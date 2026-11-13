@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.31 (2026-11-13)
+
+### What's new
+
+- The homepage now offers the Emplio app for the computer you're on: Mac, Windows or Linux.
+- The plans dialog now says every plan unlocks the **Smarter** and **Best** AI, which you can then pick in Settings, Agent, Quality.
+
+### For developers
+
+- Homepage download line follows the visitor's system (`AppDownload`; click event `<system>_download`), hidden on phones, tablets and inside the app (cloud #23).
+- Plans dialog badge and the trial's Quality lock note reworded for the Standard default (cloud #24).
+
 ## 1.2.30 (2026-11-13)
 
 ### What's new
