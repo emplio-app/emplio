@@ -3,4 +3,7 @@
 <plist version="1.0"><dict>
   <key>NSHumanReadableCopyright</key><string>Emplio</string>
   <key>NSDesktopFolderUsageDescription</key><string>Emplio only looks at files you ask it to.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Emplio only looks at files you ask it to.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Emplio only looks at files you ask it to.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Emplio listens only after you tap the microphone, until you stop.</string>
 </dict></plist>

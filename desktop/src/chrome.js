@@ -4,7 +4,7 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 
@@ -19,18 +19,20 @@ const LOOKING = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
 ];
-// Chrome that Emplio fetched itself, for a computer that has none (macOS only for now)
+// Chrome that Emplio fetched itself, for a computer that has none (macOS only for now; Intel or Apple chip)
 const OWN = join(homedir(), "Library", "Application Support", "Emplio", "chrome-for-testing");
-const OWN_EXE = join(OWN, "chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+const MAC = process.arch === "arm64" ? "mac-arm64" : "mac-x64";
+const OWN_EXE = join(OWN, `chrome-${MAC}`, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
 export const findChrome = () => [...LOOKING, OWN_EXE].find((p) => p && existsSync(p));
 
 // Fetch Google's Chrome for Testing into our own folder, once. Until it is there the cloud browser is used.
 let fetching = null;
 export function fetchChrome() {
-  if (findChrome() || process.platform !== "darwin" || process.arch !== "arm64") return Promise.resolve(false);
+  // Chrome needs macOS 12 or newer (Darwin 21): on 11 the cloud browser keeps doing the sign-ins
+  if (findChrome() || process.platform !== "darwin" || Number(release().split(".")[0]) < 21) return Promise.resolve(false);
   return (fetching ??= (async () => {
     const list = await (await fetch("https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json")).json();
-    const url = list.channels.Stable.downloads.chrome.find((d) => d.platform === "mac-arm64").url;
+    const url = list.channels.Stable.downloads.chrome.find((d) => d.platform === MAC).url;
     await mkdir(OWN, { recursive: true });
     const zip = join(OWN, "chrome.zip");
     await writeFile(zip, Buffer.from(await (await fetch(url)).arrayBuffer()));
