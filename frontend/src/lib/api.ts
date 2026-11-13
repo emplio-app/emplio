@@ -48,11 +48,22 @@ export function useTasks() {
   });
 }
 
+// who /auth/me last said is signed in (null: nobody); undefined until it first answers
+let signedInAs: string | null | undefined;
+
 export function useMe() {
   return useQuery({
     queryKey: meQueryKey,
-    // 401 = logged out, not an error
-    queryFn: () => api<MeResponse>("/auth/me").catch(() => null),
+    queryFn: async () => {
+      // 401 = logged out, not an error
+      const me = await api<MeResponse>("/auth/me").catch(() => null);
+      // Signed out and back in (as anyone) without a page load: the open chat connection still carries the old,
+      // deleted sign-in, so every message would fail. Drop it; the next message opens one with the new sign-in.
+      const id = me?.user.id ?? null;
+      if (id && signedInAs !== undefined && signedInAs !== id) chatTransport.close();
+      signedInAs = id;
+      return me;
+    },
   });
 }
 
