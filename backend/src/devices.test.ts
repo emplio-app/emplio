@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { GONE_NOTE, attach, cdpToken, cdpTokenOk, deviceFor, localBox, rpc, type Socket } from "./devices";
+import { GONE_NOTE, attach, cdpToken, cdpUrlOf, cdpTokenOk, deviceFor, localBox, rpc, type Socket } from "./devices";
 
 process.env.ENCRYPTION_KEY ??= "test-key-test-key-test-key-test-key";
 
@@ -98,5 +98,19 @@ describe("devices", () => {
     expect(cdpTokenOk(cdpToken(id))).toEqual({ browserId: id, deviceId: "55555555-1111-1111-1111-111111111111", key: "abc123" });
     expect(cdpTokenOk(cdpToken(id).replace("abc123", "abc124"))).toBeNull();
     expect(cdpTokenOk("dev_x.zzz")).toBeNull();
+  });
+
+  test("the browser link uses the public address when only WEBHOOK_URL is set (the live server)", () => {
+    const saved = { p: process.env.PUBLIC_API_URL, w: process.env.WEBHOOK_URL };
+    delete process.env.PUBLIC_API_URL;
+    process.env.WEBHOOK_URL = "https://api.example.com";
+    try {
+      expect(cdpUrlOf("dev_x_y")).toStartWith("https://api.example.com/device-cdp/dev_x_y.");
+    } finally {
+      if (saved.p === undefined) delete process.env.PUBLIC_API_URL;
+      else process.env.PUBLIC_API_URL = saved.p;
+      if (saved.w === undefined) delete process.env.WEBHOOK_URL;
+      else process.env.WEBHOOK_URL = saved.w;
+    }
   });
 });
