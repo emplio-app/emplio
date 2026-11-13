@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.32 (2026-11-13)
+
+### What's new
+
+- When Emplio asks you something about a draft (a post, an email, a bio) while working on your Mac, the draft now shows on the question card above the buttons, so you can read it before you answer.
+
+### For developers
+
+- `emplio ask` read stdin with `read -t 0` and `timeout`, which the Mac's bash 3.2 lacks, so a heredoc was dropped on desktop computers; it now reads lines with a 1 s wait each (#125).
+
 ## 1.2.31 (2026-11-13)
 
 ### What's new
