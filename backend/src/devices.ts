@@ -203,6 +203,8 @@ export function cdpTokenOk(t: string): { browserId: string; deviceId: string; ke
   const m = /^dev_([0-9a-f-]{36})_([a-z0-9]+)$/.exec(browserId);
   return m ? { browserId, deviceId: m[1]!, key: m[2]! } : null;
 }
-const apiBase = () => process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
+// Commands may run on the person's own computer (or a cloud one), so the link must work from there: the live server
+// sets only WEBHOOK_URL, and a localhost fallback there sent the Mac's browser tool to a port it doesn't have.
+const apiBase = () => process.env.PUBLIC_API_URL ?? process.env.WEBHOOK_URL ?? `http://localhost:${process.env.PORT ?? 4000}`;
 export const cdpUrlOf = (browserId: string) => `${apiBase()}/device-cdp/${cdpToken(browserId)}`;
 export const wsBase = () => apiBase().replace(/^http/, "ws");
