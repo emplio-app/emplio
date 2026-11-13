@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ask, collectOut, commandEnded, commandStarted, EZ, findOut, MAX_COMMANDS, requestsTrailer, runEz, usesBrowser, withRequests, withRoom } from "./sandbox";
+import { ask, collectOut, commandEnded, commandStarted, EZ, findOut, MAX_COMMANDS, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
@@ -353,4 +353,35 @@ test("a size the browser said yes to but didn't take goes to the server, and lat
   rmSync(home, { recursive: true, force: true });
   rmSync(`/tmp/emplio-resize.${key}`, { force: true });
   rmSync(file!, { force: true });
+});
+
+test("on a person's own computer, its folder's paths reach the server as /work ones, and skills are found there", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  const work = join(home, "my work");
+  mkdirSync(join(work, "company/skills/quote"), { recursive: true });
+  writeFileSync(join(work, "company/skills/quote/SKILL.md"), "how to quote\n");
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `test${Date.now()}`;
+  const run = async (command: string) => {
+    const p = Bun.spawn(["/bin/bash", "-c", command + requestsTrailer(key)], { env: { PATH: process.env.PATH!, EZ_KEY: key, EMPLIO_WORK: work }, cwd: home, stdout: "pipe" });
+    return withRequests(await new Response(p.stdout).text(), key);
+  };
+  const sent = (await run(`./emplio apps run x '{"file":"${work}/out/a.pdf"}'`)).split("\t")[1]!;
+  expect(Buffer.from(sent, "base64").toString().split("\0")).toEqual(["run", "x", '{"file":"/work/out/a.pdf"}', ""]);
+  expect(await run(`./emplio skills use quote`)).toContain("how to quote");
+  rmSync(home, { recursive: true });
+});
+
+test("a folder with its own .git is saved as files, its history kept aside", async () => {
+  const work = mkdtempSync(join(tmpdir(), "emplio-"));
+  const sh = (c: string, cwd = work) => Bun.spawnSync(["/bin/bash", "-c", c], { cwd, env: { PATH: process.env.PATH!, HOME: work, GIT_CONFIG_NOSYSTEM: "1" } }).stdout.toString();
+  sh(`git init -q company && cd company && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m init && mkdir -p projects/tool && cd projects/tool && git init -q && echo hi > a.txt && git add a.txt && git -c user.email=a@b -c user.name=a commit -q -m x`);
+  const out = sh(stageScript(["company"]).replaceAll("/work/", `${work}/`));
+  expect(out).toContain("CHANGED\tcompany");
+  expect(sh("git ls-files -s", join(work, "company"))).toMatch(/^100644 \S+ 0\tprojects\/tool\/a.txt\n$/);
+  expect(sh("ls -a projects/tool", join(work, "company"))).toContain(".git.emplio");
+  // run again: nothing new, and the exclude line isn't added twice
+  sh(stageScript(["company"]).replaceAll("/work/", `${work}/`));
+  expect(sh("grep -c emplio .git/info/exclude", join(work, "company")).trim()).toBe("1");
+  rmSync(work, { recursive: true });
 });

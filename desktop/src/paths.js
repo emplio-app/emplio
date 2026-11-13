@@ -11,12 +11,17 @@ export const toRemote = (text, work) => String(text).split(work).join("/work");
 
 // A path the server gave (under /work) as a real one. Anything else, or any way out of the folder, is refused.
 export function localPath(work, remote) {
+  // a path the command printed came back as the real folder's (inside an emplio request, say): /work again first
+  remote = toRemote(remote, work);
   if (remote !== "/work" && !String(remote).startsWith("/work/")) throw new Error(`only paths under /work: ${remote}`);
   const full = resolve(join(work, remote.slice("/work".length)));
   const rel = relative(work, full);
   if (rel.startsWith("..") || isAbsolute(rel)) throw new Error(`outside /work: ${remote}`);
   return full;
 }
+
+// C:\\Users\\a\\Emplio as Git Bash on Windows writes it: /c/Users/a/Emplio
+export const shellPath = (p) => String(p).replace(/^([A-Za-z]):[\\/]/, (_, d) => `/${d.toLowerCase()}/`).replace(/\\/g, "/");
 
 export const slug = (name) =>
   String(name || "business")
