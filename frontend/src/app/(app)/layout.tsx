@@ -32,7 +32,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <DraftProvider>
       <TooltipProvider>
-        <DesktopHistory />
         <SidebarProvider className="h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden pt-(--safe-top)">
@@ -43,6 +42,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <BottomTabs />
           </SidebarInset>
         </SidebarProvider>
+        {/* last in the page: of two overlapping window-drag areas, the later one wins, and the sidebar's top row is one */}
+        <DesktopHistory />
       </TooltipProvider>
     </DraftProvider>
   );

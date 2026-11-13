@@ -20,7 +20,7 @@ export function DesktopHistory() {
   if (!mac) return null;
   const cls = "flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent [-webkit-app-region:no-drag]";
   return (
-    <div className="fixed top-[1.1rem] left-[5.5rem] z-50 flex gap-0.5">
+    <div className="fixed top-[0.845rem] left-[5.5rem] z-50 flex gap-0.5">
       <button type="button" aria-label="Back" disabled={!can.back} onClick={() => history.back()} className={cls}>
         <ChevronLeft className="size-5" />
       </button>
