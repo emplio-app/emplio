@@ -53,6 +53,17 @@ describe("devices", () => {
     linux.drop();
   });
 
+  test("a Windows PC is given work once its fence is set up", () => {
+    const pc = fake();
+    attach({ ...dev("eeeeeeee-1111-1111-1111-111111111111", "u5"), platform: "win32-getting-ready" }, pc.socket, 1000);
+    expect(deviceFor("u5", true)).toBeUndefined();
+    pc.drop();
+    const ready = fake();
+    attach({ ...dev("eeeeeeee-1111-1111-1111-111111111111", "u5"), platform: "win32" }, ready.socket, 2000);
+    expect(deviceFor("u5", true)?.id).toStartWith("eeeeeeee");
+    ready.drop();
+  });
+
   test("an answer from the computer settles its request; an error rejects it", async () => {
     const a = fake();
     const conn = attach(dev("22222222-1111-1111-1111-111111111111", "u4"), a.socket);

@@ -367,10 +367,15 @@ export const EZ = `#!/bin/bash
 # one line of base64, on Linux and on a Mac (GNU base64 wraps lines; the Mac's has no -w)
 b64() { base64 | tr -d '\\n'; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# where /work really is: on a person's own computer it's a folder in their home (the server sends EMPLIO_WORK=/work,
+# which their app turns into that folder)
+W="\${EMPLIO_WORK:-${WORK}}"
 req() {
-  local t="$1" f; shift
+  local t="$1" f a m=(); shift
   f="$(mktemp "/tmp/emplio-req.$EZ_KEY.$t.XXXXXX")"
-  printf '%s\\0' "$@" | b64 > "$f"
+  # that folder's paths go to the server as /work ones
+  for a in "$@"; do m+=("\${a//"$W"/${WORK}}"); done
+  printf '%s\\0' "\${m[@]}" | b64 > "$f"
   printf '%s:%s\\t@%s\\n' "$t" "$EZ_KEY" "$f"
 }
 # n: how many words a command has, its --agent/--level/--name/--description/--skills flags and their values
@@ -460,12 +465,14 @@ case "$1" in
     [ -n "$BROWSER_CDP_URL" ] || { echo "emplio browser: no browser attached; say emplio browser in the command itself. A script file: emplio browser run <script> [args]" >&2; exit 1; }
     [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting. Run this in your next command." >&2; exit 1; }
     [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser skill" >&2; exit 2; }
-    ab="$HOME/.local/bin/agent-browser"; guides="$HOME/.local/share/agent-browser"
+    # Windows (Git Bash, on a person's PC) has its own build, an .exe
+    os=$(uname -s | tr '[:upper:]' '[:lower:]'); x=; case "$os" in mingw*|msys*|cygwin*) os=win32; x=.exe ;; esac
+    ab="$HOME/.local/bin/agent-browser$x"; guides="$HOME/.local/share/agent-browser"
     if [ ! -x "$ab" ]; then
       # the program, and its guides (they aren't in the program)
       mkdir -p "$HOME/.local/bin" "$guides" \
         && curl -fsSL "https://codeload.github.com/vercel-labs/agent-browser/tar.gz/refs/tags/v0.41.2" | tar -xz -C "$guides" --strip-components=2 $(tar --version 2>/dev/null | grep -q GNU && echo --wildcards) '*/skill-data/*' \
-        && curl -fsSL "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.2/agent-browser-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed -e s/aarch64/arm64/ -e s/x86_64/x64/)" -o "$ab.tmp" && chmod +x "$ab.tmp" && mv "$ab.tmp" "$ab" \
+        && curl -fsSL "https://github.com/vercel-labs/agent-browser/releases/download/v0.41.2/agent-browser-$os-$(uname -m | sed -e s/aarch64/arm64/ -e s/x86_64/x64/)$x" -o "$ab.tmp" && chmod +x "$ab.tmp" && mv "$ab.tmp" "$ab" \
         || { echo "emplio browser: installing the browser tool failed" >&2; exit 1; }
     fi
     run() { AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" "$ab" --cdp "$BROWSER_CDP_URL" --session "$BROWSER_SESSION" "$@"; }
@@ -631,7 +638,7 @@ PY
     [ $# -gt 0 ] || { echo "usage: emplio search <words>   (every word, any case)" >&2; exit 2; }
     echo "== Files"
     # a file matches with every word anywhere in it; shown: its lines with every word, else its first line with any
-    files="$(grep -rliI --exclude-dir=.git -F -- "$1" ${WORK}/company ${WORK}/restricted ${WORK}/me ${WORK}/in 2>/dev/null)"
+    files="$(grep -rliI --exclude-dir=.git -F -- "$1" "$W/company" "$W/restricted" "$W/me" "$W/in" 2>/dev/null)"
     for w in "\${@:2}"; do [ -n "$files" ] && files="$(printf '%s\\n' "$files" | tr '\\n' '\\0' | xargs -0 grep -liIF -- "$w")"; done
     pats=(); for w in "$@"; do pats+=(-e "$w"); done
     hits=""
@@ -689,7 +696,7 @@ PY
       # read here, not from git: an edit made in this chat counts. Framed for the server, which hands it over whole
       n="\${2#*skills/}"; n="\${n%/SKILL.md}"; n="\${n%/}"
       [ -n "$n" ] || { echo "usage: emplio skills use <name>" >&2; exit 2; }
-      for d in ${WORK}/me/skills ${WORK}/company/skills; do
+      for d in "$W/me/skills" "$W/company/skills"; do
         [ -f "$d/$n/SKILL.md" ] || continue
         echo "SKILL:$EZ_KEY"; echo "# $d/$n/SKILL.md"; cat "$d/$n/SKILL.md"; echo; echo "SKILL:$EZ_KEY"
         other=$(cd "$d/$n" && find . -type f ! -name SKILL.md ! -path './.*' | sed 's|^\./||' | sort | head -n 50)
@@ -774,6 +781,35 @@ const MAGIC: Record<string, (b: Uint8Array) => boolean> = {
   "application/pdf": (b) => String.fromCharCode(...b.slice(0, 4)) === "%PDF",
 };
 
+// Which computer a reply's commands run on: the person's own (the desktop app, devices.ts) whenever it's connected,
+// else the cloud's. Said in the note on each message (chat.ts), not the cached instructions, and again in a command's
+// result when it changes part-way through a reply (runInBox).
+type Computer = "mac" | "windows" | "cloud";
+const computerKind = (platform: string | undefined): Computer => (platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "cloud");
+const COMPUTER: Record<Computer, (name: string) => string> = {
+  mac: (name) =>
+    `Your commands run on ${name}'s own Mac right now: macOS, not Linux (bash 3.2, the Mac's own sed, date, stat and find; no apt-get or sudo; \`brew\` only if it's installed). Saved scripts in Python.`,
+  windows: (name) =>
+    `Your commands run on ${name}'s own Windows PC right now, in Git Bash: bash with git and the usual Unix tools, and Windows programs too (\`powershell -c\`, \`cmd //c\`, any .exe). No apt-get or sudo; paths are /work as always (C: is /c). Saved scripts in Python.`,
+  cloud: () => "Your commands run on the cloud's Linux computer right now (Ubuntu: sudo and apt-get work).",
+};
+// by chat: each command gets its own copy of the reply's Session
+// ponytail: never cleared, a few bytes per chat since the server started
+const toldComputer = new Map<string, Computer>();
+export function computerNote(s: Session) {
+  const kind = computerKind(deviceFor(s.user.id, true)?.platform);
+  toldComputer.set(s.conversationId, kind);
+  return COMPUTER[kind](s.user.name);
+}
+// The switch, said once, in the first command result on the other computer
+function computerChanged(s: Session, box: Box) {
+  const kind = box.local ? computerKind(box.platform) : "cloud";
+  const was = toldComputer.get(s.conversationId);
+  toldComputer.set(s.conversationId, kind);
+  if (!was || was === kind) return undefined;
+  return `${COMPUTER[kind](s.user.name)} (${kind === "cloud" ? `${s.user.name}'s computer went offline` : "it came online"}). company/, me/ and restricted/ are as of the last save; /work/tmp and anything not yet saved stayed on the other computer.`;
+}
+
 // Rules every chat gets in its system prompt. What's particular to one business lives in its
 // company/AGENT.md, which the owner and the agent edit (see businessInstructions).
 export function sandboxPrompt(s: Session) {
@@ -782,14 +818,14 @@ export function sandboxPrompt(s: Session) {
   // a check-in, automation or task: nobody is watching, so nothing that needs them to click or answer
   const bg = !!(s.automation || s.task);
   return `## Your computer
-${deviceFor(s.user.id, true) ? `Your own computer, through the bash tool: ${name}'s own Mac right now (macOS, not Linux: bash 3.2, the Mac versions of sed, date, stat and find, no apt-get or sudo; \`brew\` only if it is installed). Everything you do happens inside /work: never change anything outside it, and never look through ${name}'s other files unless they ask. When their Mac is closed or asleep your commands run on a cloud Linux computer instead, with the same /work files as of the last save.` : "Your own Linux computer, through the bash tool."} It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
+Your own computer, through the bash tool: a cloud Linux one, or ${name}'s own Mac or Windows PC while the Emplio app is open there. Which one it is now is in the note on their latest message, and a command's result says when it changes. On their own computer everything you do happens inside /work: never change anything outside it, and never look through ${name}'s other files unless they ask. It's ${name}'s: all their chats share it (files, installed tools and running apps stay). Do the work yourself (build, run, check) rather than telling people how.
 
 Folders:
 - /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skills/, agents/ (your specialists: change them with emplio agents), tools/, automations/, knowledge/, inbox/
 ${admin ? "- /work/restricted/  finance, HR, owner notes (git). Admins only.\n" : ""}- /work/me/  ${name}'s own files (git): profile.md, preferences.md, notes/, skills/
 - /work/in/  files attached in ${name}'s chats (copies; a document's words beside it in <name>.txt)
 - /work/out/  finished files to hand over
-- /work/tmp/  scratch, shared by ${name}'s chats; lost when this computer is replaced
+- /work/tmp/  scratch, shared by ${name}'s chats; stays on the computer it's on (never moves between theirs and the cloud's), lost when that computer is replaced
 
 Rules:
 - What you change under company/, restricted/ and me/ is saved to git, as ${name}, at the end of each reply. Don't run git yourself, except to restore a file someone wants back as it was: \`git log -- <path>\`, then \`git checkout <commit>~1 -- <path>\` (or delete it if it was new).
@@ -799,7 +835,7 @@ Rules:
 - company/inbox/: proposals for the owner, one file per chat, company/inbox/YYYY-MM-DD-<this chat's id>.md (who, what, why). ${admin ? "When one is accepted, put it where it belongs and delete the entry." : `In this chat company/ is read-only except inbox/: new business facts, skill fixes, rule changes and automations ${name} wants go there as a proposal (other changes in company/ are reverted). Tell ${name} the owner will see it.`}
 - No work journal: everything you do is logged on its own (Activity, below).
 - Files over 1 MB or binary in those folders become a small .media pointer (name, size, a document's words). \`emplio media get <file.media>\` puts the file in /work/tmp/media/ (from the next command); \`emplio view <file.media>\` just looks at it. A changed copy is kept only once saved back into a folder.
-- Work in /work/tmp/<short-job-name>/ (check the others when earlier work is relevant), then copy results where they belong. Anything worth reusing (a script, tool, app) goes in ${admin ? `company/projects/<name>/ (me/projects/<name>/ if only for ${name})` : "me/projects/<name>/"} before you finish; say where.
+- Work in /work/tmp/<short-job-name>/ (check the others when earlier work is relevant), then copy results where they belong. A script you keep (in a skill, a tool, a project) is Python, never bash or PowerShell, so it runs on whichever computer you're on; one-off commands can be anything. Anything worth reusing (a script, tool, app) goes in ${admin ? `company/projects/<name>/ (me/projects/<name>/ if only for ${name})` : "me/projects/<name>/"} before you finish; say where. A folder there with its own git history (cloned, \`git init\`) is saved as plain files: its .git becomes .git.emplio at the save.
 - Files put in /work/out/ appear in the chat by themselves (${name} opens or downloads them there) and leave out/ after the command: don't write links or paths to them, and \`emplio view\` them first. Each is also kept in Files (\`emplio files\`); the same name again in this chat is its next version, so fix a file by putting the corrected one in out/ under the same name. From another chat: \`emplio files show <id>\` shows one, \`emplio files get <id>\` gives you a copy to work on, \`emplio files share <id>\` a public link (only when asked to share it outside the team).${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself, or a link to it in the app when it can't open there.` : ""} A web page: one self-contained .html file opens right in the chat.
 
 Where things go (decide before saving):
@@ -877,7 +913,7 @@ emplio browser send POST /api/expenses @/work/tmp/x.json   # or a body inline, o
 - Saving: do the first on the page, read that call in full, then \`send\` the rest, however few are left, one at a time, stopping at the first failure (&& or a shell loop). A failure with no reply may have gone through: check the site before sending it again. Skip the first on the page when this site's skill or notes, or something the person showed you, give the exact call.
 - Stay on that site's tab. Refused, or the page sends something different: go to 2. Don't read \`network requests --json\`: it prints login tokens.
 - Requests you've seen are saved by themselves, and those from earlier work are listed the first time you open a site in a reply: for reading, use them right away. In that site's skill save only what the list can't say: what each is for and which fields matter. Never tokens or customer data.
-- The second time you do the same thing on a site (create, edit or delete a record), make it a small script in that site's skill, taking what changes as arguments, and name it in SKILL.md: \`emplio browser run <skill folder>/change-date.sh INV-12 01-10-2026\`. Inside: \`send\` where a call works; otherwise page steps with \`find\`, never refs, which go stale. From then on run it, once per record, rather than repeating the steps; if it breaks, fix the script.
+- The second time you do the same thing on a site (create, edit or delete a record), make it a small script in that site's skill, taking what changes as arguments, and name it in SKILL.md: \`emplio browser run <skill folder>/change_date.py INV-12 01-10-2026\`. Inside, Python calling \`emplio browser ...\` with subprocess.run(check=True): \`send\` where a call works; otherwise page steps with \`find\`, never refs, which go stale. From then on run it, once per record, rather than repeating the steps; if it breaks, fix the script.
 2. A page you've already seen: do all its steps in one command, joined with && so it stops at the first failure, or in a shell loop or Python (subprocess, with the words emplio browser in the command).
 3. One step at a time only where the next step depends on what appears.
 Always:
@@ -1201,16 +1237,28 @@ const scopeScript = `cd ${WORK}/company && git add -A && git diff --cached --nam
   git reset -q -- "$f"; git checkout -q HEAD -- "$f" 2>/dev/null || { rm -f -- "$f"; rmdir -p -- "$(dirname -- "$f")" 2>/dev/null; }; printf 'REJECTED\\t%s\\n' "$f"
 done`;
 
+// A folder with its own git history (cloned or \`git init\`ed here) would be saved as an empty link to another repo, so
+// its files would never reach another computer: its .git is set aside as .git.emplio (kept, never saved) first, and
+// one saved as such a link before is saved as files again.
+const NESTED = `grep -qxF '.git.emplio*' .git/info/exclude 2>/dev/null || { mkdir -p .git/info; echo '.git.emplio*' >> .git/info/exclude; }
+find . \\( -path ./.git -o -name node_modules -o -name '.git.emplio*' \\) -prune -o -name .git -print | while IFS= read -r g; do
+  t="$g.emplio"; [ -e "$t" ] && t="$t-$(date +%s)"; mv -- "$g" "$t"
+done
+git ls-files -s | awk -F'\\t' '/^160000 /{print $2}' | while IFS= read -r p; do git rm -q --cached -- "$p"; done`;
+
 // Stage each repo and list big/binary files to move to storage.
-const stageScript = (dirs: string[]) =>
+export const stageScript = (dirs: string[]) =>
   dirs
     .map(
-      (dir) => `cd ${WORK}/${dir} && git add -A
+      // in a subshell of its own: a repo that isn't there must not leave the next lines running in /work
+      (dir) => `(cd ${WORK}/${dir} || exit
+${NESTED}
+git add -A
 git diff --cached --name-only --diff-filter=AM | while IFS= read -r f; do
-  sz=$(stat -c%s -- "$f")
+  sz=$(($(wc -c < "$f")))
   if [ "$sz" -gt ${BIG_FILE} ] || { [ "$sz" -gt 0 ] && ! grep -qI . -- "$f"; }; then printf 'BIG\\t${dir}/%s\\n' "$f"; fi
 done
-git diff --cached --quiet || printf 'CHANGED\\t${dir}\\n'`,
+git diff --cached --quiet || printf 'CHANGED\\t${dir}\\n')`,
     )
     .join("\n");
 
@@ -1821,6 +1869,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   const ran = await withRoom(boxKey(s), MAX_COMMANDS, async () => {
     if (signal?.aborted) return null;
     const box = await sandboxFor(s);
+    const switched = computerChanged(s, box);
     // first command of a reply: pick up what teammates (or the server, like an import) saved since. Per reply, not
     // per box: a reply starting while another chat's is mid-way in the same box must still catch up (with a command
     // running there, at its next command instead)
@@ -1843,10 +1892,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
 
     // the person is showing Emplio something in this browser: hands off until it reaches Emplio
     if (usesBrowser(command) && isShowing(s.conversationId))
-      return { box, browserId: undefined, result: { exitCode: 1, output: `${s.user.name} is using this browser to show you how to do something. Don't use the browser until what they did reaches you; say so in a line and end your reply.` } as BoxResult };
+      return { box, switched, browserId: undefined, result: { exitCode: 1, output: `${s.user.name} is using this browser to show you how to do something. Don't use the browser until what they did reaches you; say so in a line and end your reply.` } as BoxResult };
 
     // a command that drives the browser gets this chat's browser, started on first use
-    let env: Record<string, string> = { TZ: await timezoneOf(s.user.id) };
+    let env: Record<string, string> = { TZ: await timezoneOf(s.user.id), EMPLIO_WORK: WORK };
     let browserId: string | undefined;
     if (usesBrowser(command)) {
       const owner = { workspaceId: s.workspaceId, userId: s.user.id };
@@ -1882,10 +1931,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         log,
         note: `Started in the background. Check with \`tail -n 50 ${log}\` or \`kill -0 ${pid}\` (running if exit 0); stop with \`kill -- -${pid}\`.`,
       };
-      return { box, browserId, result };
+      return { box, switched, browserId, result };
     }
     commandStarted(boxKey(s));
-    return { box, browserId, env, git };
+    return { box, switched, browserId, env, git };
   });
   if (!ran) return { stopped: true };
   const { box, browserId } = ran;
@@ -1921,6 +1970,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (signal?.aborted) result.stopped = true;
   }
   const out = result;
+  if (ran.switched) out.computerChanged = ran.switched;
 
   return serialize(boxKey(s), async () => {
     const notDone: string[] = [];

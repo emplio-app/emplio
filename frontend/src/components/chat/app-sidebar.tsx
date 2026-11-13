@@ -3,8 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { JobSummary } from "@emplio/shared";
 import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
   BlocksIcon,
   BookOpenIcon,
   CheckIcon,
@@ -24,6 +22,7 @@ import {
   SettingsIcon,
   SparklesIcon,
   Trash2Icon,
+  Undo2Icon,
   UsersIcon,
   ZapIcon,
 } from "lucide-react";
@@ -353,7 +352,8 @@ export function AppSidebar() {
                           isActive={pathname === `/chat/${c.id}`}
                           render={<Link href={`/chat/${c.id}`} onClick={() => setOpenMobile(false)} />}
                           // relative: the spinner centres on this row, not on the row plus its jobs below
-                          className={cn("relative", !!under.length && "pr-14")}
+                          // room for the hover buttons (tick, ⋯) and the jobs chevron
+                          className={cn("relative", c.archived ? "pr-8 text-muted-foreground" : "pr-14", !!under.length && "pr-20")}
                         >
                           <span className="truncate">{c.title}</span>
                           {/* in the options button's spot (hidden until hover) */}
@@ -372,9 +372,21 @@ export function AppSidebar() {
                             onClick={() => toggleFold(c.id)}
                             aria-expanded={!folded.has(c.id)}
                             aria-label={folded.has(c.id) ? "Show opened work" : "Hide opened work"}
-                            className="right-7 text-muted-foreground"
+                            className={cn("text-muted-foreground", c.archived ? "right-7" : "right-13")}
                           >
                             <ChevronDownIcon className={cn("transition-transform", folded.has(c.id) && "-rotate-90")} />
+                          </SidebarMenuAction>
+                        )}
+                        {/* one tap to clear a finished chat: it moves to Done, and comes back by itself if anything new happens in it */}
+                        {!c.archived && (
+                          <SidebarMenuAction
+                            showOnHover
+                            onClick={() => archive.mutate({ id: c.id, archived: true })}
+                            aria-label="Mark done"
+                            title="Mark done"
+                            className="right-7"
+                          >
+                            <CheckIcon />
                           </SidebarMenuAction>
                         )}
                         <DropdownMenu open={menuFor === c.id} onOpenChange={(open) => setMenuFor(open ? c.id : null)}>
@@ -388,8 +400,8 @@ export function AppSidebar() {
                               Rename
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => archive.mutate({ id: c.id, archived: !c.archived })}>
-                              {c.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
-                              {c.archived ? "Unarchive" : "Archive"}
+                              {c.archived ? <Undo2Icon /> : <CheckIcon />}
+                              {c.archived ? "Not done" : "Done"}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               variant="destructive"
@@ -428,7 +440,7 @@ export function AppSidebar() {
                 onClick={() => setShowArchived((v) => !v)}
                 className="rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
               >
-                {showArchived ? "Hide archived" : `Archived (${archived.length})`}
+                {showArchived ? "Hide done" : `Done (${archived.length})`}
               </button>
             )}
           </SidebarGroup>

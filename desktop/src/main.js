@@ -42,7 +42,8 @@ let config;
 let win;
 let tray;
 let state = "off";
-const boxes = new Boxes(join(homedir(), "Emplio"));
+// the app's own data (its key to the server) is out of the commands' sight
+const boxes = new Boxes(join(homedir(), "Emplio"), { hide: [app.getPath("userData")] });
 const browsers = new Browsers();
 // the backup: a Chrome of its own, for what the embedded browser can't do (and for signing in to Google)
 // a window nobody sees: the agent's browser lives in it while Emplio's own window is closed or looks at something else
@@ -66,6 +67,8 @@ const appOrigin = () => appUrl().origin;
 // --- what the server may ask of this computer -------------------------------------------------------------
 const link = new Link({
   onState: (s) => setState(s),
+  // the server gives work only to a computer that says it's a Mac or Windows PC: a PC until its fence holds says otherwise
+  platform: () => (boxes.ready ? process.platform : `${process.platform}-getting-ready`),
   handlers: {
     async request(method, p, id) {
       switch (method) {
@@ -345,6 +348,15 @@ app.whenReady().then(() => {
   if (HIDDEN) app.dock?.hide();
   else openWindow();
   void fetchChrome().then(() => buildMenu());
+  // Python for the scripts Emplio keeps (commands work without it meanwhile)
+  void boxes.tools.getPython();
+  // Windows: Git for Windows and the fence, then the server is told this PC can take work (the link says so as it reconnects)
+  const readyUp = () =>
+    void boxes.prepare().then(
+      () => (link.pause(), link.resume()),
+      (error) => (console.error("this PC can't take Emplio's work yet; trying again in 10 minutes:", error), setTimeout(readyUp, 600_000)),
+    );
+  if (process.platform === "win32") readyUp();
   if (config.token && config.apiUrl && config.enabled) link.start(config.apiUrl, config.token);
   else setState(config.enabled ? "needs-pairing" : "off");
   buildMenu();

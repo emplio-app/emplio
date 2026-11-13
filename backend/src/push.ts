@@ -1,6 +1,7 @@
-// Notifications: the one place that decides where an event the person should hear about goes (pushTo). Their Mac, when
-// the desktop app is connected (it shows it even from the menu bar); otherwise their browser (web push); and their
-// iPhone as well, being another device. Each is off unless set up, so a self-hosted Emplio needs none of it:
+// Notifications: the one place that decides where an event the person should hear about goes (pushTo). Inside Emplio
+// when they're looking at it (a tab, the Mac app's window or the phone app in front of them), and nowhere else; otherwise
+// their Mac, when the desktop app is connected (it shows it even from the menu bar), or else their browser (web push);
+// and their iPhone as well, being another device. Each is off unless set up, so a self-hosted Emplio needs none of it:
 //  - iPhone app, sent straight to Apple: APNS_KEY_ID, APNS_TEAM_ID and APNS_KEY (the .p8 file, base64)
 //  - browsers: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (webpush.ts)
 import { sign } from "node:crypto";
@@ -11,6 +12,7 @@ import { currentUser } from "./auth";
 import { db } from "./db";
 import { pushDevices, sessions, webPushDevices } from "./db/schema";
 import { deviceFor, rpc } from "./devices";
+import { showInApp } from "./live";
 import { publicKey, sendWeb } from "./webpush";
 
 const TOPIC = "app.emplio";
@@ -38,6 +40,8 @@ export const plain = (markdown: string) =>
 
 export type Note = { title: string; body: string; path: string };
 export type Senders = {
+  // true when an app they're looking at took it
+  app(userId: string, note: Note): boolean;
   // true when their Mac took it (shown, or deliberately not because they're looking at that chat)
   desktop(userId: string, note: Note): Promise<boolean>;
   web(userId: string, note: Note): Promise<void>;
@@ -52,11 +56,14 @@ export async function route(userId: string, note: Note, senders: Senders, now = 
   const key = `${userId}|${note.path}|${note.body}`;
   if (recent.has(key)) return;
   recent.set(key, now);
+  // they're at Emplio already: a buzz on the phone or a system banner as well would only be noise
+  if (senders.app(userId, note)) return;
   const onMac = await senders.desktop(userId, note).catch(() => false);
   await Promise.all([onMac ? undefined : senders.web(userId, note), senders.phone(userId, note)].map((p) => p?.catch((error) => console.error("push failed", error))));
 }
 
 const senders: Senders = {
+  app: showInApp,
   async desktop(userId, note) {
     const conn = deviceFor(userId);
     if (!conn) return false;

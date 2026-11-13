@@ -26,8 +26,8 @@ export type Conn = {
   id: string;
   userId: string;
   name: string;
-  // the app's process.platform. Only a Mac ("darwin") does Emplio's work (commands and browser); a Linux one just shows
-  // notifications, until commands there get a fence like the Mac's (desktop/src/box.js) and its browser's downloads reach the cloud computer
+  // the app's process.platform. A Mac ("darwin") or Windows PC ("win32") does Emplio's work (commands and browser); a Linux one just
+  // shows notifications, until commands there get a fence like theirs (desktop/src/box.js)
   platform?: string;
   socket: Socket;
   next: number;
@@ -54,11 +54,13 @@ const goneListeners: ((deviceId: string) => void)[] = [];
 // told when a device drops off (browser.ts forgets its browsers)
 export const onGone = (fn: (deviceId: string) => void) => void goneListeners.push(fn);
 
+// the apps whose computer does Emplio's work: commands fenced in (desktop/src/box.js) and a browser
+const WORKS_ON = new Set(["darwin", "win32"]);
 // This person's computer, if one of theirs is connected now (the newest if several); `work`: one that runs commands and a browser.
 export function deviceFor(userId: string, work = false): Conn | undefined {
   let found: Conn | undefined;
   for (const c of online.values())
-    if (c.userId === userId && c.alive && (!work || c.platform === "darwin") && (!found || c.since > found.since)) found = c;
+    if (c.userId === userId && c.alive && (!work || WORKS_ON.has(c.platform ?? "")) && (!found || c.since > found.since)) found = c;
   return found;
 }
 export const deviceById = (id: string) => online.get(id);
@@ -168,6 +170,7 @@ export function localBox(conn: Conn, workspaceId: string, name = ""): Box {
   return {
     id: `local:${conn.id}:${workspaceId}`,
     local: true,
+    platform: conn.platform,
     async run(command, { cwd, env, timeoutMs, signal }) {
       try {
         return await ask<{ exitCode: number; result: string }>("run", { command, cwd, env, timeoutMs }, { signal, timeoutMs: timeoutMs + 30_000 });

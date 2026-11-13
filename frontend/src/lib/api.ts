@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ConversationSummary, MeResponse, Task } from "@emplio/shared";
 import { WebSocketChatTransport } from "ai";
-import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ??
@@ -73,8 +75,15 @@ export function useArchiveConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, archived }: { id: string; archived: boolean }) => api(`/conversations/${id}`, { archived }, "PATCH"),
-    onMutate: ({ id, archived }) =>
-      queryClient.setQueryData<ConversationSummary[]>(conversationsQueryKey, (old) => old?.map((c) => (c.id === id ? { ...c, archived } : c))),
+    onMutate: ({ id, archived }) => {
+      const title = queryClient.getQueryData<ConversationSummary[]>(conversationsQueryKey)?.find((c) => c.id === id)?.title;
+      queryClient.setQueryData<ConversationSummary[]>(conversationsQueryKey, (old) => old?.map((c) => (c.id === id ? { ...c, archived } : c)));
+      // a few seconds to take it back, like marking a task done. Straight to the server, not through this hook: the chat's own
+      // Done button has left the page by then, and a mutation from an unmounted page never runs
+      const undo = () =>
+        void api(`/conversations/${id}`, { archived: false }, "PATCH").then(() => queryClient.invalidateQueries({ queryKey: conversationsQueryKey }));
+      if (archived) toast("Marked done", { description: title, action: { label: "Undo", onClick: undo } });
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: conversationsQueryKey }),
   });
 }
@@ -96,8 +105,13 @@ export const chatTransport = new WebSocketChatTransport({
 
 // The server's nudges (/events): refetch the chat list when it changed (a reply started or finished, a new
 // title), so the sidebar's working and unread marks stay current. Reconnects after a drop.
+// Also the notification center's spot in the app (backend push.ts): we tell the server which page is in front of the
+// person, and while one is, their notifications show here instead of on their devices.
 export function useLiveEvents() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const tell = useRef(() => {});
   useEffect(() => {
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -113,19 +127,43 @@ export function useLiveEvents() {
       // anything missed while disconnected
       socket.onopen = () => {
         refresh();
+        tell.current();
         // the connection also drops when a new version goes live
         void queryClient.invalidateQueries({ queryKey: versionQueryKey });
       };
-      socket.onmessage = refresh;
+      socket.onmessage = (e) => {
+        refresh();
+        const frame = JSON.parse(e.data as string) as { type: string; body?: string; path?: string };
+        if (frame.type === "note" && frame.body && frame.path) {
+          const path = frame.path;
+          toast(frame.body, { duration: 8000, action: { label: "Open", onClick: () => router.push(path) } });
+        }
+      };
       socket.onclose = () => {
         if (!closed) retry = setTimeout(connect, 3000);
       };
     };
+    // in front of them: the page is showing and its window has focus (a background tab, a hidden Mac window or a
+    // phone app in the background isn't)
+    tell.current = () => {
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      const looking = document.visibilityState === "visible" && document.hasFocus() ? location.pathname : null;
+      socket.send(JSON.stringify({ looking }));
+    };
+    const told = () => tell.current();
+    window.addEventListener("focus", told);
+    window.addEventListener("blur", told);
+    document.addEventListener("visibilitychange", told);
     connect();
     return () => {
       closed = true;
       clearTimeout(retry);
       socket?.close();
+      window.removeEventListener("focus", told);
+      window.removeEventListener("blur", told);
+      document.removeEventListener("visibilitychange", told);
     };
-  }, [queryClient]);
+  }, [queryClient, router]);
+  // a different page in front of them
+  useEffect(() => tell.current(), [pathname]);
 }

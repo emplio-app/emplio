@@ -6,8 +6,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Link {
   // handlers: { request(method, params, id) -> result, note(method, params) }
-  constructor({ handlers, onState }) {
+  constructor({ handlers, onState, platform = () => process.platform }) {
     this.handlers = handlers;
+    this.platform = platform;
     this.onState = onState;
     this.ws = null;
     this.target = null;
@@ -61,7 +62,7 @@ export class Link {
     if (!target) return;
     this.onState?.("connecting");
     const url = `${target.apiUrl.replace(/^http/, "ws")}/devices/connect`;
-    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${target.token}` }, maxPayload: 256 * 1024 * 1024, perMessageDeflate: false });
+    const ws = new WebSocket(url, { headers: { authorization: `Bearer ${target.token}`, "x-emplio-platform": this.platform() }, maxPayload: 256 * 1024 * 1024, perMessageDeflate: false });
     this.ws = ws;
     ws.on("open", () => {
       this.try = 0;

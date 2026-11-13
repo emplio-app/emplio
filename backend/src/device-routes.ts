@@ -65,7 +65,9 @@ export async function deviceRoutes(app: FastifyInstance) {
     const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
     const [row] = token ? await db.select().from(devices).where(eq(devices.tokenHash, hash(token))) : [];
     if (!row) return socket.close(4001, "unknown device");
-    attach({ id: row.id, userId: row.userId, name: row.name, platform: row.platform }, socket as unknown as Socket);
+    // the app says what it is now (a Windows PC takes work only once its fence is set up); older apps don't
+    const now = String(req.headers["x-emplio-platform"] ?? "").slice(0, 40);
+    attach({ id: row.id, userId: row.userId, name: row.name, platform: now || row.platform }, socket as unknown as Socket);
     await db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.id)).catch(() => {});
     socket.on("close", () => void db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.id)).catch(() => {}));
   });
