@@ -26,7 +26,8 @@ const REOPEN_MS = 24 * 60 * 60_000;
 export const canReopen = (usedAt: Date | null, now = Date.now()) => !!usedAt && now - usedAt.getTime() < REOPEN_MS;
 
 // owner: whose sign-ins it carries (unknown for one picked up after a restart until a command uses it)
-export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; owner?: Owner; paid?: boolean; signedIn?: Set<string> };
+// keeper/print: a computer's browser saves its sign-ins as they change (keepSignIns)
+export type LiveBrowser = { id: string; liveUrl: string; cdpUrl: string; ends: number; timer?: Timer; keeper?: Timer; print?: string; owner?: Owner; paid?: boolean; signedIn?: Set<string> };
 const open = new Map<string, Promise<LiveBrowser>>();
 
 // Whose browser: the person's own Chrome while their computer is connected (device-browser.ts), else the cloud's.
@@ -38,6 +39,7 @@ onGone((deviceId) => {
       (live) => {
         if (live?.id.startsWith(`dev_${deviceId}_`) && open.get(chat) === pending) {
           clearTimeout(live.timer);
+          clearInterval(live.keeper);
           open.delete(chat);
         }
       },
@@ -180,6 +182,7 @@ export async function stopBrowser(conversationId: string) {
   const live = await pending.catch(() => null);
   if (!live) return;
   clearTimeout(live.timer);
+  clearInterval(live.keeper);
   stopping.add(live.id);
   // a browser that has already ended doesn't answer: don't hold the stop up for it
   const page = live.owner
@@ -250,7 +253,40 @@ const remember = (conversationId: string, pending: Promise<LiveBrowser | null>) 
   pending.then((live) => live ?? open.delete(conversationId)).catch(() => open.delete(conversationId));
 };
 
+// A computer's browser can't be saved at its stop: a shut lid ends it at once (desktop/src/main.js) and the server only
+// hears it's gone. So while it runs, its sign-ins are saved within a minute of changing, and the cloud's browser carries on with them.
+const KEEP_MS = 60_000;
+// Script-hidden cookies are the sign-ins; the ones a page's scripts write (analytics) change on every page and don't count.
+// ponytail: a site that keeps its sign-in only in local storage is saved at the stop alone; read that too if one matters
+export const signInPrint = (cookies: Cookie[]) =>
+  cookies
+    .filter((c) => c.httpOnly)
+    .map((c) => `${c.domain}\t${c.name}\t${c.value}`)
+    .sort()
+    .join("\n");
+
+async function keepSignIns(live: LiveBrowser) {
+  // a hand-back after the stop can start the keeper again (holdOpen): it ends here
+  if (stopping.has(live.id)) return clearInterval(live.keeper);
+  if (!live.owner) return;
+  const cdp = await devtools(live.cdpUrl);
+  const print = await cdp.send("Storage.getCookies").then((r) => signInPrint(r.cookies), () => undefined).finally(() => cdp.close());
+  if (print === undefined || print === live.print) return;
+  await saveState(live.owner, live.cdpUrl);
+  live.print = print;
+}
+
 const idle = (conversationId: string, live: LiveBrowser) => {
+  if (isDeviceBrowser(live.id) && !live.keeper) {
+    let busy = false;
+    live.keeper = setInterval(() => {
+      if (busy) return;
+      busy = true;
+      void keepSignIns(live)
+        .catch((e) => console.error("browser sign-ins not kept:", e))
+        .finally(() => (busy = false));
+    }, KEEP_MS);
+  }
   clearTimeout(live.timer);
   live.timer = setTimeout(() => void stopBrowser(conversationId), IDLE_MS);
 };
