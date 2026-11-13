@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.34 (2026-11-13)
+
+### What's new
+
+- Signing out and then signing in as someone else in the same tab no longer makes every message fail with "Something went wrong".
+
+### For developers
+
+- `useMe` closes `chatTransport` when `/auth/me` reports a different signed-in person than it last saw. The chat socket's sign-in is fixed at its handshake and logging out deletes that session, so every send on the old socket got "Not logged in" (#129).
+
 ## 1.2.33 (2026-11-13)
 
 ### What's new
