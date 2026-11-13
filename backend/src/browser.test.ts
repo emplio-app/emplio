@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canReopen, keepIndexedDb, signedInSites, sitesIn, stillRunning } from "./browser";
+import { canReopen, keepIndexedDb, signInPrint, signedInSites, sitesIn, stillRunning } from "./browser";
 
 test("the Live browser button lasts 24 hours after the browser last ran", () => {
   const now = Date.now();
@@ -48,4 +48,12 @@ test("a browser being stopped isn't picked up again as the chat's browser", () =
   expect(stillRunning(listed, new Set()).map((x) => x.id)).toEqual(["new", "old"]);
   expect(stillRunning(listed, new Set(["new"])).map((x) => x.id)).toEqual(["old"]);
   expect(stillRunning([b("old", "2026-11-11T04:57:56")], new Set(["old"]))).toEqual([]);
+});
+
+test("a computer's browser saves again when a sign-in changes, not when analytics cookies do", () => {
+  const c = (name: string, value: string, httpOnly: boolean) => ({ name, value, domain: ".example.com", httpOnly });
+  const before = signInPrint([c("session", "a", true), c("_ga", "1", false)]);
+  expect(signInPrint([c("_ga", "2", false), c("session", "a", true)])).toBe(before);
+  expect(signInPrint([c("session", "b", true), c("_ga", "1", false)])).not.toBe(before);
+  expect(signInPrint([c("session", "a", true), c("sid", "x", true), c("_ga", "1", false)])).not.toBe(before);
 });
