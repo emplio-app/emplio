@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.36 (2026-11-14)
+
+### What's new
+
+- Sites you sign in to in the browser on your Mac now stay signed in when you close the laptop and carry on from the website.
+
+### For developers
+
+- While a desktop app's browser runs, the server checks its script-hidden (`httpOnly`) cookies every minute and saves the browser state when they change (`keepSignIns` in `backend/src/browser.ts`). Sleep ends that browser at once (`powerMonitor` `suspend`), so the save at its stop never ran and the cloud browser started from older sign-ins (#134).
+- Desktop apps' version is 0.2.2 (#133).
+
 ## 1.2.35 (2026-11-13)
 
 ### What's new
