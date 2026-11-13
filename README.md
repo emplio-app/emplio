@@ -20,7 +20,11 @@
 
 Emplio is one agent for a whole business. Everyone on the team talks to it, on the web, on Telegram or in the Mac app. It does the work on its own Linux computer and browser, in your apps, and it writes what it learns about the business into git repos you can read.
 
-<!-- TODO before merge: an unedited screen recording of a real session goes here. -->
+<p align="center">
+  <img src="docs/images/real-session.gif" alt="A real session: Emplio opens Hacker News, hands the job to a Web Researcher agent it sets up, returns a spreadsheet of the top 10 stories, then saves a rule to leave out crypto stories in its memory">
+</p>
+
+<p align="center"><sub>A real session on a fresh install from the ready-made images, recorded 13 Nov 2026. Waiting is sped up 4× and a two-minute idle pause is cut; nothing else is edited. <a href="docs/real-session.mp4">Video</a>.</sub></p>
 
 ## Run it
 
