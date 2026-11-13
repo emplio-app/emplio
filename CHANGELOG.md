@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.22 (2026-11-13)
+
+### What's new
+
+- Emplio for Linux: download it from the Downloads page, unpack it and open `emplio`. It's Emplio in its own window, with its notifications on your desktop. For 64-bit PCs.
+
+### For developers
+
+- `desktop/build/linux/emplio` starts the app (`emplio-app`), adding `--no-sandbox` only where Ubuntu blocks Chromium's own sandbox and `chrome-sandbox` isn't set up as root.
+- The Linux archive no longer carries macOS file attributes (`tar --no-xattrs --no-mac-metadata`).
+- Tried on Ubuntu 24.04 (x64): opens to the sign-in page.
+
 ## 1.2.21 (2026-11-13)
 
 ### What's new
