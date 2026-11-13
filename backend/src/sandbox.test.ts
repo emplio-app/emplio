@@ -250,6 +250,53 @@ elif "url" in a: print(${JSON.stringify(page)})
   rmSync(home, { recursive: true });
 });
 
+test("an old site's whole-page form save is listed and kept like any call, but its sign-in form never is", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  const form = "https://old.test/invoices/12/edit";
+  // as the browser records them: a post that redirected has no status, and the page it went on to shares its id
+  const records = [
+    { requestId: "L", method: "POST", url: "https://old.test/login", status: null, resourceType: "Document", postData: "user=a&password=hunter2", headers: { Referer: "https://old.test/login" } },
+    { requestId: "L", method: "GET", url: "https://old.test/invoices", status: 200, resourceType: "Document", mimeType: "text/html", headers: {} },
+    { requestId: "F", method: "POST", url: "https://old.test/invoices/12", status: null, resourceType: "Document", postData: "__CODE=abc123&id=12&amount=150", headers: { "Content-Type": "application/x-www-form-urlencoded", Referer: form } },
+    { requestId: "F", method: "GET", url: "https://old.test/invoices/12", status: 200, resourceType: "Document", mimeType: "text/html", headers: {} },
+  ];
+  const fake = `#!/usr/bin/env python3
+import json, sys
+a = sys.argv[1:]
+R = ${JSON.stringify(records).replaceAll("null", "None")}
+if "--json" in a and "requests" in a: print(json.dumps({"data": {"requests": R}}))
+elif "--json" in a and "request" in a:
+    i = a[-1]; print(json.dumps({"data": {**next(r for r in R if r["requestId"] == i), "responseBody": "<html><title>Books</title><body><p>Amount: 150</p><script>x=1</script></body></html>"}}))
+elif "eval" in a and "innerText" in sys.stdin.read(): print(json.dumps(json.dumps({"page": "old.test", "blocked": False, "signIn": False})))
+elif "url" in a: print(${JSON.stringify(form)})
+`;
+  writeFileSync(join(home, ".local/bin/agent-browser"), fake, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `form${Date.now()}`;
+  const run = async (command: string) => {
+    const p = Bun.spawn(["bash", "-c", command + requestsTrailer(key)], {
+      env: { HOME: home, PATH: `${home}:${process.env.PATH}`, EZ_KEY: key, BROWSER_CDP_URL: "x", BROWSER_SESSION: `s${key}`, BROWSER_POINTER: "p" },
+      cwd: home,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return await new Response(p.stdout).text();
+  };
+
+  const out = await run(`true`);
+  expect(out).toContain("POST /invoices/* 302 sends {__CODE, id, amount} returns page");
+  expect(out).not.toContain("/login");
+  const told = JSON.parse(atob(out.split("\n").find((l) => l.startsWith(`SITECALLS:${key}\t`))!.split("\t")[1]!));
+  expect(told.rows).toEqual([{ host: "old.test", method: "POST", path: "/invoices/*", op: "", query: "", sends: "{__CODE, id, amount}", returns: "page", keys: null }]);
+  expect(JSON.stringify(told)).not.toMatch(/abc123|hunter2|150/);
+  // in full, the page it landed on reads as text
+  const full = await run(`emplio browser calls POST /invoices/12`);
+  expect(full).toContain("Reply: Books Amount: 150");
+  expect(full).not.toContain("<");
+  rmSync(home, { recursive: true });
+});
+
 test("emplio browser run: a saved script drives the browser, takes arguments, and stops at the first failed step", async () => {
   const home = mkdtempSync(join(tmpdir(), "emplio-"));
   mkdirSync(join(home, ".local/bin"), { recursive: true });
