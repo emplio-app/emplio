@@ -116,6 +116,7 @@ export class Panes {
   }
 
   #dispose(t) {
+    t.gone = true;
     for (const w of [this.getWindow(), this.getHost()]) {
       try {
         w?.contentView.removeChildView(t.view);
@@ -127,18 +128,28 @@ export class Panes {
   }
 
   // --- tabs ---------------------------------------------------------------------------------------------------
-  async newTab(b, url = "about:blank", activate = true) {
-    const view = new WebContentsView({ webPreferences: { session: this.#session(), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  // popup: a page this browser opened itself ({ view, opener }), already loading; url is then unused
+  async newTab(b, url = "about:blank", activate = true, popup = null) {
+    const view = popup?.view ?? new WebContentsView({ webPreferences: { session: this.#session(), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     const wc = view.webContents;
-    const tab = { id: ++this.tabId, view, targetId: null, title: "", loading: false, favicon: "" };
+    const tab = { id: ++this.tabId, view, targetId: null, title: "", loading: false, favicon: "", opener: popup?.opener ?? null };
     view.setVisible(false);
     this.getHost().contentView.addChildView(view);
     tab.home = "host";
-    // a page that opens another (a sign-in popup, a link to a new window) gets a tab of its own here
-    wc.setWindowOpenHandler(({ url }) => {
-      void this.newTab(b, url).catch(() => {});
-      return { action: "deny" };
-    });
+    // A page that opens another (a sign-in popup, a link to a new window) gets a tab of its own here, still linked to
+    // the page that opened it, as in any browser: a sign-in popup hands the sign-in back to its opener and closes itself.
+    // A tab opened apart from it would sit on a blank "request complete" page instead.
+    wc.setWindowOpenHandler(() => ({
+      action: "allow",
+      outlivesOpener: true,
+      createWindow: (options) => {
+        const child = new WebContentsView({ webContents: options.webContents, webPreferences: options.webPreferences });
+        void this.newTab(b, null, true, { view: child, opener: tab }).catch(() => {});
+        return child.webContents;
+      },
+    }));
+    // the page closed itself (window.close(), as a sign-in popup does when it's done)
+    wc.once("destroyed", () => tab.gone || this.closeTab(b, tab));
     wc.on("page-favicon-updated", (_event, icons) => {
       tab.favicon = icons.find((i) => /^https?:/.test(i)) ?? "";
       this.sync();
@@ -158,7 +169,7 @@ export class Panes {
     this.layout();
     this.#emulate(b);
     this.sync();
-    void wc.loadURL(url).catch(() => {});
+    if (!popup) void wc.loadURL(url).catch(() => {});
     return tab;
   }
 
@@ -182,7 +193,8 @@ export class Panes {
     if (i < 0) return;
     b.tabs.splice(i, 1);
     this.#dispose(tab);
-    if (b.active === tab) b.active = b.tabs[Math.min(i, b.tabs.length - 1)] ?? null;
+    // a popup that closes goes back to the page that opened it
+    if (b.active === tab) b.active = (tab.opener && b.tabs.includes(tab.opener) ? tab.opener : b.tabs[Math.min(i, b.tabs.length - 1)]) ?? null;
     // a browser always has a tab: closing the last one leaves a blank one
     if (!b.tabs.length) void this.newTab(b, "about:blank").catch(() => {});
     this.layout();

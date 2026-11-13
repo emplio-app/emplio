@@ -4,13 +4,14 @@
 import { rmSync, readdirSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, powerMonitor, safeStorage, shell } from "electron";
+import { BrowserWindow, Menu, Notification, Tray, app, autoUpdater, ipcMain, nativeImage, powerMonitor, safeStorage, shell } from "electron";
 import { Boxes } from "./box.js";
 import { Browsers, fetchChrome, findChrome } from "./chrome.js";
 import { Panes } from "./pane.js";
 import { overdue } from "./sweep.js";
 import { loadConfig } from "./config.js";
 import { Link } from "./link.js";
+import { Updater } from "./update.js";
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 const DEFAULT_URL = "https://emplio.app";
@@ -25,7 +26,9 @@ app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled");
 let quitting = false;
 // Cmd+Q puts the app in the background (no window, no Dock icon, still in the menu bar and still connected) unless this is set
 let fullQuit = false;
-const HIDDEN = process.argv.includes("--hidden");
+// started with the computer, or reopened after an update while it was in the background (set again in whenReady)
+let HIDDEN = process.argv.includes("--hidden");
+let updater;
 
 const vault = {
   seal: (text) => (safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(text).toString("base64") : null),
@@ -181,7 +184,7 @@ function setState(next) {
 
 function buildMenu() {
   const status = { label: WORDS[state], enabled: false };
-  const mine = [status];
+  const mine = [status, ...(updater?.ready ? [{ label: "Restart to update", click: () => restart(false) }] : [])];
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       { label: "Emplio", submenu: [{ role: "about" }, { type: "separator" }, ...mine, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { type: "separator" }, { role: "quit" }] },
@@ -192,6 +195,18 @@ function buildMenu() {
   );
   tray?.setContextMenu(Menu.buildFromTemplate([...mine, { type: "separator" }, { label: "Show Emplio", click: showWindow }, { label: "Quit Emplio completely", click: quitCompletely }]));
 }
+
+// Quit and reopen as the new version; `hidden`: back in the background, the way it was
+function restart(hidden) {
+  config.reopenHidden = hidden;
+  config.save();
+  fullQuit = true;
+  // a Mac's updater quits the app itself
+  if (updater.apply() && process.platform !== "darwin") app.quit();
+}
+
+// Nothing going on: no command running, no browser of Emplio's open, the window not up
+const idle = () => !boxes.running.size && !panes.browsers.size && !browsers.open.size && (!win || win.isDestroyed() || !win.isVisible());
 
 function quitCompletely() {
   fullQuit = true;
@@ -331,6 +346,17 @@ app.whenReady().then(() => {
   const file = join(app.getPath("userData"), "config.json");
   config = loadConfig(file, vault);
   if (arg("url")) config.appUrl = arg("url");
+  if (config.reopenHidden !== undefined) {
+    HIDDEN = config.reopenHidden;
+    delete config.reopenHidden;
+    config.save();
+  }
+  // the app keeps itself up to date (update.js): a new version goes in once nothing is going on
+  if (app.isPackaged) {
+    updater = new Updater({ api: config.apiUrl ?? "https://api.emplio.app", version: app.getVersion(), onReady: buildMenu, autoUpdater });
+    updater.start();
+    setInterval(() => updater.ready && idle() && restart(true), 5 * 60_000).unref();
+  }
   // a Mac's menu bar shows the tray's title (● / ○); Linux shows only an icon, so it gets the logo
   tray = new Tray(process.platform === "darwin" ? nativeImage.createEmpty() : nativeImage.createFromPath(join(import.meta.dirname, "logo.png")).resize({ width: 22 }));
   tray.setToolTip("Emplio");

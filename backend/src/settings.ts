@@ -179,7 +179,7 @@ export async function settingsCommand(who: Who, args: string[], allow: Allow) {
     const s = forPeople(await savedSettings(who.workspaceId));
     const lock = s.openrouterKey ? null : await cloud.models.lock(who.workspaceId);
     const lines = SETTING_FIELDS.map((f) => {
-      const can = f.type === "choice" ? f.options.map((o) => o.value).join(" | ") : f.type === "number" ? `${f.min}–${f.max} ${f.unit}` : f.type === "toggle" ? "on | off" : f.type === "model" ? "auto | <provider/model>" : "set in Settings only";
+      const can = f.type === "choice" ? f.options.map((o) => (o.value === o.label.toLowerCase() ? o.value : `${o.value} (${o.label})`)).join(" | ") : f.type === "number" ? `${f.min}–${f.max} ${f.unit}` : f.type === "toggle" ? "on | off" : f.type === "model" ? "auto | <provider/model>" : "set in Settings only";
       return `${f.key}: ${shownValue(f.key, s[f.key as keyof Settings])}   ${f.label}. ${f.help} (${can})`;
     });
     return [
@@ -187,7 +187,7 @@ export async function settingsCommand(who: Who, args: string[], allow: Allow) {
       `name: ${w?.name}   The business's name`,
       ...lines,
       ...(canEdit(who.role) ? [] : ["Only the owner or an admin can change the business's settings and name."]),
-      ...(lock ? [`Note: ${lock.why} Until then the models run as "save", whatever these say.`] : []),
+      ...(lock ? [`Note: ${lock.why} Until then the models run as "save" (Standard), whatever these say.`] : []),
     ].join("\n");
   }
   if (sub !== "set" || !key || !rest.length) return SETTINGS_USAGE;
