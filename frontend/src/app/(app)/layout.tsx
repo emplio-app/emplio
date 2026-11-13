@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/chat/app-sidebar";
 import { BottomTabs } from "@/components/chat/bottom-tabs";
 import { JustUpdated, NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
+import { DesktopHistory } from "@/components/desktop-history";
 import { useDesktopLink } from "@/components/desktop-link";
 import { useWebNotifications } from "@/components/web-notifications";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -31,6 +32,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <DraftProvider>
       <TooltipProvider>
+        <DesktopHistory />
         <SidebarProvider className="h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden pt-(--safe-top)">
