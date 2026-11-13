@@ -150,9 +150,10 @@ export const PAGE_CHECK = String.raw`(() => {
 
 // emplio browser calls|send: what the page asked its server, and repeating it from the signed-in page.
 // Login headers are read from the browser's record here, so they never reach the output or the conversation.
-// ponytail: fetch and XHR only, so old sites that post whole pages aren't listed; they stay on the page itself
+// Old sites that post a whole form and reload count too: send then fills the rest of that form from the open page.
+// ponytail: binary bodies, live connections and file-upload forms aren't covered; those stay on the page itself
 const CALLS_PY = String.raw`
-import base64, json, os, re, subprocess, sys, tempfile
+import base64, html, json, os, re, subprocess, sys, tempfile
 from urllib.parse import urlsplit, parse_qsl
 
 AB = [os.environ["EMPLIO_AB"], "--cdp", os.environ["BROWSER_CDP_URL"], "--session", os.environ["BROWSER_SESSION"]]
@@ -166,13 +167,60 @@ BLOCK = re.compile(r"just a moment|attention required|verify you are human|check
 PAGE_CHECK = ${JSON.stringify(PAGE_CHECK)}
 PAID = os.environ.get("BROWSER_PAID") == "1"
 SECRET = re.compile(r"""("?[\w-]*(?:pass|pwd|secret|token|otp|cvv|api_?key|authorization)[\w-]*"?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|[^&\s,}]+)""", re.I)
+# Runs in the signed-in page. Posting to a form that's on the open page sends the whole form as it stands, with
+# what was given in place of its visible fields: hidden one-time codes are always the page's own, fresh. Only that
+# form's exact address counts, so a form for another record is never mixed in. A page in reply comes back as its text.
+SEND_JS = r'''(async () => {
+  const url = URL_, opts = OPTIONS_;
+  let form = null;
+  if (opts.method === "POST" && typeof opts.body === "string" && !/^\s*[\[{]/.test(opts.body)) {
+    const at = (u) => { const x = new URL(u, location.href); return x.origin + x.pathname + x.search; };
+    form = [...document.forms].find((f) => f.method === "post" && at(f.action) === at(url)) || null;
+  }
+  if (form) {
+    if (form.enctype.includes("multipart")) return JSON.stringify({ multipart: true });
+    const mine = new URLSearchParams(opts.body), body = new URLSearchParams();
+    const hidden = new Set([...form.querySelectorAll("input[type=hidden][name]")].map((i) => i.name));
+    for (const [k, v] of new FormData(form)) if (typeof v === "string" && (hidden.has(k) || !mine.has(k))) body.append(k, v);
+    for (const [k, v] of mine) if (!hidden.has(k)) body.append(k, v);
+    opts.body = body.toString();
+    opts.headers["Content-Type"] = "application/x-www-form-urlencoded";
+  }
+  const r = await fetch(url, opts);
+  let text = await r.text();
+  const page = (r.headers.get("content-type") || "").includes("html");
+  if (page) {
+    const d = new DOMParser().parseFromString(text, "text/html");
+    d.querySelectorAll("script,style,noscript,template").forEach((e) => e.remove());
+    d.querySelectorAll("br,p,div,li,tr,h1,h2,h3,h4,h5,h6,table,form,section,article,header,footer").forEach((e) => e.append("\n"));
+    d.querySelectorAll("td,th").forEach((e) => e.append(" "));
+    text = ((d.title ? d.title + "\n" : "") + (d.body ? d.body.textContent : "")).replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim().slice(0, 3000);
+  }
+  return JSON.stringify({ status: r.status, body: text, page, form: !!form, at: r.redirected ? r.url : "" });
+})()'''
 
 def ab(*args, stdin=None):
     return subprocess.run(AB + list(args), input=stdin, capture_output=True, text=True, timeout=8 if sys.argv[2:] == ["--new"] else 120)
 def data(*args):
     return json.loads(ab("--json", *args).stdout)["data"]
 def records():
-    return data("network", "requests", "--type", "xhr,fetch")["requests"]
+    rows = data("network", "requests", "--type", "xhr,fetch,document")["requests"]
+    # a request that was redirected has no status of its own; the page it went on to shares its id
+    after = set()
+    for r in reversed(rows):
+        if r.get("status") is None and r.get("requestId") in after: r["status"] = 302
+        after.add(r.get("requestId"))
+    return rows
+# a whole-page form post (an old site's Save), not a background call
+def form_post(r):
+    return (r.get("resourceType") or "").lower() == "document" and r["method"] == "POST"
+def reply(text):
+    try: return json.loads(text) if text else None
+    except Exception: return None
+def readable(body):
+    if not (body or "").lstrip().startswith("<"): return body or ""
+    body = html.unescape(re.sub(r"(?is)<(script|style|noscript)\b.*?</\1\s*>|<[^>]+>", " ", body))
+    return re.sub(r"\s*\n\s*", "\n", re.sub(r"[ \t\r\f\v]+", " ", body)).strip()
 def detail(r):
     try: return data("network", "request", r["requestId"])
     except Exception: return r
@@ -205,6 +253,9 @@ def name(r):
 def worth(r):
     status = r.get("status")
     if status is None or "/cdn-cgi/" in r["url"]: return False
+    # a sign-in form is never one to repeat: Emplio doesn't have the password
+    if form_post(r): return same_site(r) and status < 400 and not re.search(r"(^|&)[^=&]*(pass|pwd)", r.get("postData") or "", re.I)
+    if (r.get("resourceType") or "").lower() == "document": return False
     if "json" in (r.get("mimeType") or ""): return True
     return r["method"] != "GET" and same_site(r) and 200 <= status < 300
 def shape(v, depth=0):
@@ -215,8 +266,9 @@ def shape(v, depth=0):
     return "{" + ", ".join(parts) + (", ..." if len(v) > 8 else "") + "}"
 def line(r):
     d = detail(r)
-    sent, got = parse(d.get("postData")), parse(d.get("responseBody"))
-    return (name(r) + " " + str(r.get("status")) + (" sends " + shape(sent) if sent else "") + (" returns " + shape(got) if got else ""))[:160]
+    sent, got = parse(d.get("postData")), reply(d.get("responseBody"))
+    back = " returns page" if form_post(r) else " returns " + shape(got) if got else ""
+    return (name(r) + " " + str(r.get("status")) + (" sends " + shape(sent) if sent else "") + back)[:160]
 def masked(text):
     return SECRET.sub(lambda m: m.group(1) + '"***"', text or "")
 def top(v):
@@ -227,7 +279,7 @@ def row(r, sent, got):
     u = urlsplit(r["url"])
     return {"host": u.netloc, "method": r["method"], "path": clean(u.path)[:500], "op": (op(r) or "")[:200],
             "query": "&".join(k + "=" for k, _ in parse_qsl(u.query, keep_blank_values=True))[:300],
-            "sends": shape(sent)[:500] if sent else "", "returns": shape(got)[:500] if got else "", "keys": top(got)}
+            "sends": shape(sent)[:500] if sent else "", "returns": "page" if form_post(r) else shape(got)[:500] if got else "", "keys": top(got)}
 def encoded(report):
     return base64.b64encode(json.dumps(report).encode()).decode()
 
@@ -257,7 +309,7 @@ def new():
         keep = []
         for r in [r for r in rows if same_site(r) and (r.get("status") or 0) < 400][:15]:
             d = detail(r)
-            keep.append(row(r, parse(d.get("postData")), parse(d.get("responseBody"))))
+            keep.append(row(r, parse(d.get("postData")), reply(d.get("responseBody"))))
         print("SITECALLS:" + os.environ["EZ_KEY"] + "\t" + encoded({"page": urlsplit(ab("get", "url").stdout.strip()).netloc, "rows": keep}))
     except Exception:
         pass  # only a hint: never spoils the command it follows
@@ -283,7 +335,7 @@ def calls(args):
     print("Query: " + masked(urlsplit(r["url"]).query))
     print("Headers sent (values hidden): " + ", ".join(k for k in (r.get("headers") or {}) if not DROP.match(k)))
     print("Sent: " + masked(d.get("postData"))[:4000])
-    print("Reply: " + masked(d.get("responseBody"))[:4000])
+    print("Reply: " + masked(readable(d.get("responseBody")))[:4000])
     return 0
 
 def send(args):
@@ -308,11 +360,11 @@ def send(args):
         headers["Content-Type"] = "application/json"
     options = {"method": method, "headers": headers, "credentials": "include"}
     if body is not None: options["body"] = body
-    js = "(async () => { const r = await fetch(" + json.dumps(url) + ", " + json.dumps(options) + "); return JSON.stringify({ status: r.status, body: await r.text() }); })()"
-    p = ab("eval", "--stdin", stdin=js)
+    p = ab("eval", "--stdin", stdin=SEND_JS.replace("OPTIONS_", json.dumps(options), 1).replace("URL_", json.dumps(url), 1))
     try: out = json.loads(json.loads(p.stdout))
     except Exception:
         return fail(method + " " + target + ": no reply, so it may or may not have gone through (check the site before trying again; this tab must be on that site): " + (p.stderr or p.stdout)[:300])
+    if out.get("multipart"): return fail(method + " " + target + ": this form uploads files, so do it on the page")
     # its own request isn't one the page made: never saved as what the site does
     try:
         mine = find(records(), method, target)
@@ -320,10 +372,13 @@ def send(args):
             with open(SENT, "a") as f: f.write(mine["requestId"] + "\n")
     except Exception:
         pass
-    # a web page where data should be, saying no
-    if not PAID and out["body"].lstrip()[:1] == "<" and BLOCK.search(out["body"][:3000]): tell_blocked(url)
-    if out["status"] >= 400: return fail(method + " " + target + ": " + str(out["status"]) + " " + masked(out["body"])[:300])
-    print(str(out["status"]))
+    # a web page where data should be, saying no (a form's own page is expected, and may well mention a captcha)
+    if not PAID and out.get("page") and not out.get("form") and BLOCK.search(out["body"][:3000]): tell_blocked(url)
+    if out["status"] >= 400:
+        was_form = any(form_post(r) and r["method"] == method and clean(urlsplit(r["url"]).path) == clean(t.path) for r in rows)
+        hint = " (a form: open the page that has it, then send again)" if was_form and not out.get("form") else ""
+        return fail(method + " " + target + ": " + str(out["status"]) + " " + masked(out["body"])[:300] + hint)
+    print(str(out["status"]) + (" -> " + out["at"] if out.get("at") else ""))
     print(masked(out["body"]))
     tell_sent(url, method, body, out["body"])
     return 0
@@ -911,6 +966,7 @@ emplio browser send POST /api/expenses @/work/tmp/x.json   # or a body inline, o
 \`\`\`
 - Reading: when a call returns what you need, use \`send\` rather than snapshots and clicking through pages.
 - Saving: do the first on the page, read that call in full, then \`send\` the rest, however few are left, one at a time, stopping at the first failure (&& or a shell loop). A failure with no reply may have gone through: check the site before sending it again. Skip the first on the page when this site's skill or notes, or something the person showed you, give the exact call.
+- Forms (\`returns page\`, an older site that reloads on save): open the page with that record's form, then \`send POST /invoices/13 'amount=150'\` with only the fields you change, as name=value&...; the rest of the form, its hidden codes included, comes from that page. You get the text of the page it lands on: read it for an error before the next.
 - Stay on that site's tab. Refused, or the page sends something different: go to 2. Don't read \`network requests --json\`: it prints login tokens.
 - Requests you've seen are saved by themselves, and those from earlier work are listed the first time you open a site in a reply: for reading, use them right away. In that site's skill save only what the list can't say: what each is for and which fields matter. Never tokens or customer data.
 - The second time you do the same thing on a site (create, edit or delete a record), make it a small script in that site's skill, taking what changes as arguments, and name it in SKILL.md: \`emplio browser run <skill folder>/change_date.py INV-12 01-10-2026\`. Inside, Python calling \`emplio browser ...\` with subprocess.run(check=True): \`send\` where a call works; otherwise page steps with \`find\`, never refs, which go stale. From then on run it, once per record, rather than repeating the steps; if it breaks, fix the script.
