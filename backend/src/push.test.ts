@@ -9,9 +9,10 @@ test("a lock screen shows plain words", () => {
 });
 
 const note = (body = "Done") => ({ title: "Emplio", body, path: "/chat/c1" });
-function senders(o: { mac?: boolean | "throws" } = {}) {
+function senders(o: { mac?: boolean | "throws"; looking?: boolean } = {}) {
   const got: string[] = [];
   const s: Senders = {
+    app: () => (o.looking ? (got.push("app"), true) : false),
     desktop: async () => {
       if (o.mac === "throws") throw new Error("app too old");
       got.push("mac");
@@ -37,9 +38,15 @@ test("without the Mac app (or one that can't show it), the browser and the phone
   }
 });
 
+test("looking at Emplio: it shows there and nowhere else", async () => {
+  const { s, got } = senders({ mac: true, looking: true });
+  await route("u4", note(), s);
+  expect(got).toEqual(["app"]);
+});
+
 test("a sender that fails doesn't stop the others", async () => {
   const got: string[] = [];
-  await route("u2", note(), { desktop: async () => false, web: async () => Promise.reject(new Error("x")), phone: async () => void got.push("phone") });
+  await route("u2", note(), { app: () => false, desktop: async () => false, web: async () => Promise.reject(new Error("x")), phone: async () => void got.push("phone") });
   expect(got).toEqual(["phone"]);
 });
 
