@@ -16,6 +16,9 @@ ditto --norsrc --noextattr "$APP" "$WORK/Emplio.app"
 find "$WORK/Emplio.app" -name "._*" -delete
 APP="$WORK/Emplio.app"
 sh build/sign-notarize.sh app "$APP"
+# the signed app, zipped: what apps already installed update to (desktop/src/update.js)
+rm -f "${OUT%.dmg}-mac.zip"
+ditto -c -k --keepParent "$APP" "${OUT%.dmg}-mac.zip"
 rm -f "$OUT"
 "$DMGBUILD" -s build/dmg-settings.py -D app="$APP" -D settings="$PWD/build/dmg-settings.py" "Emplio" "$OUT"
 sh build/sign-notarize.sh dmg "$OUT"
