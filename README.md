@@ -18,7 +18,7 @@
   <a href="LICENSE">AGPL-3.0</a>
 </p>
 
-Emplio is one agent for a whole business. Everyone on the team talks to it, on the web, on Telegram or in the desktop app. It does the work on its own Linux computer and browser, in your apps, and it writes what it learns about the business into git repos you can read.
+Emplio is one agent for a whole business. Everyone on the team talks to it, on the web, on Telegram or in the desktop app. It does the work on its own computer and browser, in your apps, and it writes what it learns about the business into git repos you can read.
 
 <p align="center">
   <img src="docs/images/real-session.gif" alt="A real session: Emplio opens Hacker News, hands the job to a Web Researcher agent it sets up, returns a spreadsheet of the top 10 stories, then saves a rule to leave out crypto stories in its memory">
@@ -63,7 +63,7 @@ These are the decisions that make it what it is.
 
 ### One tool: `bash`
 
-The model gets one tool, `bash`, on its own Linux computer ([`chat.ts`](backend/src/chat.ts)). Everything beyond plain Linux goes through one command, `emplio`: apps, the browser, tasks, the team, records, skills, hand-offs ([`sandbox.ts`](backend/src/sandbox.ts), listed in [docs](https://docs.emplio.app/developers/cli)).
+The model gets one tool, `bash`, on its own computer: a Linux container, or your Mac or PC through the desktop app ([`chat.ts`](backend/src/chat.ts)). Everything beyond plain Linux goes through one command, `emplio`: apps, the browser, tasks, the team, records, skills, hand-offs ([`sandbox.ts`](backend/src/sandbox.ts), listed in [docs](https://docs.emplio.app/developers/cli)).
 
 Models are good at shells, so we don't spend the prompt on dozens of tool schemas. Most `emplio` subcommands are thin calls to the API, which checks who may do what. The rules live on the server, not in the prompt. Adding a capability means adding a subcommand.
 
