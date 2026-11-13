@@ -19,6 +19,7 @@ import {
   RefreshCcwIcon,
   SendIcon,
   TriangleAlertIcon,
+  Undo2Icon,
   UploadIcon,
   XIcon,
 } from "lucide-react";
@@ -70,6 +71,7 @@ import {
   api,
   chatTransport,
   conversationsQueryKey,
+  useArchiveConversation,
   useConversations,
   useMe,
   useRenameConversation,
@@ -927,6 +929,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // an old Telegram-only thread is answered there; the main chat is on Telegram and here at once
   const here = conversations?.find((c) => c.id === id);
   const onTelegram = here?.channel === "telegram" && here.kind !== "main";
+  const archive = useArchiveConversation();
   const firstName = me?.user.name?.split(" ")[0];
 
   // for the memoized message list below: its buttons call the latest of these, without redrawing it
@@ -1154,6 +1157,21 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </span>
               )}
               <BrowserChip />
+              {/* finished with it: into the sidebar's Done list and back to the main chat; anything new brings it back */}
+              {here?.kind === "chat" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => {
+                    archive.mutate({ id, archived: !here.archived });
+                    if (!here.archived) router.push("/home");
+                  }}
+                >
+                  {here.archived ? <Undo2Icon /> : <CheckIcon />}
+                  {here.archived ? "Not done" : "Done"}
+                </Button>
+              )}
             </div>
           </header>
 

@@ -12,8 +12,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={dark ? "dark" : "light"}
       className="toaster group"
-      // on a phone, above the bottom tabs and the home bar (--tabs-h, globals.css), not over them
-      mobileOffset={{ bottom: "calc(var(--tabs-h, var(--safe-bottom)) + 0.75rem)" }}
+      // top right under the top bar, like a computer's own notifications; on a phone along the top, below the notch
+      position="top-right"
+      offset={{ top: "4rem", right: "1rem" }}
+      mobileOffset={{ top: "calc(env(safe-area-inset-top) + 0.75rem)" }}
       icons={{
         success: (
           <CircleCheckIcon className="size-4" />
