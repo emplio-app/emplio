@@ -1,4 +1,4 @@
-// emplio.app/download/mac (or /linux): an Emplio desktop app. The browser stays on our own site and the file downloads at
+// emplio.app/download/mac (or /mac-older for macOS 11 and 12, or /linux): an Emplio desktop app. The browser stays on our own site and the file downloads at
 // once: the server fetches it from the backend (which keeps it in our S3 bucket) and passes it straight through.
 const API = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 

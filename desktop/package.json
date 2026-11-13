@@ -8,9 +8,11 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-packager . Emplio --platform=darwin --arch=arm64 --out=out --overwrite --app-bundle-id=app.emplio.desktop --icon=build/icon.icns --ignore='^/(out|\\.git)' --extend-info=info.plist",
+    "pack": "electron-packager . Emplio --platform=darwin --arch=universal --overwrite --app-bundle-id=app.emplio.desktop --icon=build/icon.icns --ignore='^/(out|\\.git)' --extend-info=info.plist --out=out",
+    "pack:older": "electron-packager . Emplio --platform=darwin --arch=universal --overwrite --app-bundle-id=app.emplio.desktop --icon=build/icon.icns --ignore='^/(out|\\.git)' --extend-info=info.plist --out=out/older --electron-version=37.10.3",
     "test": "bun test",
-    "dmg": "npm run pack && sh build/make-dmg.sh",
+    "dmg": "npm run pack && sh build/make-dmg.sh out/Emplio-darwin-universal/Emplio.app",
+    "dmg:older": "npm run pack:older && sh build/make-dmg.sh out/older/Emplio-darwin-universal/Emplio.app older",
     "pack:linux": "electron-packager . Emplio --platform=linux --arch=x64 --out=out --overwrite --executable-name=emplio --ignore='^/(out|\\.git|build)'",
     "linux": "npm run pack:linux && COPYFILE_DISABLE=1 tar -C out --exclude='._*' -czf out/Emplio-linux-x64.tar.gz Emplio-linux-x64"
   },
