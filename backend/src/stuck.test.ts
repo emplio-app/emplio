@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { failureGuard } from "./stuck";
+import { failureGuard, outOfUsage, unlessStuck } from "./stuck";
 
 test("same failure: warned the second time, stopped the third", () => {
   const g = failureGuard();
@@ -33,4 +33,12 @@ test("background starts and stopped commands aren't judged", () => {
     expect(g.check("x", { stopped: true, exitCode: 130 })).toBeNull();
   }
   expect(g.stuck).toBe(false);
+});
+
+test("usage running out ends the run's commands with the reason", async () => {
+  const g = failureGuard();
+  expect(g.end(outOfUsage("This month's usage is used up."))).toContain("This month's usage is used up.");
+  expect(g.stuck).toBe(true);
+  const step = await unlessStuck(async () => ({}), g)(null);
+  expect(step).toMatchObject({ toolChoice: "none", activeTools: [] });
 });

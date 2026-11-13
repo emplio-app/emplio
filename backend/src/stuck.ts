@@ -15,6 +15,10 @@ const AGAIN =
 const STOP =
   "[Stopped: commands keep failing the same way. No more commands this time: tell them plainly what you were trying to do, what's blocking it (the error, in everyday words), and what you need from them to get past it.]";
 
+// reason: why the business is paused (credit.pausedReason)
+export const outOfUsage = (reason: string) =>
+  `[Stopped: usage just ran out. ${reason} No more commands this time: in your last message tell them plainly what's done, what's left, and that you'll carry on from there as soon as usage is added.]`;
+
 export function failureGuard() {
   const seen = new Map<string, number>();
   let inARow = 0;
@@ -22,6 +26,11 @@ export function failureGuard() {
   return {
     get stuck() {
       return stuck;
+    },
+    // ends the run's commands for another reason (usage ran out): its next step writes its last message
+    end(note: string) {
+      stuck = true;
+      return note;
     },
     // what to add to this command's output, if anything
     check(command: string, result: { exitCode?: unknown; output?: unknown; stopped?: unknown }): string | null {

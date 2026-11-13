@@ -38,7 +38,7 @@ import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summ
 import { settingsFor } from "./settings";
 import { model, modelForJob } from "./models";
 import { timezoneOf, when } from "./time";
-import { failureGuard, unlessStuck, type FailureGuard } from "./stuck";
+import { failureGuard, outOfUsage, unlessStuck, type FailureGuard } from "./stuck";
 import type { Bill } from "./credit";
 import { cloud } from "./cloud";
 import { slashCommand } from "./skills";
@@ -960,6 +960,10 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         if (!finished) yield { approvals: [...cards.values()], ...(started.size && { jobs: [...started] }) };
       }
       let result = judged(await done);
+      // Usage ran out during this command (the check before the reply only covers its start): no more commands,
+      // and its next step is its last message, so the work stops at once but never without a word (stuck.ts)
+      const out = await cloud.credit.pausedReason(ctx.workspaceId).catch(() => null);
+      if (out) result = { ...result, output: `${String(result.output ?? "")}\n\n${guard.end(outOfUsage(out))}` };
       // on the cards it allowed: how it went
       void outcome([...cards.values()], ctx.userId, result).catch(() => {});
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
