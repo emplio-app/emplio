@@ -1,7 +1,7 @@
 {
   "name": "emplio-desktop",
   "productName": "Emplio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Emplio on your Mac or PC: the same app, plus your own computer and browser for Emplio to work on while it's awake.",
   "type": "module",
