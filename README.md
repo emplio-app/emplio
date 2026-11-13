@@ -63,7 +63,7 @@ These are the decisions that make it what it is.
 
 ### One tool: `bash`
 
-The model gets one tool, `bash`, on its own computer: a Linux container, or your Mac or PC through the desktop app ([`chat.ts`](backend/src/chat.ts)). Everything beyond plain Linux goes through one command, `emplio`: apps, the browser, tasks, the team, records, skills, hand-offs ([`sandbox.ts`](backend/src/sandbox.ts), listed in [docs](https://docs.emplio.app/developers/cli)).
+The model gets one tool, `bash`, on its own computer: a Linux container, or your Mac or PC through the desktop app ([`chat.ts`](backend/src/chat.ts)). Everything beyond a plain shell goes through one command, `emplio`: apps, the browser, tasks, the team, records, skills, hand-offs ([`sandbox.ts`](backend/src/sandbox.ts), listed in [docs](https://docs.emplio.app/developers/cli)).
 
 Models are good at shells, so we don't spend the prompt on dozens of tool schemas. Most `emplio` subcommands are thin calls to the API, which checks who may do what. The rules live on the server, not in the prompt. Adding a capability means adding a subcommand.
 
