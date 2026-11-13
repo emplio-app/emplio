@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.28 (2026-11-13)
+
+### What's new
+
+- When usage runs out partway through a piece of work, Emplio now stops right away and sends one last message saying what's done, what's left, and that it will carry on as soon as usage is added, instead of finishing the whole job first.
+- The free trial for new businesses is now twice as big.
+
+### For developers
+
+- After each command, a paused business (`credit.pausedReason`) ends the run's commands via `failureGuard().end(outOfUsage(reason))`, so the next step must be the last message (#109).
+- Free trial lot raised from $0.50 to $1 (`TRIAL.usd`, cloud #20).
+
 ## 1.2.27 (2026-11-13)
 
 ### What's new
