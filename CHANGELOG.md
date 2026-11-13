@@ -13,6 +13,7 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 - After each command, a paused business (`credit.pausedReason`) ends the run's commands via `failureGuard().end(outOfUsage(reason))`, so the next step must be the last message (#109).
 - Free trial lot raised from $0.50 to $1 (`TRIAL.usd`, cloud #20).
+- Toasts and in-app notes use the app's font: `fontFamily: "inherit"` on the sonner Toaster, which sets the system font itself (#120).
 
 ## 1.2.27 (2026-11-13)
 
