@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.29 (2026-11-13)
+
+### What's new
+
+- Emplio for Windows and Emplio for Linux now have their own pages, like the Mac one: what the app does, how to install it in three steps, and answers to common questions. Open them from **Learn more** on the Downloads page or the Downloads menu.
+
+### For developers
+
+- `/downloads/windows` and `/downloads/linux` added; all three app pages share one component with search-friendly titles, descriptions, social cards and app, FAQ and breadcrumb data, and are in the sitemap (#117).
+
 ## 1.2.28 (2026-11-13)
 
 ### What's new
