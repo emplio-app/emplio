@@ -18,7 +18,7 @@
   <a href="LICENSE">AGPL-3.0</a>
 </p>
 
-Emplio is one agent for a whole business. Everyone on the team talks to it, on the web, on Telegram or in the Mac app. It does the work on its own Linux computer and browser, in your apps, and it writes what it learns about the business into git repos you can read.
+Emplio is one agent for a whole business. Everyone on the team talks to it, on the web, on Telegram or in the desktop app. It does the work on its own Linux computer and browser, in your apps, and it writes what it learns about the business into git repos you can read.
 
 <p align="center">
   <img src="docs/images/real-session.gif" alt="A real session: Emplio opens Hacker News, hands the job to a Web Researcher agent it sets up, returns a spreadsheet of the top 10 stories, then saves a rule to leave out crypto stories in its memory">
@@ -44,7 +44,7 @@ A few Docker services on one machine. The app does the thinking and holds the ru
 
 ```mermaid
 flowchart LR
-  team["Your team: web, Telegram, Mac app"] --> caddy["Caddy (HTTPS, servers only)"]
+  team["Your team: web, Telegram, desktop app"] --> caddy["Caddy (HTTPS, servers only)"]
   caddy --> app["app: Next.js web + Bun API"]
   app --> pg[("Postgres")]
   app --> gitea[("Gitea: memory in git")]
@@ -67,13 +67,29 @@ The model gets one tool, `bash`, on its own Linux computer ([`chat.ts`](backend/
 
 Models are good at shells, so we don't spend the prompt on dozens of tool schemas. Most `emplio` subcommands are thin calls to the API, which checks who may do what. The rules live on the server, not in the prompt. Adding a capability means adding a subcommand.
 
+### A manager that hands off and checks
+
+The main chat is a manager, not a worker. Anything long goes out with `emplio hand`: a thread with a fresh context on the same computer, briefed with what "done" means, that reports back when it's finished. Several run at once, and threads can hand off too, three levels deep. Each thread is a chat you can open, watch and write to, and people keep talking to the main chat while the work runs ([`jobs.ts`](backend/src/jobs.ts)). The main chat's context holds decisions and results, not every command's output.
+
+The manager is also the checker. It holds each report against the brief's "Done when" and against the server's own record of what was sent or changed through apps, and sends unfinished work back to the same agent instead of redoing it. When an agent gets its kind of work wrong, the manager fixes that agent's instructions.
+
+Agents are saved roles named like job titles, such as Web Researcher or Invoice Chaser, and Emplio makes them itself as kinds of work come back. Each is `company/agents/<slug>/AGENT.md` with instructions, the skills it uses and a level. Next to it, `LESSONS.md` keeps the last 40 dated lessons from past jobs, shown to the agent as notes, never as instructions. Work that repeats becomes a repeating task on the work list, naming its agent.
+
+The split is also what keeps it affordable. On the default setting the manager runs on Claude Sonnet and light agents on Claude Haiku; a `strong` agent gets the manager's model ([`MODEL_SETS`](shared/src/index.ts)). The recording above shows a hand-off: the Web Researcher was made during that chat.
+
 ### A computer and a browser per person, not per company
 
 Each person gets their own container and their own Docker network, holding their computer and a Chromium per chat. The networks can't reach Postgres, Gitea, the runner or the cloud metadata address. A computer sleeps about 15 minutes after its last command and keeps its files.
 
 The business is shared; people's sign-ins and files aren't. The owner's Gmail session never sits in the same browser as a new hire's.
 
-The [Mac app](desktop/) can stand in for that computer: while it's open, Emplio works in `~/Emplio/<business>/` and a Chrome on your Mac. Commands run under `sandbox-exec` and can only write inside that folder. They can't read `~/.ssh`, keychains, browser data, `Documents`, `Desktop` or `Downloads` ([`box.js`](desktop/src/box.js)). Close the lid and the cloud computer carries on from the last save.
+The [desktop app](desktop/) can stand in for that computer, so the work runs on your own machine. While it's open, Emplio works in `~/Emplio/<business>/` and a Chrome on that computer, and commands can only write inside that folder ([`box.js`](desktop/src/box.js)):
+
+- **Mac:** commands run under `sandbox-exec` and can't read `~/.ssh`, keychains, browser data, `Documents`, `Desktop` or `Downloads`.
+- **Windows:** commands run in Git for Windows' bash at Low integrity, the way Chrome fences its tabs, with no admin rights needed ([`fence-win.js`](desktop/src/fence-win.js)). The PC takes work only after a test from inside the fence passes.
+- **Linux:** the app only shows notifications for now. Commands there have no fence yet, so the work stays on the server's computer.
+
+Close the lid and the server's computer carries on from the last save.
 
 ### Memory is git
 
@@ -84,12 +100,6 @@ You get diff, history and revert for free, and "who can see this note" is a repo
 ### Skills it writes itself
 
 A skill is a folder with a `SKILL.md` and any scripts it needs, in `company/skills/` or `me/skills/`. Emplio writes and fixes them as it works. You can also record yourself doing a task in its browser, with or without talking it through, and it turns the recording into a skill. Passwords aren't recorded. It can install skills from [skills.sh](https://skills.sh) too, after reading them and asking you.
-
-### Agents for work that keeps coming back
-
-When a kind of job keeps coming back, Emplio writes an agent for it: `company/agents/<slug>/AGENT.md` with instructions, the skills it uses and a model level. Next to it, `LESSONS.md` keeps the last 40 dated lessons from past jobs, shown to the agent as notes, never as instructions.
-
-The main chat manages and doesn't do the long work itself. `emplio hand` starts a thread: a fresh context on the same computer, which reports back when done. Several run at once, and each is a chat you can open and write to ([`jobs.ts`](backend/src/jobs.ts)). The main chat's context holds decisions and results, not every command's output.
 
 ### Approvals, records, background work
 
@@ -110,10 +120,10 @@ Most agents work for one person. Emplio works for a company, and that shows up i
 
 ## What it works with
 
-- **Talk to it:** the web app, a Telegram bot, the Mac app, and an iPhone app for [Emplio Cloud](https://emplio.app). Voice notes are turned into text.
+- **Talk to it:** the web app, a Telegram bot, desktop apps for Mac, Windows and Linux, and an iPhone app for [Emplio Cloud](https://emplio.app). Voice notes are turned into text.
 - **Apps:** our own integrations for GitHub, Slack, Zoom, Notion, HubSpot, Stripe, Razorpay, Google Calendar, Docs, Sheets, Meet, Search Console, Analytics and Business Profile, Zoho Mail, Books and Invoice, and more in [`integrations/own`](backend/src/integrations/own). Gmail, Outlook, Google Drive, OneDrive, Teams, WhatsApp and LinkedIn still go through [Composio](https://composio.dev).
 - **MCP:** any remote MCP server over Streamable HTTP or SSE. A header like `{{ACME_KEY}}` is filled from each person's own saved key on the server, so the token never enters the computer.
-- **Models:** anything on OpenRouter. You pick a model for chat, for agents and for background work in Settings.
+- **Models:** anything on OpenRouter. Settings has three presets (Save money, Default, Best quality), or you pick a model for chat, for agents and for background work yourself.
 
 ## Security
 
@@ -154,7 +164,7 @@ We've used Emplio every day at Kulp Labs, our software agency, since May 2026. O
 - **Some apps still need Composio**, including Gmail and Google Drive, so you need a Composio key for them.
 - **Links to apps the agent starts on its computer** don't work self-hosted yet; you get files and screenshots instead.
 - **iPhone notifications** need the App Store app's Apple key, so they only work on Emplio Cloud. Browser notifications work self-hosted.
-- **The desktop app is Mac only.** It connects to emplio.app unless you start it with `EMPLIO_URL` set to your own server.
+- **The desktop apps are young.** The Windows app is new and hasn't been tested on a real PC yet, and the Linux app only shows notifications. They connect to emplio.app unless you start them with `EMPLIO_URL` set to your own server.
 - **Telegram is the only chat app.** It works in private chats, not groups.
 
 It isn't a personal assistant for one person's inbox, a coding agent, or a framework for building agents. It's one employee for one business.
