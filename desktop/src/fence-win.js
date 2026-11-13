@@ -59,7 +59,7 @@ export async function label(pairs) {
 // Proof the fence holds, from inside it: the command runs at Low, can write its own folder, and can't write outside
 // it or read what's hidden. Only then does this computer take Emplio's work (main.js says so to the server).
 export function fenceTest(secret, outside) {
-  return `whoami /groups | grep -q 'Low Mandatory Level' && echo LOW
+  return `MSYS_NO_PATHCONV=1 /c/Windows/System32/whoami.exe /groups | grep -q 'Low Mandatory Level' && echo LOW
 echo x > "$HOME/.fence-test" && echo WROTE && rm -f "$HOME/.fence-test"
 (echo x > ${JSON.stringify(outside)}) 2>/dev/null && echo ESCAPED && rm -f ${JSON.stringify(outside)}
 cat ${JSON.stringify(secret)} >/dev/null 2>&1 && echo LEAKED

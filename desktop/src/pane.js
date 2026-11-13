@@ -128,7 +128,7 @@ export class Panes {
 
   // --- tabs ---------------------------------------------------------------------------------------------------
   async newTab(b, url = "about:blank", activate = true) {
-    const view = new WebContentsView({ webPreferences: { session: this.#session(), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+    const view = new WebContentsView({ webPreferences: { session: this.#session(), sandbox: process.platform !== "win32", contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     const wc = view.webContents;
     const tab = { id: ++this.tabId, view, targetId: null, title: "", loading: false, favicon: "" };
     view.setVisible(false);
@@ -267,7 +267,7 @@ export class Panes {
   #shield() {
     if (this.shield) return this.shield;
     const win = this.getWindow();
-    const v = (this.shield = new WebContentsView({ webPreferences: { preload: join(import.meta.dirname, "pane-ui.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false } }));
+    const v = (this.shield = new WebContentsView({ webPreferences: { preload: join(import.meta.dirname, "pane-ui.cjs"), sandbox: process.platform !== "win32", contextIsolation: true, nodeIntegration: false } }));
     v.setBackgroundColor("#00000000");
     v.setVisible(false);
     win.contentView.addChildView(v);
@@ -300,7 +300,7 @@ export class Panes {
   #ui() {
     if (this.ui) return this.ui;
     const win = this.getWindow();
-    const ui = (this.ui = new WebContentsView({ webPreferences: { preload: join(import.meta.dirname, "pane-ui.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false } }));
+    const ui = (this.ui = new WebContentsView({ webPreferences: { preload: join(import.meta.dirname, "pane-ui.cjs"), sandbox: process.platform !== "win32", contextIsolation: true, nodeIntegration: false } }));
     ui.setBackgroundColor("#00000000");
     ui.setVisible(false);
     win.contentView.addChildView(ui);

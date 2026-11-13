@@ -21,3 +21,10 @@ frontend/public/cloud/
 # Emplio Cloud: a separate private repo cloned here by the team, CI and deploys
 /cloud/
 .bt/
+/desktop/out2
+/desktop/out3
+/.fileops-undo
+/desktop/out4
+/desktop/out5
+/desktop/out6
+/desktop/out7

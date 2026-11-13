@@ -15,7 +15,7 @@
     "dmg:older": "npm run pack:older && sh build/make-dmg.sh out/older/Emplio-darwin-universal/Emplio.app older",
     "pack:linux": "electron-packager . Emplio --platform=linux --arch=x64 --out=out --overwrite --executable-name=emplio-app --ignore='^/(out|\\.git|build)'",
     "linux": "npm run pack:linux && cp build/linux/emplio out/Emplio-linux-x64/emplio && COPYFILE_DISABLE=1 tar -C out --no-xattrs --no-mac-metadata --exclude='._*' -czf out/Emplio-linux-x64.tar.gz Emplio-linux-x64",
-    "pack:win": "electron-packager . Emplio --platform=win32 --arch=x64 --out=out --overwrite --ignore='^/(out|\\.git|build)'",
+    "pack:win": "electron-packager . Emplio --platform=win32 --arch=x64 --out=out --overwrite --icon=build/icon.ico --ignore='^/(out|\\.git|build)'",
     "win": "npm run pack:win && cd out && rm -f Emplio-win32-x64.zip && zip -qrX Emplio-win32-x64.zip Emplio-win32-x64 -x '*/._*'"
   },
   "dependencies": {
