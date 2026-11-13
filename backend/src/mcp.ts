@@ -7,7 +7,10 @@
 // A server that wants its own sign-in (OAuth, like Swiggy's or Notion's) gets one per person, the way Claude and
 // Cursor do it: a "Sign in" button in the chat (a link on Telegram) opens its login page, it comes back to us, and
 // we keep that person's tokens encrypted (mcp_auth), refreshed by the SDK.
-// ponytail: remote servers only; local (stdio) ones when someone needs them.
+// A local server (a program on the person's Mac, like Logic Pro's) is `local:<command>`: the desktop app starts it and
+// passes its messages along the device link (devices.ts); only the person who added it can use it, and the app asks
+// them before running a command it hasn't run before.
+// ponytail: started fresh for each job (no memory between calls); keep it running if a server needs that.
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { type ConnectCard, KEY_MASK, mcpLogo, type McpServer, type McpServerInput, type McpTool, type SaveLoginCard } from "@emplio/shared";
 import { auth, type OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
@@ -15,6 +18,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OAuthClientInformationMixed, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { and, asc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { record } from "./activity";
@@ -22,6 +27,7 @@ import { approve } from "./approvals";
 import { availableApps, esc, fromLink } from "./integrations";
 import { context, currentUser } from "./auth";
 import { db } from "./db";
+import { type Conn, deviceFor, notify } from "./devices";
 import { mcpAuth, mcpServers } from "./db/schema";
 import { loginsCommand, nameOf, siteOf, withKeys } from "./logins";
 import type { Session } from "./sandbox";
@@ -46,6 +52,8 @@ const findRow = async (workspaceId: string, name: string) =>
   (await db.select().from(mcpServers).where(and(eq(mcpServers.workspaceId, workspaceId), eq(mcpServers.name, name.toLowerCase()))))[0];
 
 class McpError extends Error {}
+const LOCAL = "local:";
+const isLocal = (r: { url: string }) => r.url.startsWith(LOCAL);
 // the server wants this person to sign in first (OAuth)
 class NeedsSignIn extends Error {}
 
@@ -128,6 +136,10 @@ function fromState(state: string): State | null {
 const signInCard = (row: Row): ConnectCard => ({ app: row.name, name: row.name, path: `/mcp/${row.name}/connect`, mcp: true, logo: mcpLogo(row.url) || undefined });
 
 function checkUrl(url: string) {
+  if (url.startsWith(LOCAL)) {
+    if (url.length > LOCAL.length && url.length <= 500) return url;
+    throw new McpError("give the command to run on this Mac, like LogicProMCP");
+  }
   try {
     const u = new URL(url);
     if (u.protocol === "https:" || (u.protocol === "http:" && ["localhost", "127.0.0.1"].includes(u.hostname))) return u.toString();
@@ -174,9 +186,60 @@ async function remove(who: Who, id: string) {
 
 // --- talking to a server ---------------------------------------------------------------------------------
 
+// A local server's end of the pipe: the Mac app starts the command and hands back what it prints, line by line
+export class DeviceTransport implements Transport {
+  onmessage?: (m: JSONRPCMessage) => void;
+  onclose?: () => void;
+  onerror?: (e: Error) => void;
+  reason?: string;
+  constructor(
+    private conn: Conn,
+    private key: string,
+    private command: string,
+  ) {}
+  async start() {
+    this.conn.mcp.set(this.key, {
+      data: (text) => {
+        try {
+          this.onmessage?.(JSON.parse(text));
+        } catch (e) {
+          this.onerror?.(e as Error);
+        }
+      },
+      closed: (reason) => ((this.reason = reason), this.onclose?.()),
+    });
+    notify(this.conn, "mcp.open", { key: this.key, command: this.command });
+  }
+  async send(m: JSONRPCMessage) {
+    if (!this.conn.alive) throw new Error("the computer went offline");
+    notify(this.conn, "mcp.send", { key: this.key, data: JSON.stringify(m) });
+  }
+  async close() {
+    this.conn.mcp.delete(this.key);
+    notify(this.conn, "mcp.close", { key: this.key });
+  }
+}
+
+async function connectedLocal<T>(who: Who, row: Row, job: (client: Client) => Promise<T>) {
+  if (row.createdBy !== who.userId) throw new McpError(`${row.name} runs on the Mac of the person who added it, so only they can use it`);
+  const conn = deviceFor(who.userId);
+  if (!conn) throw new McpError(`${row.name} runs on this person's Mac: open the Emplio app there and keep it open, then try again`);
+  const transport = new DeviceTransport(conn, randomUUID(), row.url.slice(LOCAL.length));
+  const client = new Client({ name: "Emplio", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    return { result: await job(client), scrub: (text: string) => text };
+  } catch (error) {
+    throw new McpError(`couldn't start ${row.name}: ${transport.reason ?? ((error instanceof Error && error.message) || String(error))}`);
+  } finally {
+    void client.close().catch(() => {});
+  }
+}
+
 // Connected as `who` (their {{NAME}} keys swapped in), for one job, then closed. `scrub` blanks those keys out
 // of anything that comes back.
 async function connected<T>(who: Who, row: Row, job: (client: Client) => Promise<T>) {
+  if (isLocal(row)) return connectedLocal(who, row, job);
   const keys = await withKeys(who, siteOf(row.url), Object.values(headersOf(row)));
   if (typeof keys === "string") {
     const missing = /nothing saved as (\S+)/.exec(keys)?.[1];
@@ -254,6 +317,7 @@ const USAGE = `usage: emplio mcp list                              the business'
                                                 --key: it needs a token; each person saves their own in a box in the
                                                 chat (sent as Authorization: Bearer). A header value can also be
                                                 {{KEY_NAME}}, a saved key (emplio logins). Never put a pasted token here.
+       emplio mcp add <name> --local "<command>"    a program on this person's Mac (the Emplio app must be open); only they can use it
        emplio mcp update <name> [--url <url>] [--header "Name: value"]... [--on | --off]
        emplio mcp remove <name>`;
 
@@ -272,11 +336,13 @@ export async function mcpCommand(s: Session, args: string[], park: (name: string
       if (s.role === "member") return `error: only the owner or an admin can change MCP servers. Tell ${s.user.name} to ask one.`;
       if (!name) return USAGE;
       if (sub === "add") {
-        if (!rest[0] || rest[0].startsWith("--")) return USAGE;
+        const local = flag("--local")[0];
+        const target = local !== undefined ? `${LOCAL}${local.trim()}` : rest[0];
+        if (!target || target.startsWith("--")) return USAGE;
         // a token: a {{NAME}} each person fills with their own, through the in-app box
         const keyName = nameOf(`${name}_token`);
         if (rest.includes("--key")) headers.push({ name: "Authorization", value: `Bearer {{${keyName}}}` });
-        const server = await save(who, { name, url: rest[0], headers, enabled: true });
+        const server = await save(who, { name, url: target, headers, enabled: true });
         if (rest.includes("--key")) {
           const ask = await loginsCommand(who, s.conversationId, s.channel, ["ask", keyName, "--site", siteOf(server.url), "--key"]);
           const lead = `added ${server.name}; it needs ${s.user.name}'s token first. `;
@@ -298,7 +364,7 @@ export async function mcpCommand(s: Session, args: string[], park: (name: string
       if (sub === "remove") return (await remove(who, row.id)) ? "removed" : "error: already gone";
       const current = toServer(row);
       const merged = [...current.headers.filter((h) => !headers.some((n) => n.name.toLowerCase() === h.name.toLowerCase())), ...headers].filter((h) => h.value);
-      const server = await save(who, { name: row.name, url: flag("--url")[0] ?? row.url, headers: merged, enabled: rest.includes("--off") ? false : rest.includes("--on") ? true : row.enabled }, row.id);
+      const server = await save(who, { name: row.name, url: flag("--local")[0] !== undefined ? `${LOCAL}${flag("--local")[0]!.trim()}` : (flag("--url")[0] ?? row.url), headers: merged, enabled: rest.includes("--off") ? false : rest.includes("--on") ? true : row.enabled }, row.id);
       return `updated ${server.name}`;
     }
     if (sub === "tools" || sub === "info" || sub === "call") {
