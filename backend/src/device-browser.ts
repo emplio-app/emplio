@@ -28,7 +28,7 @@ export const deviceBrowser = {
   useProxy: async (_id: string, _owner: Owner) => false,
 
   async startHosted(chat: string, owner: Owner): Promise<HostedBrowser> {
-    const conn = deviceFor(owner.userId);
+    const conn = deviceFor(owner.userId, true);
     if (!conn) throw new Error("no computer connected");
     return hosted(conn.id, chat, await rpc<Started>(conn, "browser.start", { box: owner.workspaceId, name: "", chat }, { timeoutMs: 60_000 }));
   },
@@ -55,5 +55,5 @@ export const deviceBrowser = {
 };
 
 // The computer's own browser for this person if one is connected, else null (the cloud's browser is used).
-export const deviceBrowserFor = (userId: string) => (deviceFor(userId) ? deviceBrowser : null);
-export const browserKindFor = (userId: string, cloudKind: string) => (deviceFor(userId) ? BROWSER_KIND : cloudKind);
+export const deviceBrowserFor = (userId: string) => (deviceFor(userId, true) ? deviceBrowser : null);
+export const browserKindFor = (userId: string, cloudKind: string) => (deviceFor(userId, true) ? BROWSER_KIND : cloudKind);

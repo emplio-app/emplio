@@ -10,7 +10,9 @@
     "start": "electron .",
     "pack": "electron-packager . Emplio --platform=darwin --arch=arm64 --out=out --overwrite --app-bundle-id=app.emplio.desktop --icon=build/icon.icns --ignore='^/(out|\\.git)' --extend-info=info.plist",
     "test": "bun test",
-    "dmg": "npm run pack && sh build/make-dmg.sh"
+    "dmg": "npm run pack && sh build/make-dmg.sh",
+    "pack:linux": "electron-packager . Emplio --platform=linux --arch=x64 --out=out --overwrite --executable-name=emplio --ignore='^/(out|\\.git|build)'",
+    "linux": "npm run pack:linux && COPYFILE_DISABLE=1 tar -C out --exclude='._*' -czf out/Emplio-linux-x64.tar.gz Emplio-linux-x64"
   },
   "dependencies": {
     "ws": "^8.22.2"

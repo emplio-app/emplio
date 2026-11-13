@@ -328,7 +328,8 @@ app.whenReady().then(() => {
   const file = join(app.getPath("userData"), "config.json");
   config = loadConfig(file, vault);
   if (arg("url")) config.appUrl = arg("url");
-  tray = new Tray(nativeImage.createEmpty());
+  // a Mac's menu bar shows the tray's title (● / ○); Linux shows only an icon, so it gets the logo
+  tray = new Tray(process.platform === "darwin" ? nativeImage.createEmpty() : nativeImage.createFromPath(join(import.meta.dirname, "logo.png")).resize({ width: 22 }));
   tray.setToolTip("Emplio");
   // Chrome profiles of earlier runs hold sign-in cookies and are never reused: clear them
   try {

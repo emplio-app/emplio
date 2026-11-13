@@ -65,7 +65,7 @@ export async function deviceRoutes(app: FastifyInstance) {
     const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
     const [row] = token ? await db.select().from(devices).where(eq(devices.tokenHash, hash(token))) : [];
     if (!row) return socket.close(4001, "unknown device");
-    attach({ id: row.id, userId: row.userId, name: row.name }, socket as unknown as Socket);
+    attach({ id: row.id, userId: row.userId, name: row.name, platform: row.platform }, socket as unknown as Socket);
     await db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.id)).catch(() => {});
     socket.on("close", () => void db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.id)).catch(() => {}));
   });

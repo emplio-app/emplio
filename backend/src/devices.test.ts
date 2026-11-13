@@ -41,6 +41,18 @@ describe("devices", () => {
     a.drop();
   });
 
+  test("only a Mac is given work; a Linux computer still gets notifications", () => {
+    const mac = fake();
+    const linux = fake();
+    attach({ ...dev("cccccccc-1111-1111-1111-111111111111", "u4"), platform: "darwin" }, mac.socket, 1000);
+    attach({ ...dev("dddddddd-1111-1111-1111-111111111111", "u4"), platform: "linux" }, linux.socket, 2000);
+    expect(deviceFor("u4")?.id).toStartWith("dddddddd");
+    expect(deviceFor("u4", true)?.id).toStartWith("cccccccc");
+    mac.drop();
+    expect(deviceFor("u4", true)).toBeUndefined();
+    linux.drop();
+  });
+
   test("an answer from the computer settles its request; an error rejects it", async () => {
     const a = fake();
     const conn = attach(dev("22222222-1111-1111-1111-111111111111", "u4"), a.socket);
