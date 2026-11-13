@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.35 (2026-11-13)
+
+### What's new
+
+- With the Mac app, Emplio can now use programs that live on your Mac, like a music app's own tools. Tell Emplio the command to run, and it starts the program when it needs it. The app asks you first, on your Mac, the first time.
+
+### For developers
+
+- Local MCP servers: `emplio mcp add <name> --local "<command>"` stores `local:<command>` in `mcp_servers.url` (no migration). The desktop app starts it in a login shell (`desktop/src/mcp.js`) and relays its lines over the device link (`mcp.open`, `mcp.send`, `mcp.close` and the `mcp.data`, `mcp.closed` events); the server stays the MCP client through `DeviceTransport` in `backend/src/mcp.ts`. Only the person who added it can use it, a new command needs their OK on the Mac, and it starts fresh for each use (#131).
+
 ## 1.2.34 (2026-11-13)
 
 ### What's new
