@@ -256,6 +256,10 @@ Most AI agents are built for one person. Emplio is built for the whole company.
 
 Every business, from a freelancer to an enterprise, should have an employee who knows the whole company: what it sells, who does what, and where it's trying to go. Emplio works alongside every person on the team, takes the repetitive work off everyone's plate so people can spend their time on growth, and keeps pushing the business toward its goals around the clock. It gets better every day, and everything it learns belongs to the business.
 
+Our launch video, which tells that story:
+
+https://github.com/user-attachments/assets/fa225020-2aa2-4892-8895-dcc1fe1760b1
+
 ## Community and contributing
 
 Questions, ideas, or something it did for your business? [Discord](https://discord.gg/vjAr5ARex). Bugs: [open an issue](https://github.com/emplio-app/emplio/issues).
