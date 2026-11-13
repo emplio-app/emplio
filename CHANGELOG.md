@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.17 (2026-11-13)
+
+### What's new
+
+- In the Mac app, the Back and Forward buttons now work and line up with the window buttons.
+
+### For developers
+
+- `DesktopHistory` renders after the sidebar so its no-drag area wins over the sidebar's window-drag row (#99).
+
 ## 1.2.16 (2026-11-13)
 
 ### What's new
