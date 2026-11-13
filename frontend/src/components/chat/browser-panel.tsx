@@ -389,7 +389,8 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
       const css = getComputedStyle(document.documentElement);
       const skin = Object.fromEntries(["popover", "popover-foreground", "border", "primary", "primary-foreground", "muted-foreground"].map((k) => [k, css.getPropertyValue(`--${k}`).trim()]));
       const r = holder.current?.getBoundingClientRect();
-      const spot = { chat, x: r?.x ?? 0, y: r?.y ?? 0, width: r?.width ?? 0, height: r?.height ?? 0, visible: wanted && !!r, control: inControl, skin };
+      // a dialog open anywhere in the page: the real browser is drawn over the page, so it steps aside
+      const spot = { chat, x: r?.x ?? 0, y: r?.y ?? 0, width: r?.width ?? 0, height: r?.height ?? 0, visible: wanted && !!r && !document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'), control: inControl, skin };
       const text = JSON.stringify(spot);
       if (text === last) return;
       last = text;
