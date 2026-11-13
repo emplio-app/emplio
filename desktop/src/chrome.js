@@ -2,10 +2,12 @@
 // a profile folder of its own, thrown away when it closes; the server puts the person's saved sign-ins into it (browser.ts).
 // Chrome only listens on this computer; the server reaches it through the app's connection (link.js relays).
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, release } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import WebSocket from "ws";
 
 const LOOKING = [
@@ -21,26 +23,55 @@ const LOOKING = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
 ];
-// Chrome that Emplio fetched itself, for a computer that has none (macOS only for now; Intel or Apple chip)
-const OWN = join(homedir(), "Library", "Application Support", "Emplio", "chrome-for-testing");
-const MAC = process.arch === "arm64" ? "mac-arm64" : "mac-x64";
-const OWN_EXE = join(OWN, `chrome-${MAC}`, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
-export const findChrome = () => [...LOOKING, OWN_EXE].find((p) => p && existsSync(p));
+// Google Chrome that Emplio fetched itself, for a Mac with none of the above (Google's download is universal: Intel or
+// Apple chip). The real Chrome, not Chrome for Testing: Google refuses sign-ins from that one, which calls itself plain
+// "Chromium". It lives in the app's own folder, so the person's Applications stay as they were.
+const SUPPORT = join(homedir(), "Library", "Application Support", "Emplio");
+const OWN = join(SUPPORT, "google-chrome");
+const OWN_EXE = join(OWN, "Google Chrome.app", "Contents", "MacOS", "Google Chrome");
+const DMG_URL = "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg";
+// Google's Apple developer team: the download is used only if it's signed by it
+const GOOGLE_TEAM = "EQHXZ8M8AV";
+// what Emplio 0.2.1 and older fetched: still used until the real one is here, then deleted
+const TESTING = join(SUPPORT, "chrome-for-testing");
+const TESTING_EXE = join(TESTING, `chrome-${process.arch === "arm64" ? "mac-arm64" : "mac-x64"}`, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
+export const findChrome = () => [...LOOKING, OWN_EXE, TESTING_EXE].find((p) => p && existsSync(p));
 
-// Fetch Google's Chrome for Testing into our own folder, once. Until it is there the cloud browser is used.
+const run = (cmd, args) => new Promise((ok, no) => execFile(cmd, args, (e, out, err) => (e ? no(e) : ok(`${out}${err}`))));
+
+// Fetch Google Chrome into our own folder, once, when the app starts; nothing to answer. Until it's there, Chrome for
+// Testing (if an earlier version fetched it) or the cloud browser is used.
 let fetching = null;
 export function fetchChrome() {
   // Chrome needs macOS 12 or newer (Darwin 21): on 11 the cloud browser keeps doing the sign-ins
-  if (findChrome() || process.platform !== "darwin" || Number(release().split(".")[0]) < 21) return Promise.resolve(false);
+  if (LOOKING.some((p) => p && existsSync(p)) || existsSync(OWN_EXE) || process.platform !== "darwin" || Number(release().split(".")[0]) < 21)
+    return Promise.resolve(false);
   return (fetching ??= (async () => {
-    const list = await (await fetch("https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json")).json();
-    const url = list.channels.Stable.downloads.chrome.find((d) => d.platform === MAC).url;
     await mkdir(OWN, { recursive: true });
-    const zip = join(OWN, "chrome.zip");
-    await writeFile(zip, Buffer.from(await (await fetch(url)).arrayBuffer()));
-    await new Promise((ok, no) => execFile("/usr/bin/ditto", ["-xk", zip, OWN], (e) => (e ? no(e) : ok())));
-    await rm(zip, { force: true });
-    return true;
+    const dmg = join(OWN, "chrome.dmg");
+    const mnt = join(OWN, "mnt");
+    const next = join(OWN, "next.app");
+    try {
+      const res = await fetch(DMG_URL);
+      if (!res.ok) throw new Error(`download failed: ${res.status}`);
+      await pipeline(Readable.fromWeb(res.body), createWriteStream(dmg));
+      await rm(next, { recursive: true, force: true });
+      await run("/usr/bin/hdiutil", ["attach", dmg, "-nobrowse", "-readonly", "-noautoopen", "-quiet", "-mountpoint", mnt]);
+      try {
+        await run("/usr/bin/ditto", [join(mnt, "Google Chrome.app"), next]);
+      } finally {
+        await run("/usr/bin/hdiutil", ["detach", mnt, "-force", "-quiet"]).catch(() => {});
+      }
+      // not --strict: Google's own disk image already fails it (extended attributes on some helpers)
+      await run("/usr/bin/codesign", ["--verify", "--deep", next]);
+      if (!(await run("/usr/bin/codesign", ["-dv", next])).includes(`TeamIdentifier=${GOOGLE_TEAM}`)) throw new Error("not signed by Google");
+      await rename(next, join(OWN, "Google Chrome.app"));
+      await rm(TESTING, { recursive: true, force: true });
+      return true;
+    } finally {
+      await rm(dmg, { force: true });
+      await rm(next, { recursive: true, force: true });
+    }
   })().catch((e) => (console.error("chrome not fetched:", e), (fetching = null), false)));
 }
 
@@ -68,7 +99,9 @@ export class Browsers {
     );
     const child = spawn(
       exe,
-      [`--user-data-dir=${profile}`, "--remote-debugging-port=0", "--remote-allow-origins=*", "--use-mock-keychain", "--password-store=basic", "--no-first-run", "--no-default-browser-check", "--window-size=1280,900", url],
+      [`--user-data-dir=${profile}`, "--remote-debugging-port=0", "--remote-allow-origins=*", "--use-mock-keychain", "--password-store=basic", "--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
+        // a debugging port alone makes navigator.webdriver true, and Google then refuses the sign-in
+        "--disable-blink-features=AutomationControlled", url],
       { stdio: "ignore", detached: false },
     );
     const b = { id, chat, child, profile, port: 0, startedAt: new Date(), timeoutAt: new Date(Date.now() + HOURS * 3_600_000) };
