@@ -11,6 +11,10 @@ import { api, versionQueryKey } from "@/lib/api";
 // Asked every 5 minutes, when this tab comes back into view, and when the live connection returns after a deploy.
 // ponytail: compares with the version this screen first saw, not one stamped at build. A screen that loads in the
 // moments between the server and the website restarting misses this update's bar; stamp it at build if that ever bites.
+// In the desktop app (desktop/src/preload.cjs): a new version of the app itself is downloaded and waiting
+type AppUpdate = { ready(): Promise<boolean>; onReady(listener: () => void): () => void; restart(): Promise<boolean> };
+const appUpdate = () => (window as { emplioDesktop?: { update?: AppUpdate } }).emplioDesktop?.update;
+
 export function NewVersionBar() {
   const { data } = useQuery({
     queryKey: versionQueryKey,
@@ -18,7 +22,24 @@ export function NewVersionBar() {
     refetchInterval: 5 * 60_000,
   });
   const [mine, setMine] = useState<string>();
+  const [appReady, setAppReady] = useState(false);
+  useEffect(() => {
+    const update = appUpdate();
+    if (!update) return;
+    void update.ready().then((ready) => ready && setAppReady(true)).catch(() => {});
+    return update.onReady(() => setAppReady(true));
+  }, []);
   if (data && !mine) setMine(data.version);
+  // the app restarting into its new version loads the newest website too, so this one bar covers both
+  if (appReady)
+    return (
+      <div className="flex shrink-0 items-center justify-center gap-3 border-b bg-muted px-4 py-1.5 text-sm">
+        A new version of the Emplio app is ready.
+        <Button size="sm" onClick={() => void appUpdate()?.restart()}>
+          Update
+        </Button>
+      </div>
+    );
   if (!data || !mine || data.version === mine) return null;
   return (
     <div className="flex shrink-0 items-center justify-center gap-3 border-b bg-muted px-4 py-1.5 text-sm">
