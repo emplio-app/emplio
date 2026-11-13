@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.30 (2026-11-13)
+
+### What's new
+
+- When a new version of the Mac, Windows or Linux app is ready, it now shows in the same bar at the top as website updates, with an **Update** button that restarts the app into the new version. Choosing Restart to update from the menu still works too.
+
+### For developers
+
+- Desktop app 0.2.1: the preload exposes `emplioDesktop.update` (`ready`, `onReady`, `restart`); `NewVersionBar` shows the app's update first and falls back to the website bar (#123).
+
 ## 1.2.29 (2026-11-13)
 
 ### What's new
