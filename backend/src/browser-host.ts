@@ -7,6 +7,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { devtools, openBrowser, sig, type Owner } from "./browser";
 import { runner } from "./computer";
+import { apiBase } from "./devices";
 
 export type HostedBrowser = { id: string; liveUrl: string; cdpUrl: string; timeoutAt: string; startedAt?: string };
 export const RESTORE_SIGN_INS: boolean = true;
@@ -23,7 +24,7 @@ function signatureOk(chat: string, t = "") {
   return ends > Date.now() && given.length === want.length && timingSafeEqual(given, want);
 }
 export const liveUrlOf = (chat: string, timeoutAt: string, prefix = "browser-live") =>
-  `${process.env.PUBLIC_API_URL ?? "http://localhost:4000"}/${prefix}/${chat}?t=${encodeURIComponent(signed(chat, new Date(timeoutAt).getTime()))}`;
+  `${apiBase()}/${prefix}/${chat}?t=${encodeURIComponent(signed(chat, new Date(timeoutAt).getTime()))}`;
 
 async function ready(cdpUrl: string) {
   for (let i = 0; i < 60; i++) {
@@ -79,7 +80,7 @@ const addressOf = (text: string) => {
   return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
 };
 
-async function live(socket: { send(data: string): void; on(event: string, fn: (data: unknown) => void): void; close(): void }, cdpUrl: string) {
+export async function live(socket: { send(data: string): void; on(event: string, fn: (data: unknown) => void): void; close(): void }, cdpUrl: string) {
   const cdp = await devtools(cdpUrl);
   let session: string | undefined;
   let target: string | undefined;
@@ -141,10 +142,24 @@ async function live(socket: { send(data: string): void; on(event: string, fn: (d
     } catch {}
   }, 1500);
 
+  // A frame's size is in screen pixels, but clicks are placed in the page's own pixels. They differ when the page is
+  // zoomed: the desktop app zooms its browser to fit the panel it's drawn in, so without this clicks land short.
+  let zoom = 1;
+  let zoomOf: string | undefined;
+  const measure = (at: string) =>
+    void cdp
+      .send("Page.getLayoutMetrics", {}, at)
+      .then((m) => {
+        if (at === session) zoom = (m as { cssVisualViewport: { zoom?: number } }).cssVisualViewport.zoom || 1;
+      })
+      .catch(() => {});
+  const zoomCheck = setInterval(() => session && measure(session), 2000);
+
   cdp.on((method, p, from) => {
     if (method === "Page.screencastFrame" && from === session) {
       lastFrame = Date.now();
-      socket.send(JSON.stringify({ data: p.data, width: p.metadata.deviceWidth, height: p.metadata.deviceHeight }));
+      if (from && zoomOf !== from) ((zoomOf = from), measure(from));
+      socket.send(JSON.stringify({ data: p.data, width: Math.round(p.metadata.deviceWidth / zoom), height: Math.round(p.metadata.deviceHeight / zoom) }));
       void cdp.send("Page.screencastFrameAck", { sessionId: p.sessionId }, from).catch(() => {});
     } else if (method === "Target.targetCreated") {
       chosen = undefined;
@@ -193,7 +208,7 @@ async function live(socket: { send(data: string): void; on(event: string, fn: (d
     else if (m.t === "key") send("Input.dispatchKeyEvent", { type: m.type, key: m.key, code: m.code, windowsVirtualKeyCode: m.keyCode, text: m.text, modifiers: m.modifiers });
     else if (m.t === "paste") send("Input.insertText", { text: String(m.text).slice(0, 100_000) });
   });
-  socket.on("close", () => (clearInterval(still), cdp.close()));
+  socket.on("close", () => (clearInterval(still), clearInterval(zoomCheck), cdp.close()));
   await cdp.send("Target.setDiscoverTargets", { discover: true });
   await follow();
 }
