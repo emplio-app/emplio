@@ -2,6 +2,7 @@
 // and marks where it put each thing. `bun run eval evals/background-round` in backend; see ../README.md.
 import { MODEL_SETS } from "@emplio/shared";
 import { Eval } from "braintrust";
+import { appendFileSync } from "node:fs";
 import type { Said } from "../emplio";
 import { cases, type Case } from "./cases";
 import { scorers } from "./scorers";
@@ -16,11 +17,14 @@ const GOALS = "# Goals\n\n## Grow online orders to 40% of sales by March\n## Col
 Eval<{ notes: string; world: [string, string][] }, Said, Case["expect"]>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "background-round",
   data: () => cases.map((c) => ({ input: { notes: c.notes, world: c.world ?? [] }, expected: c.expect, metadata: { name: c.name, category: c.category, source: c.source }, tags: [c.category] })),
-  task: async ({ notes, world }) => {
+  task: async ({ notes, world }, { metadata, expected }) => {
     const [{ reply, pretend, person }, { backgroundBrief, instructions }] = await load();
     const round = `${instructions("check-in", null, "(no tasks)", "Asia/Kolkata")}\n\n${backgroundBrief({ name: "Kaveri Home Furnishings", chat: "ab12cd34", today: "2026-11-10", goals: GOALS, journal: JOURNAL, notes })}`;
     // every command gets a believable result (nothing is saved yet, nothing new came in), up to 14 steps
-    return reply({}, [person(round)], (command) => pretend(command, world), 14, true);
+    const said = await reply({}, [person(round)], (command) => pretend(command, world), 14, true);
+    // EVAL_DUMP=<file>: each try's case, answer and expectation, one JSON line each
+    if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: (metadata as { name: string }).name, expected, output: { text: said.text, commands: said.commands } })}\n`);
+    return said;
   },
   scores: scorers,
   trialCount: 3,

@@ -2,6 +2,7 @@
 // `bun run eval evals/hand-off` in backend; see ../README.md.
 import { MODEL_SETS } from "@emplio/shared";
 import { Eval } from "braintrust";
+import { appendFileSync } from "node:fs";
 import type { Case } from "./cases";
 import { scorers, type Input, type Output } from "./scorers";
 
@@ -31,6 +32,8 @@ async function decide({ business, chat, world }: Input): Promise<Output> {
     },
     12,
   );
+  // EVAL_DUMP=<file>: each try's answer, one JSON line each
+  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ text: said.text, commands: said.commands })}\n`);
   return { ...said, byHand };
 }
 

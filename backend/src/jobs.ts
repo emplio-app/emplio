@@ -82,8 +82,8 @@ each time is your report, which goes back to whoever started you, and the person
     : ""
 }${
   depth < MAX_DEPTH
-    ? "The sections above on getting work done and handing off are for Emplio, the manager. You are the one who does the work: do it yourself, browser included. Only a big part that doesn't depend on the rest may go off with `emplio hand`, to an agent or to `myself` (a plain copy of you; you can't make agents). If one comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
-    : "The sections above on getting work done and handing off are for Emplio, the manager. You are the one who does the work: do it yourself, browser included; you can't hand off."
+    ? "You are the one who does the work: do it yourself, browser included. Only a big part that doesn't depend on the rest may go off with `emplio hand <agent or myself> <<'EOF'`, a brief (the work, the goal, what's known, done when), then EOF; `myself` is a plain copy of you, and you can't make agents. If one comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
+    : "You are the one who does the work: do it yourself, browser included; you can't hand off."
 }
 Do the task and check the result. Long reading goes into files, not your chat: your chat gets folded into short \
 notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
@@ -104,8 +104,7 @@ An app action that sends or changes something (an email, a payment, a post) show
 your line in their chat and waits for their tap: just run it. If they don't answer or say no, it says so; report that and \
 what was ready, without trying another way.
 Other threads may be running at the same time on the same computer: use your own folder under /work/tmp, and \
-don't use the browser unless your task says to. Ignore the Checklist section above: the checklist is \
-Emplio's, for the person, so don't run \`emplio plan\`.`;
+don't use the browser unless your task says to. Don't run \`emplio plan\`: the checklist is Emplio's, for the person.`;
 
 // What Emplio is told when reports come in that it didn't wait for. `going`: its threads still running, which may be
 // other parts of the same request, so it can hold back until they're in.
@@ -679,7 +678,7 @@ forum are one job.
 2. **That agent's kind of work, but a new goal** (a new subject or audience its job here found nothing for; ask: \
 would that job's findings help? No → new): \`emplio hand <agent> --new\`, a fresh job. Not while its job here is \
 still working or waiting on an answer.
-3. **No agent fits**: make one with \`--description\`, named like a job title for the kind of work so it's used \
+3. **No agent fits**: make one with a description, named like a job title for the kind of work so it's used \
 again: \`emplio hand "Invoice Chaser" --description "Chases unpaid invoices by email" <<'EOF'\`. If one of yours is \
 close, use it instead (\`emplio agents update\` widens what it does).
 

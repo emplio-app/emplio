@@ -478,7 +478,8 @@ export const asCommand = (code: string) => code.replace(/\bemplio((?:\.\w+)+)\s*
 export const isCommandPart = (type: string) => type === "tool-bash" || type === "tool-python";
 
 // Who Emplio is in this chat and how it talks: the top of its prompt (jobs share it, jobs.ts).
-export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">, automation?: string): string[] {
+// agent: a job (jobs.ts), whose last message is a report, so the person-facing voice rules aren't sent to it
+export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">, automation?: string, agent = false): string[] {
   const who = `${ctx.userName} (${ctx.role})`;
   return [
     `You are Emplio, the AI employee of "${ctx.workspaceName}", shared by its owner and staff.`,
@@ -493,7 +494,9 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
           ? `The automation "${automation}" (company/automations/${automation}.md) started this chat, on behalf of ${who}. Nobody is watching or will answer questions: do the work; if something needs a person's decision or approval, stop and say what in a line or two (${ctx.userName} reads this later). Run the commands its instructions name directly, without first checking apps, the automation file or help.`
           : `You are talking with ${who}.`,
     `A bracketed note at the end of a message, starting "${CONTEXT_MARK}", is from us, not them; the latest one is current: where they are (web app or phone), today's date and their time zone, setup left, their other chats, an unfinished checklist. Times you write or schedule are on their clock unless they say otherwise.`,
-    ...(automation
+    ...(agent
+      ? []
+      : automation
       ? ["Your last message is read later by a person: one or two lines, the result first, then anything they must decide, things called by name, never by id. No preamble, recap or offers."]
       : [
           "Write like a sharp employee texting a busy boss: every reply is one line, two at most (the result, then anything they must decide or the one next step), however much work went into it. Plain everyday words, one idea per line, nothing they'd have to read twice.",
@@ -518,14 +521,14 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
 
 // Emplio's shared instructions as one text, from pieces already read. The evals (backend/evals/emplio.ts) build
 // theirs with this too, so they check the wording the app sends.
-export const emplioPrompt = (p: { rules: string[]; computer: string; team: string[]; connected: string; business: string; userName: string; personal: string; skills: string[]; visual?: boolean }) =>
+export const emplioPrompt = (p: { rules: string[]; computer: string; team: string[]; connected: string; business: string; userName: string; personal: string; skills: string[]; visual?: boolean; agent?: boolean }) =>
   [
     ...p.rules,
     "",
     p.computer,
     "",
-    MANAGER_PROMPT,
-    "",
+    // an agent does the work: how Emplio manages it is no use to it (its own rules come with its job, jobs.ts RULES)
+    ...(p.agent ? [] : [MANAGER_PROMPT, ""]),
     "## Team",
     ...p.team,
     "",
@@ -819,7 +822,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     await db.update(messages).set({ parts: asked.parts }).where(eq(messages.id, asked.id));
   // this message, which stays word for word when everything before it is folded into notes
   const turn = await toModel(sent.slice(-1));
-  const promptKey = JSON.stringify([automation, visual]);
+  const promptKey = JSON.stringify([automation, visual, !!job]);
   const kept = prompts.get(id);
   const system: SystemModelMessage[] = kept && kept.key === promptKey && Date.now() - kept.at < cacheMs(people) ? kept.system : [
     // static and large: cached by the provider so it isn't re-billed in full every message
@@ -837,8 +840,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       // its own cache mark too, so jobs (same prompt, their own messages) read it from the cache
       providerOptions: { openrouter: { cacheControl: cache } },
       content: emplioPrompt({
-        rules: agentRules(ctx, automation),
-        computer: sandboxPrompt(session),
+        rules: agentRules(ctx, automation, !!job),
+        computer: sandboxPrompt(session, !!job),
         team: (await listTeam(ctx.workspaceId)).map((m) => `- ${m.name ?? "(name not set)"} <${m.email}>, ${m.role}`),
         connected: await connectedNow(ctx).catch(() => "(unavailable right now; emplio apps list)"),
         // ponytail: read from Gitea on every message; cache per workspace if it shows up in latency
@@ -859,6 +862,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           },
         ),
         visual,
+        agent: !!job,
       }),
     },
   ];
