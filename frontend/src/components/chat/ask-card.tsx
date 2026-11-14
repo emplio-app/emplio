@@ -5,6 +5,7 @@ import { ArrowUpIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, PencilIcon }
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChatSendContext } from "@/components/chat/connect-card";
+import { api } from "@/lib/api";
 import { VoiceInput } from "@/components/chat/voice-input";
 
 // What the person said right after this reply (their answer to a question in it), or undefined while unanswered.
@@ -155,6 +156,21 @@ export function AskCard({ cards }: { cards: Card[] }) {
         </>
       )}
     </div>
+  );
+}
+
+// An agent's questions, over the chat box of the chat that started it: the answer goes into the agent's own chat, as
+// if typed there, and it carries on. If that fails, the card comes back to answer again.
+export function JobAskCard({ job, cards, onAnswered }: { job: string; cards: Card[]; onAnswered: () => void }) {
+  const [attempt, setAttempt] = useState(0);
+  const answer = (text: string) =>
+    void api(`/jobs/${job}/answer`, { text }).then(onAnswered, () => setAttempt((a) => a + 1));
+  return (
+    <ChatSendContext value={answer}>
+      <ReplyContext value={undefined}>
+        <AskCard key={attempt} cards={cards} />
+      </ReplyContext>
+    </ChatSendContext>
   );
 }
 

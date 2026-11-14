@@ -50,7 +50,7 @@ import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing, isStep } from "@/components/chat/tool-calls";
 import { ChatSendContext } from "@/components/chat/connect-card";
-import { ReplyContext } from "@/components/chat/ask-card";
+import { JobAskCard, ReplyContext } from "@/components/chat/ask-card";
 import { BrowserChip, BrowserPanel, BrowserProvider, keepPanel, useLiveBrowser, type BrowserTab } from "@/components/chat/browser-panel";
 import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file-viewer";
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
@@ -1030,19 +1030,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       {busyJobs.length > 0 && (
         <div className="mb-2 flex flex-col gap-1">
           {busyJobs.map((w) => (
-            <Link
-              key={w.id}
-              href={`/chat/${w.chatId}`}
-              className="flex min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
-              <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
-              {w.status === "working" ? (
-                <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
-              ) : (
-                <span className="min-w-0 flex-1 truncate">· has a question about {w.name}</span>
+            <Fragment key={w.id}>
+              <Link
+                href={`/chat/${w.chatId}`}
+                className="flex min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
+                <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
+                {w.status === "working" ? (
+                  <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate">· has a question about {w.name}</span>
+                )}
+              </Link>
+              {/* its question, to answer right here: the answer goes to the agent, not to Emplio */}
+              {w.status === "asking" && !!w.asks?.length && (
+                <JobAskCard job={w.id} cards={w.asks} onAnswered={() => void queryClient.invalidateQueries({ queryKey: ["working", id] })} />
               )}
-            </Link>
+            </Fragment>
           ))}
         </div>
       )}

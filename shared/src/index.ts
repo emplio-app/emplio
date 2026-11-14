@@ -494,7 +494,8 @@ export const splitRef = (ref: string) => {
 
 // A job still at work for a chat, or waiting on an answer (GET /conversations/:id/working)
 // done: finished, but its browser is still open, so its tab stays until that closes
-export type WorkingJob = { id: string; chatId: string; name: string; agent: string; status: "working" | "asking" | "done"; browser: boolean };
+// asks: its unanswered question cards (emplio ask), answered over the chat box (POST /jobs/:id/answer)
+export type WorkingJob = { id: string; chatId: string; name: string; agent: string; status: "working" | "asking" | "done"; browser: boolean; asks?: AskCard[] };
 
 export type JobInfo = {
   id: string;

@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -16,7 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { context, type Ctx } from "./auth";
 import { personFor } from "./automations";
 import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./channels";
-import { generateReply, lastWords, loadMessages, quiet, replyUntil, steer, steered } from "./chat";
+import { generateReply, lastWords, loadMessages, quiet, replyFromNotification, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
 import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agents";
@@ -72,7 +72,8 @@ const SIDEBAR_DAYS = 7;
 export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
 const WAIT_MS = 10 * 60_000;
 
-export const RULES = (depth: number) => `## You have one piece of work
+// from: the chat it was started from, which it can search for what the person said there
+export const RULES = (depth: number, from?: string) => `## You have one piece of work
 ${depth > 1 ? "Another thread" : "Emplio"} handed you one task, in this chat of your own. Messages starting \
 "${FROM_EMPLIO.trim()}" are from ${depth > 1 ? "the thread that started you" : "Emplio"}; any other message is the person, who opened \
 your chat and wrote to you directly: answer them, and what they say wins over your brief. Your last message \
@@ -97,8 +98,17 @@ go, section by section, so nothing done is lost. If you worked out how a site wo
 - Anything you couldn't do and why, with the exact error, and what a person would need to decide or provide.
 No preamble. Don't claim what you didn't verify. If the task is unclear, do the most sensible reading and say \
 which one you chose. If you truly can't go on without a decision or a fact only a person has (guessing would \
-be wrong or risky), stop and make your report start with "Question:": exactly what you need and why, then what \
-you've done so far. The answer comes back to you as a message and you carry on. Whoever started you may also \
+be wrong or risky), ${
+  depth === 1 && from
+    ? `first look for it in what they said in the chat that started you (\`emplio history search <words> --chat ${from.slice(0, 8)}\`). Still missing: \
+ask them yourself with \`emplio ask "<question>" "<answer>" ...\` (2 to 4 short answers to tap; none for an open one; \
+several questions, one \`emplio ask\` each in one command), which puts a card over their chat box, then end your \
+reply in a few words. Their answer comes back to you as a message and you carry on. Where \`emplio ask\` says \
+nobody can answer, stop and make your report start with "Question:" instead: exactly what you need and why, then \
+what you've done so far.`
+    : `stop and make your report start with "Question:": exactly what you need and why, then what you've done so far. \
+The answer comes back to you as a message and you carry on.`
+} Whoever started you may also \
 send you a message while you work: it arrives as a new message, and it wins over your brief where they differ.
 An app action that sends or changes something (an email, a payment, a post) shows the person an Allow card on \
 your line in their chat and waits for their tap: just run it. If they don't answer or say no, it says so; report that and \
@@ -124,9 +134,9 @@ const NOTE_REPORT = 1500;
 export const untoldNote = (reports: string[]) =>
   `[The person worked in these threads' chats directly, so you weren't woken. Their latest reports, for you to know; don't mention them unless it matters (\`emplio threads show <id>\` for all of one):\n\n${reports.map((r) => (r.length > NOTE_REPORT ? `${r.slice(0, NOTE_REPORT)}…` : r)).join("\n\n")}\n]`;
 
-// agents still at it for this chat: Emplio isn't waiting on the person yet (chat.ts nextStep)
+// agents still at it for this chat, or asking the person something: Emplio isn't waiting on the person yet (chat.ts nextStep)
 export const stillWorking = async (conversationId: string) =>
-  !!(await db.query.jobs.findFirst({ where: and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")), columns: { id: true } }));
+  !!(await db.query.jobs.findFirst({ where: and(eq(jobs.conversationId, conversationId), inArray(jobs.status, ["working", "asking"])), columns: { id: true } }));
 
 export async function untoldReports(conversationId: string) {
   if (!untold.size) return null;
@@ -191,7 +201,7 @@ export async function jobReply(chatId: string) {
   const agent = w.agent ? await findAgent(w.workspaceId, w.agent) : null;
   return {
     caller: { depth: w.depth, jobId: w.id } satisfies Caller,
-    prompt: [RULES(w.depth), ...(agent ? [await agentPrompt(w.workspaceId, agent)] : [])].join("\n\n"),
+    prompt: [RULES(w.depth, w.conversationId), ...(agent ? [await agentPrompt(w.workspaceId, agent)] : [])].join("\n\n"),
     strong: (w.level ?? agent?.level) === "strong",
     agent: agent?.name,
     startedIn: w.conversationId,
@@ -226,7 +236,8 @@ async function began(w: Row, stop: () => void) {
   await db.update(jobs).set({ status: "working", report: null, finishedAt: null }).where(eq(jobs.id, w.id));
   // its last words are its report: a question waits for an answer
   // capped: the run ended on the step limit, mid-work
-  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false) => {
+  // carded: it asked the person with a card (emplio ask), which shows over their chat box and sends their answer here
+  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false, carded: AskCard[] = []) => {
     const timeLeft = Date.now() < until - 60_000;
     if (capped && outcome === "completed" && !interrupted && timeLeft) {
       // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
@@ -240,13 +251,19 @@ async function began(w: Row, stop: () => void) {
     }
     const unfinished =
       outcome === "failed" && !timeLeft ? "Ran out of time, not finished. " : capped && !interrupted ? "Stopped at the step limit, not finished. " : "";
-    const report = unfinished + (answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)"));
-    const status = unfinished ? "failed" : outcome === "completed" ? (asks(report) ? "asking" : "done") : outcome;
+    const asked = outcome === "completed" && !unfinished && carded.length > 0;
+    const report = asked
+      ? `Question: ${carded.map((c) => `${c.question}${c.options.length ? ` [${c.options.join(" / ")}]` : ""}`).join("\n")}`
+      : unfinished + (answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)"));
+    const status = unfinished ? "failed" : outcome === "completed" ? (asked || asks(report) ? "asking" : "done") : outcome;
     await db.update(jobs).set({ status, report, finishedAt: new Date() }).where(eq(jobs.id, w.id));
     if (status === "done") cloud.onWork(w.workspaceId, w.userId, "agent");
     live.delete(w.id);
     e.end();
-    const goes = reportGoes({ depth: w.depth, stopped: outcome === "stopped", owed: owed.has(w.id), interrupted });
+    // its card is the ask: Emplio isn't woken for it, and still gets the report the answer leads to. Unless the
+    // person last wrote from their phone, which doesn't show the card: Emplio asks there instead.
+    const direct = asked && w.depth === 1 && !(await wroteFromPhone(w.conversationId));
+    const goes = direct ? "nowhere" : reportGoes({ depth: w.depth, stopped: outcome === "stopped", owed: owed.has(w.id), interrupted });
     if (goes === "untold") untold.add(w.id);
     if (goes === "wake") {
       owed.delete(w.id);
@@ -331,6 +348,13 @@ function actionsIn(msgs: ChatMessages): Action[] {
             jobs: p.output?.jobs,
           })),
   );
+}
+
+// The question cards (emplio ask) in a job's last reply that nobody has answered yet: a message after it is the answer.
+export function openAsks(msgs: { role: string; parts: unknown }[]): AskCard[] {
+  const last = msgs.at(-1);
+  if (last?.role !== "assistant") return [];
+  return (last.parts as { output?: { asks?: AskCard[] } }[]).flatMap((p) => p.output?.asks ?? []);
 }
 
 // A job's card for one run (the prompt that started it, see send). The latest run is the job's own status and
@@ -694,6 +718,9 @@ Kaveri", "skip Sai Residency")
 A brief to a job that has worked on it before only needs what's new, plus their exact words.
 
 ### Questions and answers
+- An agent asks the person itself, with a card over their chat box; their answer goes straight to it. Don't ask \
+them the same again or chase it: their reply to the card isn't yours to pass on. If they answer it to you instead \
+(here, or on their phone), hand it to that agent as below.
 - A report starting "Question:" waits for an answer. Answer it yourself if you know; otherwise ask the person. \
 When they answer, hand it to that agent at once (\`emplio hand <agent>\`, never \`--new\`: an answer or a change to \
 what it asked about belongs to the job that asked), their words quoted exactly, nothing softened, added or argued. A \
@@ -818,11 +845,27 @@ export async function jobRoutes(app: FastifyInstance) {
           agent: agentName(r.agent) ?? "Emplio",
           status,
           browser: status !== "asking" && canReopen(r.usedAt) && !!(await liveView(r.chatId!)),
+          ...(status === "asking" && { asks: openAsks(await loadMessages(r.chatId!)) }),
         } satisfies WorkingJob;
       }),
     );
     return all.filter((w) => w.status !== "done" || w.browser);
   });
+
+  // the person answering a job's question card from the chat that started it: as if typed in the job's chat
+  app.post<{ Params: { id: string }; Body: { text: string } }>(
+    "/jobs/:id/answer",
+    { schema: { params, body: { type: "object", required: ["text"], properties: { text: { type: "string", minLength: 1, maxLength: 20_000 } } } } },
+    async (req, reply) => {
+      const ctx = await context(req, reply);
+      if (!ctx) return;
+      const w = await db.query.jobs.findFirst({ where: owned(req.params.id, ctx) });
+      if (!w?.chatId) return reply.code(404).send({ error: "Not found" });
+      const error = await replyFromNotification(ctx.userId, w.chatId, req.body.text, req.log);
+      if (error) return reply.code(400).send({ error });
+      return { ok: true };
+    },
+  );
 
   // the jobs the person opened as their own chat, nested in the sidebar under the chat they came from until closed
   app.get("/jobs", async (req, reply) => {
