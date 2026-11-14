@@ -1,13 +1,19 @@
 import UIKit
 import Capacitor
+import UserNotifications
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // A chat's notification has a Reply button with a text field (the server marks those "reply": backend/src/push.ts).
+        let reply = UNTextInputNotificationAction(identifier: "reply", title: "Reply", options: [], textInputButtonTitle: "Send", textInputPlaceholder: "Reply to Emplio")
+        let center = UNUserNotificationCenter.current()
+        center.setNotificationCategories([UNNotificationCategory(identifier: "reply", actions: [reply], intentIdentifiers: [], options: [])])
+        // set here, not by Capacitor (handleApplicationNotifications: false), so a reply reaches the app even when it wasn't running
+        center.delegate = self
         return true
     }
 
@@ -52,5 +58,49 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
+    // --- notifications ---------------------------------------------------------------------------------
+    // A reply is sent from here, without opening the app or waiting for the page: the notification carries a token for
+    // that chat and where to send it. Everything else (a tap opening the chat) goes to Capacitor and on to the page.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        guard response.actionIdentifier == "reply", let input = response as? UNTextInputNotificationResponse else {
+            return withRouter({ $0.userNotificationCenter(center, didReceive: response, withCompletionHandler: completionHandler) }, orElse: completionHandler)
+        }
+        let text = input.userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let token = info["reply"] as? String, let url = (info["replyUrl"] as? String).flatMap(URL.init(string:)) else { return completionHandler() }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["token": token, "text": text])
+        let task = UIApplication.shared.beginBackgroundTask(withName: "reply")
+        URLSession.shared.dataTask(with: request) { _, res, _ in
+            if (res as? HTTPURLResponse)?.statusCode != 200 { self.replyFailed(text) }
+            DispatchQueue.main.async {
+                completionHandler()
+                UIApplication.shared.endBackgroundTask(task)
+            }
+        }.resume()
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        withRouter({ $0.userNotificationCenter(center, willPresent: notification, withCompletionHandler: completionHandler) }, orElse: { completionHandler([]) })
+    }
+
+    // What was typed isn't lost: it's in the notification saying so.
+    private func replyFailed(_ text: String) {
+        let note = UNMutableNotificationContent()
+        note.title = "Your reply didn't send"
+        note.body = "Open Emplio and send it again: \(text)"
+        note.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: note, trigger: nil))
+    }
+
+    // Capacitor's router, once the page's bridge is up: an app opened by a tap gets the tap before it has one.
+    private func withRouter(_ run: @escaping (NotificationRouter) -> Void, orElse: @escaping () -> Void, tries: Int = 100) {
+        if let router = (window?.rootViewController as? CAPBridgeViewController)?.bridge?.notificationRouter { return run(router) }
+        if tries == 0 { return orElse() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.withRouter(run, orElse: orElse, tries: tries - 1) }
     }
 }
