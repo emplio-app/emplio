@@ -2,6 +2,22 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.41 (2026-11-14)
+
+### What's new
+
+- Emplio now works in Python: it keeps what it has loaded from one step to the next and uses its own tools straight from its code, so long jobs with many steps finish faster, in fewer steps and for less.
+- Files Emplio makes are kept on its computer to keep working on, and saved in Files as they change. It shows you the finished file in the chat with its answer, instead of every draft.
+- When an agent finishes a job, Emplio sees which files it already showed you, so it no longer asks the agent to send them again.
+- Excel, Word and PowerPoint work is ready on your own Mac or Windows PC too: what Emplio needs installs by itself the first time.
+- Mac app: the back and forward buttons update without a warning when you move between pages.
+
+### For developers
+
+- Code mode, on by default (`CODE_MODE=0` turns it off): a Python session per chat and job (`backend/src/python/kernel.py`), the `emplio` library (`backend/src/python/py/emplio`), live answers at `POST /live/<token>/<tag>`, JSON answers for `db`, `web` and `tasks` when the library asks, and every prompt, help and error text written as Python calls (`inPython`) (#153).
+- `/work/out` stays between commands; changed files are stored in Files without showing; `emplio files show <name or id>` shows one (#153).
+- Evals run in code mode (`EVAL_CODE_MODE=0` for bash); workday report files hold real contents (#153).
+
 ## 1.2.40 (2026-11-14)
 
 ### What's new
