@@ -10,7 +10,6 @@ import { runner } from "./computer";
 import { apiBase } from "./devices";
 
 export type HostedBrowser = { id: string; liveUrl: string; cdpUrl: string; timeoutAt: string; startedAt?: string };
-export const RESTORE_SIGN_INS: boolean = true;
 // what the agent is told its browser is (sandbox.ts)
 export const BROWSER_KIND: string = "a Chromium browser on this server";
 

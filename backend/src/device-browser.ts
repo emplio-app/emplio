@@ -21,8 +21,6 @@ const hosted = (deviceId: string, chat: string, b: Started): HostedBrowser => {
 };
 
 export const deviceBrowser = {
-  // sign-ins stay in that Chrome's own folder, so nothing is put back into it
-  RESTORE_SIGN_INS: true as boolean, // the same saved sign-ins as the cloud browser
   BROWSER_KIND,
   // it is already on the person's own connection
   useProxy: async (_id: string, _owner: Owner) => false,

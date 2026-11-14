@@ -184,6 +184,7 @@ export async function stopBrowser(conversationId: string) {
   clearTimeout(live.timer);
   clearInterval(live.keeper);
   stopping.add(live.id);
+  stayInCloud.delete(live.id);
   // a browser that has already ended doesn't answer: don't hold the stop up for it
   const page = live.owner
     ? await Promise.race([saveState(live.owner, live.cdpUrl), Bun.sleep(20_000).then(() => Promise.reject(new Error("timed out")))]).catch((e) => {
@@ -193,6 +194,7 @@ export async function stopBrowser(conversationId: string) {
     : undefined;
   await hostOf(live.id).stopHosted(live.id).catch(() => {});
   await markUsed(conversationId, page);
+  return page;
 }
 
 // Every browser ends at its timeout; a minute early here so we never hand out a dead one.
@@ -228,23 +230,25 @@ async function startOn(conversationId: string, owner: Owner, size?: Size) {
   const mine = deviceBrowserFor(owner.userId);
   if (mine) {
     try {
-      return { started: await mine.startHosted(conversationId, owner), host: mine as { RESTORE_SIGN_INS: boolean } };
+      return await mine.startHosted(conversationId, owner);
     } catch (error) {
       console.error("the computer's browser didn't start; using the cloud's:", error);
     }
   }
-  return { started: await cloud.browser.startHosted(conversationId, owner, size), host: cloud.browser };
+  return cloud.browser.startHosted(conversationId, owner, size);
 }
 
+// a cloud browser started because the computer's Chrome wouldn't: not moved to the computer, so a broken Chrome isn't retried every command
+const stayInCloud = new Set<string>();
+
 const start = async (conversationId: string, owner: Owner, size?: Size) => {
-  const { started, host } = await startOn(conversationId, owner, size);
-  const live = toLive(started);
+  const live = toLive(await startOn(conversationId, owner, size));
+  if (!isDeviceBrowser(live.id) && deviceBrowserFor(owner.userId)) stayInCloud.add(live.id);
   const saved = await savedState(owner).catch(() => null);
-  // A browser service's own profile brings back cookies and local storage. Its docs don't promise Indexed DB, so that
-  // always goes through, and only databases the browser doesn't already have get written.
-  const toRestore = saved && (host.RESTORE_SIGN_INS ? saved : { ...saved, cookies: [], storage: {} });
-  if (toRestore && (toRestore.cookies.length || Object.keys(toRestore.storage).length || Object.keys(toRestore.indexedDb ?? {}).length))
-    await restoreState(live.cdpUrl, toRestore).catch((e) => console.error("browser state not restored:", e));
+  // Always put back, even where a browser service's own profile keeps sign-ins: the latest ones may have been made in the
+  // person's own Chrome (or the cloud's, for that Chrome), and saved here only. Only Indexed DB databases the browser doesn't already have get written.
+  if (saved && (saved.cookies.length || Object.keys(saved.storage).length || Object.keys(saved.indexedDb ?? {}).length))
+    await restoreState(live.cdpUrl, saved).catch((e) => console.error("browser state not restored:", e));
   return live;
 };
 
@@ -299,6 +303,7 @@ export function holdOpen(conversationId: string, live: LiveBrowser) {
 
 // The chat's browser, found or started on first use; each call pushes the idle stop back.
 export async function browserFor(conversationId: string, owner: Owner): Promise<LiveBrowser> {
+  if (moving.has(conversationId)) return moving.get(conversationId)!;
   if (!open.has(conversationId)) {
     remember(conversationId, find(conversationId).then((found) => found ?? start(conversationId, owner)));
     await markUsed(conversationId);
@@ -314,8 +319,28 @@ export async function browserFor(conversationId: string, owner: Owner): Promise<
     return browserFor(conversationId, owner);
   }
   live.owner = owner;
+  // the computer came back while the chat used the cloud's browser: carry on there, signed in, on the same page
+  if (!isDeviceBrowser(live.id) && !stayInCloud.has(live.id) && deviceBrowserFor(owner.userId)) return moveToComputer(conversationId, owner);
   idle(conversationId, live);
   return live;
+}
+
+const moving = new Map<string, Promise<LiveBrowser>>();
+function moveToComputer(conversationId: string, owner: Owner) {
+  const already = moving.get(conversationId);
+  if (already) return already;
+  const move = (async () => {
+    const page = await stopBrowser(conversationId);
+    const pending = start(conversationId, owner);
+    remember(conversationId, pending);
+    const live = await pending;
+    if (isDeviceBrowser(live.id) && page && /^https?:/.test(page)) await goTo(live.cdpUrl, page).catch((e) => console.error("browser page not carried over:", e));
+    live.owner = owner;
+    idle(conversationId, live);
+    return live;
+  })().finally(() => moving.delete(conversationId));
+  moving.set(conversationId, move);
+  return move;
 }
 
 // What the browser downloaded since we last looked (it saves them on its own computer, not the person's): each
