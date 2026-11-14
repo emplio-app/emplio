@@ -2,6 +2,26 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.37 (2026-11-14)
+
+### What's new
+
+- Web addresses in chat now show as short highlighted links with a link icon; hover to see the whole address.
+- Type @ to point work at one of your agents.
+- A chat that stopped showing progress now catches up by itself once the work is done, without a refresh.
+- The suggestion cards on a new chat get out of the way once you start typing.
+- On a phone, the Settings tabs scroll sideways, so every tab can be reached.
+- Files with several dots in a row in their name now open and download.
+- Usage details now count from when your current plan began, so a plan bought mid-month starts fresh.
+
+### For developers
+
+- `emplio apps run` checks the action's required fields before showing Allow, so a blank `{}` is turned back at once (#139, fixes #93).
+- `pointerAt` refuses only a real `..` folder step, not any two dots (#139, fixes #32). Job cards hide while typing (#128); settings tab row scrolls on phones (#91).
+- Links in sent messages and replies render as `ShortLink` chips; `@` mentions include agents (`emplio hand <slug>`); the chat stops waiting when the server says the reply ended (#142, fixes #33, refs #56).
+- iPhone app: native file saving through Filesystem + Share and keyboard resize (#142, fixes #136, #34). These need a new app build; older builds show "Update the Emplio app to save files."
+- Billing usage chart and per-person totals count from `periodStart` (Emplio Cloud, fixes #92).
+
 ## 1.2.36 (2026-11-14)
 
 ### What's new
