@@ -2,6 +2,23 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.39 (2026-11-14)
+
+### What's new
+
+- Reply to Emplio straight from a notification on your Mac: type in the notification and send, without opening the app. Emplio's answer arrives as the next notification.
+- The same on iPhone, once the next version of the iPhone app is out: press and hold a notification, type, send.
+- On the Mac app, Update and Restart to update now really restart into the new version. Until you have this version, quit Emplio completely from the menu bar icon and open it again to update, or download the Mac app again.
+- The Mac app reconnects by itself when its connection to Emplio quietly drops.
+- A question waiting for your OK is no longer skipped by Emplio's own updates in the chat, only by a message from you.
+
+### For developers
+
+- Notification replies (#148): `POST /push/reply` (a per-chat token in the push, no cookie) for the iPhone app; the Mac app sends `notify.reply` over its link. Both go through `replyFromNotification` in `backend/src/chat.ts`. The iPhone part needs a new app build (`AppDelegate.swift` owns the notification delegate).
+- Mac app: `restart()` marks the app as quitting before `autoUpdater.quitAndInstall()`, which closes every window first; the window's hide-on-close stopped it (#149).
+- Desktop apps 0.2.4 ship #148, #149 and the link ping from #144.
+- `moveOn` runs only for messages the person wrote (#147).
+
 ## 1.2.38 (2026-11-14)
 
 ### What's new
