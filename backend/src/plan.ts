@@ -10,10 +10,8 @@ const MAX_STEPS = 30;
 const MARK = { todo: "[ ]", doing: "[>]", done: "[x]" } as const;
 
 const USAGE = `usage: emplio plan                              the checklist the person sees
-       emplio plan set <<'EOF'                 a new one, one step per line (start a line with [x] if it's done already;
-                                               or each step as its own argument: emplio plan set "step one" "step two")
-       <step>
-       EOF
+       emplio plan set "step one" "step two"   a new one, each step its own argument (or one step per line from
+                                               stdin: emplio plan set <<'EOF' ... EOF); start a step with [x] if it's done already
        emplio plan add <step>                  one more step at the end
        emplio plan doing <n>                   step n is what you're on now
        emplio plan done <n>...                 steps done and checked (the next one becomes the one you're on)

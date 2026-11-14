@@ -93,7 +93,7 @@ to read it. When the task makes something (a sheet, a document, a list), start t
 go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you, which is checked against what you were asked:
 - Whether it's all done, and if not, what's left. Never say done for work you've only started.
 - What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
-- Files you made (saved to /work/out to offer them to the person).
+- Files you made, by name: leave them in /work/out (they stay there and are stored in Files; Emplio shows them to the person).
 - Anything you couldn't do and why, with the exact error, and what a person would need to decide or provide.
 No preamble. Don't claim what you didn't verify. If the task is unclear, do the most sensible reading and say \
 which one you chose. If you truly can't go on without a decision or a fact only a person has (guessing would \
@@ -318,7 +318,7 @@ function actionsIn(msgs: ChatMessages): Action[] {
     m.role !== "assistant"
       ? []
       : (m.parts as unknown as (Bash & { input?: { command?: string } })[])
-          .filter((p) => p.type === "tool-bash")
+          .filter((p) => p.type === "tool-bash" || p.type === "tool-python")
           .map((p) => ({
             id: p.toolCallId,
             description: p.input?.description ?? "…",
@@ -413,7 +413,12 @@ const full = async (w: Row) => {
   const head = `${short(w.id)} "${w.name}"${w.agent ? ` (${w.agent})` : ""}: ${w.status}, ${actions.length} actions\n`;
   return w.status === "working"
     ? `${head}now: ${actions.filter((a) => !a.done).at(-1)?.description ?? "thinking"}`
-    : `${head}${w.report ?? ""}${await recorded(w)}${agentNudge(w)}`;
+    : `${head}${w.report ?? ""}${madeNote(actions)}${await recorded(w)}${agentNudge(w)}`;
+};
+// what a job already put in the person's chat, so Emplio doesn't show it again
+const madeNote = (actions: Action[]) => {
+  const made = new Map(actions.flatMap((a) => a.saved ?? []).map((f) => [f.filename, f.id]));
+  return made.size ? `\n[Files it already showed the person on its line: ${[...made].map(([name, id]) => (id ? `${name} (${id.slice(0, 8)})` : name)).join(", ")}.]` : "";
 };
 const notFound = (ref?: string) => `error: none of your threads starts with ${ref ?? "(nothing)"}; see emplio threads list`;
 
@@ -651,7 +656,7 @@ first step: finding things out, opening what you haven't seen, acting on a site 
 - **Yours**: understanding, deciding, planning; answering; asking the person; checking a report; one quick look-up \
 (a note, one app read); a reply, draft, summary or final report that pulls your jobs' results together, written \
 from their reports, even when they call it a document: write it yourself, as one file in /work/out with one command \
-(markdown, so it opens as a document), plus a quick sum if it needs one.
+(markdown, so it opens as a document) and show it, plus a quick sum if it needs one.
 - **An agent's**: research and reading through mail, sites, files or documents; anything in a browser (you have \
 none: agents do); app actions that send or change something; sign-ins; data work across sheets or files; any file \
 that needs more than the reports hold (a sheet built from data, slides, a long document). No saved login or \

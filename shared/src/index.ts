@@ -510,7 +510,7 @@ export type JobInfo = {
     exitCode?: number;
     error?: boolean;
     done: boolean;
-    saved?: { url: string; filename: string }[];
+    saved?: { url: string; filename: string; id?: string }[];
     connect?: ConnectCard[];
     logins?: SaveLoginCard[];
     approvals?: Approval[];

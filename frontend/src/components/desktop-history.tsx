@@ -12,7 +12,8 @@ export function DesktopHistory() {
     // ponytail: Chromium's Navigation API knows what is behind and ahead; if it is missing, both stay on
     const nav = (window as { navigation?: { canGoBack: boolean; canGoForward: boolean; addEventListener: Window["addEventListener"]; removeEventListener: Window["removeEventListener"] } }).navigation;
     if (!nav) return setCan({ back: true, forward: true });
-    const look = () => setCan({ back: nav.canGoBack, forward: nav.canGoForward });
+    // later, not at once: Next.js changes the address inside a React insertion effect, where updates aren't allowed
+    const look = () => setTimeout(() => setCan({ back: nav.canGoBack, forward: nav.canGoForward }));
     look();
     nav.addEventListener("currententrychange", look);
     return () => nav.removeEventListener("currententrychange", look);

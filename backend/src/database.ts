@@ -466,7 +466,7 @@ export const asJson = (r: ResultSet) =>
 const SHOW_ROWS = 50;
 
 const USAGE = () => [
-  `usage: emplio db sql "<one statement>"              run it: rows come back as a table (? params: emplio db sql "<sql>" -- 'v1' 'v2')
+  `usage: emplio db sql "<one statement>"              run it: its rows come back (? params: emplio db sql "<sql>" -- 'v1' 'v2')
        emplio db sql - <<'SQL' ... SQL               the same, statement from stdin
        emplio db script - <<'SQL' ... SQL            several statements as ONE transaction (all or nothing), no results
        emplio db search <words>                      rows in any table with every word somewhere in their text columns
@@ -491,6 +491,8 @@ export async function dbCommand(
   conversationId: string,
   args: string[],
   box: { read(path: string): Promise<string>; write(path: string, text: string): Promise<void>; park(name: string, text: string): Promise<string> },
+  // asked by code (the Python library): rows as JSON, every one of them
+  data = false,
 ) {
   const [sub, first = "", ...rest] = args;
   try {
@@ -499,6 +501,7 @@ export async function dbCommand(
         if (!first.trim()) break;
         const params = rest[0] === "--" ? rest.slice(1) : [];
         const r = await runSql(who, first, params, conversationId);
+        if (data) return r.columns.length ? asJson(r) : JSON.stringify({ changed: r.rowsAffected, last_id: r.lastInsertRowid === undefined ? null : Number(r.lastInsertRowid) });
         if (!r.columns.length)
           return `ok: ${r.rowsAffected} row${r.rowsAffected === 1 ? "" : "s"} changed${r.lastInsertRowid !== undefined && r.rowsAffected ? `, last id ${r.lastInsertRowid}` : ""}`;
         if (!r.rows.length) return `${r.columns.join("\t")}\n(no rows)`;
@@ -517,6 +520,7 @@ export async function dbCommand(
       }
       case "tables": {
         const list = await listTables(who);
+        if (data) return JSON.stringify(list.map((t) => ({ name: t.name, type: t.type, rows: t.rows ?? null, ...(who.role !== "member" && { private: !!t.private }) })));
         return list.length ? list.map((t) => `${t.name}\t${t.type}\t${t.rows ?? "?"} rows${who.role !== "member" && t.private ? "\tprivate" : ""}`).join("\n") : "No tables yet. Create one with emplio db sql \"create table ...\".";
       }
       case "schema":

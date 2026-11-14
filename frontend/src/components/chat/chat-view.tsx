@@ -48,7 +48,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { JobCards, TelegramOffer, WelcomeDialog } from "@/components/chat/first-run";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
-import { AssistantParts, doing } from "@/components/chat/tool-calls";
+import { AssistantParts, doing, isStep } from "@/components/chat/tool-calls";
 import { ChatSendContext } from "@/components/chat/connect-card";
 import { ReplyContext } from "@/components/chat/ask-card";
 import { BrowserChip, BrowserPanel, BrowserProvider, keepPanel, useLiveBrowser, type BrowserTab } from "@/components/chat/browser-panel";
@@ -898,7 +898,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               <LongText>
                 <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
               </LongText>
-            ) : isLast && busy && message.parts.every((p) => p.type !== "text" && p.type !== "tool-bash") ? (
+            ) : isLast && busy && message.parts.every((p) => p.type !== "text" && !isStep(p.type)) ? (
               thinking(message)
             ) : (
               <>

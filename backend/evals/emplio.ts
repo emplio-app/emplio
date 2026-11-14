@@ -4,10 +4,13 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { MODEL_SETS } from "@emplio/shared";
 import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
-import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote } from "../src/chat";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote, PYTHON_DESCRIPTION, pythonInput } from "../src/chat";
 import { HEARTBEAT } from "../src/heartbeat";
 import { AGENTS_HEADING, THREADS_HEADING } from "../src/jobs";
-import { sandboxPrompt, type Session } from "../src/sandbox";
+import { inPython, sandboxPrompt, type Session } from "../src/sandbox";
 import { DEFAULTS } from "../src/settings";
 
 // A made-up business: a furnishings shop in Pune. Nothing here is a real customer's.
@@ -24,10 +27,14 @@ export type Business = {
 };
 
 export const CHAT_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.chatModel;
+// Code mode by default (EVAL_CODE_MODE=0 for bash): the same cases in code mode (src/sandbox.ts codeMode): the python tool and its instructions, the
+// Python really running, with every emplio command, shell command and business file answered by the same stand-ins
+export const CODE_MODE = process.env.EVAL_CODE_MODE !== "0";
+process.env.CODE_MODE = CODE_MODE ? "1" : "0";
 export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgroundModel;
 
 // round: a background round (the owner's check-in), which nobody watches, on the cheaper model
-const system = (b: Business, round: boolean) => [
+export const system = (b: Business, round: boolean) => [
   emplioPrompt({
     rules: agentRules(ctx, round ? HEARTBEAT : undefined),
     computer: sandboxPrompt(round ? { ...session, automation: true, thinker: true, watched: false } : session),
@@ -63,6 +70,17 @@ export type Said = { text: string; commands: string[]; messages?: ModelMessage[]
 let calls = 0;
 export const ran = (description: string, command: string, output: string): ModelMessage[] => {
   const toolCallId = `call_${++calls}`;
+  // code mode: the same step as the python tool would have run it, so the chat so far shows the tool it has
+  if (CODE_MODE) {
+    const [first, ...rest] = command.split("\n");
+    const call = /^emplio [a-z]/.test(first!) ? inPython(`\`${first}\``).slice(1, -1) : "";
+    const body = rest.slice(0, -1).join("\n");
+    const code = call.startsWith("emplio.") ? `print(${call.replace('input="""..."""', `input=${JSON.stringify(body)}`)})` : `print(sh(${JSON.stringify(command)}))`;
+    return [
+      { role: "assistant", content: [{ type: "tool-call", toolCallId, toolName: "python", input: { description, code } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId, toolName: "python", output: { type: "json", value: { exitCode: 0, output: inPython(output) } } }] },
+    ];
+  }
   return [
     { role: "assistant", content: [{ type: "tool-call", toolCallId, toolName: "bash", input: { description, command } }] },
     { role: "tool", content: [{ type: "tool-result", toolCallId, toolName: "bash", output: { type: "json", value: { exitCode: 0, output } } }] },
@@ -72,7 +90,16 @@ export const person = (text: string): ModelMessage => ({ role: "user", content: 
 export const emplio = (text: string): ModelMessage => ({ role: "assistant", content: text });
 
 // What stand-in a command gets, or null to stop there: the choice the eval is about has been made.
-export type StandIn = (command: string) => string | null;
+// step: which tool call it's part of. In code mode one step (a run of Python) can make many commands; a step counts
+// once toward how many Emplio did by hand, as the server counts it (counted, below).
+export type StandIn = (command: string, step: number) => string | null;
+// The by-hand count after this command: one more for the first counted command of a step, as the server counts steps.
+export const counted = () => {
+  let n = 0;
+  let last = -1;
+  return (step: number, counts: boolean) => (counts && step !== last ? ((last = step), ++n) : counts ? n : 0);
+};
+let steps_ = 0;
 
 // A believable result for the everyday commands, so Emplio can look around before it decides. Nothing is run.
 // A chain (`a; echo ---; b`) answers part by part, as a shell would; a write prints nothing.
@@ -132,6 +159,8 @@ const one = (c: string): string => {
   if (/\bemplio (activity|notes)\b/.test(c)) return "(nothing since the last round)";
   if (/\bemplio db tables\b/.test(c)) return "(no tables yet)";
   if (/\bemplio\b/.test(c)) return "ok";
+  // a file a job made: there, and what its report said is in it
+  if (/^\s*(cat|head|tail|sed|wc|less)\b.*\/work\/out\//.test(c)) return "(the job's file: what its report says it holds)";
   if (/^\s*(cat|head|tail|sed|wc|less)\b/.test(c)) return FILES.find(([file]) => file.test(c))?.[1] ?? `cat: ${c.trim().split(/\s+/).at(-1)}: No such file or directory`;
   if (/^\s*ls\b/.test(c) && /tmp\/slip/.test(c)) return "make.py";
   if (/^\s*ls\b/.test(c)) return /company\/?(\s|$)/.test(c) ? "AGENT.md  README.md  goals.md  heartbeat.md  agents  automations  inbox  knowledge  skills  tools" : "";
@@ -148,35 +177,147 @@ export const pretend = (command: string, world: World = []): string =>
     .join("\n") || "(no output)";
 
 // Emplio's reply to a chat whose last message is the person's (the note goes on it, as in the app).
-export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round = false): Promise<Said> {
+// session: a Python session to keep across replies (code mode; a conversation's), else one for this reply only
+export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round = false, session?: string): Promise<Said> {
   const last = chat.map((m) => m.role).lastIndexOf("user");
   const asked = chat[last]!;
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
   const commands: string[] = [];
   let stop = false;
+  const bash = tool({
+    description: BASH_DESCRIPTION,
+    inputSchema: bashInput,
+    execute: async ({ command }) => {
+      commands.push(command);
+      const out = standIn(command, ++steps_);
+      if (out === null) stop = true;
+      return { exitCode: 0, output: out ?? "(stopped here)" };
+    },
+  });
+  const python = tool({
+    description: PYTHON_DESCRIPTION,
+    inputSchema: pythonInput,
+    execute: async ({ code, restart }) => {
+      // the server's notes ([...] after a result) go under the run's own output, as the app adds them, once each
+      const notes = new Set<string>();
+      const step = ++steps_;
+      let first = true;
+      const answer = (command: string) => {
+        commands.push(command);
+        const out = standIn(command, step);
+        first = false;
+        if (out === null) {
+          stop = true;
+          return "(stopped here)";
+        }
+        const [result, ...extra] = out.split(/\n\n(?=\[)/);
+        for (const n of extra) notes.add(n);
+        return result!;
+      };
+      const ran = await runPython(session ?? key, code, !!restart, answer);
+      // a run that called nothing still counts as a step done by hand
+      if (first && !stop) {
+        const out = standIn(`python3 <<'EOF'\n${code}\nEOF`, step);
+        if (out === null) stop = true;
+        for (const n of (out ?? "").split(/\n\n(?=\[)/).slice(1)) notes.add(n);
+      }
+      return { exitCode: ran.exitCode, output: [ran.output, ...[...notes].map(inPython)].join("\n\n") };
+    },
+  });
+  const key = crypto.randomUUID();
+  const began = Date.now();
   const { steps, response } = await generateText({
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
-    system: system(b, round).map((content, i) => ({ role: "system" as const, content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
+    system: system(b, round).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
     messages,
-    tools: {
-      bash: tool({
-        description: BASH_DESCRIPTION,
-        inputSchema: bashInput,
-        execute: async ({ command }) => {
-          commands.push(command);
-          const out = standIn(command);
-          if (out === null) stop = true;
-          return { exitCode: 0, output: out ?? "(stopped here)" };
-        },
-      }),
-    },
+    tools: CODE_MODE ? { python } : { bash },
     stopWhen: [stepCountIs(maxSteps), () => stop],
   });
+  if (CODE_MODE && !session) endPython(key);
   const usage = {
     input: steps.reduce((n, s) => n + (s.usage.inputTokens ?? 0), 0),
     output: steps.reduce((n, s) => n + (s.usage.outputTokens ?? 0), 0),
     cost: steps.reduce((n, s) => n + Number((s.usage.raw as { cost?: number } | undefined)?.cost ?? 0), 0),
   };
+  // EVAL_USAGE=<file>: every reply's cost, tokens and steps, one JSON line each, to add up a run (both modes)
+  if (process.env.EVAL_USAGE) appendFileSync(process.env.EVAL_USAGE, `${JSON.stringify({ ...usage, steps: steps.length, commands: commands.length, ms: Date.now() - began })}\n`);
   return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage };
+}
+
+// ---- code mode: the real Python session on a stand-in computer (code/fake.py) ----
+const KERNEL = join(import.meta.dir, "../src/python/kernel.py");
+const FAKE = join(import.meta.dir, "code/fake.py");
+type Answer = (command: string) => string;
+const answering = new Map<string, Answer>();
+const folders = new Map<string, string>();
+let server: ReturnType<typeof Bun.serve> | undefined;
+
+// what a shell would have run for each request, so the markers read both modes the same way
+const word = (w: string) => (/^[\w@%+=:,./-]+$/.test(w) ? w : w.includes("'") ? JSON.stringify(w) : `'${w}'`);
+const heredoc = (text: string) => ` <<'EOF'\n${text.replace(/\n$/, "")}\nEOF`;
+type Ask = { args?: string[]; stdin?: string | null; sh?: string; read?: string; ls?: string; write?: string; text?: string };
+// What the library gets back, as the server answers code (src/sandbox.ts liveRoutes): rows, results and lists as
+// data, everything else in the words code writes
+function asData(a: Ask, out: string) {
+  const [area, sub] = a.args!;
+  if (/^\s*[[{]/.test(out)) return out;
+  if (area === "db" && sub === "sql") return out === "ok" ? (/^\s*(select|with)\b/i.test(a.args![2] === "-" ? (a.stdin ?? "") : (a.args![2] ?? "")) ? "[]" : '{"changed": 1, "last_id": 1}') : out;
+  if (area === "db" && sub === "tables" && /no tables/.test(out)) return "[]";
+  if (area === "tasks" && (sub === "list" || sub === "search") && /no tasks/i.test(out)) return "[]";
+  if (area === "web" && (sub === "search" || sub === "similar"))
+    return JSON.stringify([...out.matchAll(/^\d+\. (.+) \((https?:\/\/\S+)\)$/gm)].map((m) => ({ title: m[1], url: m[2], date: null, text: m[1] })));
+  return inPython(out);
+}
+const asCommand = (a: Ask) =>
+  a.args ? `emplio ${a.args.map(word).join(" ")}${a.stdin ? heredoc(a.stdin) : ""}`
+  : a.sh !== undefined ? `${a.sh}${a.stdin ? heredoc(a.stdin) : ""}`
+  : a.read ? `cat ${a.read}`
+  : a.ls ? `ls ${a.ls}`
+  : `cat > ${a.write}${heredoc(a.text ?? "")}`;
+
+function fakeServer() {
+  server ??= Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const key = new URL(req.url).pathname.slice(1);
+      const a = (await req.json()) as Ask;
+      const answer = answering.get(key);
+      const out = answer ? answer(asCommand(a)) : "";
+      return Response.json({ out: a.args ? asData(a, out) : out, code: 0 });
+    },
+  });
+  server.unref(); // the stand-in server mustn't keep the eval run open once it's done
+  return server;
+}
+
+async function runPython(key: string, code: string, restart: boolean, answer: Answer) {
+  answering.set(key, answer);
+  if (!folders.has(key)) folders.set(key, mkdtempSync(join(tmpdir(), "emplio-eval-")));
+  const work = folders.get(key)!;
+  const p = Bun.spawn(["python3", KERNEL, "run", key, ...(restart ? ["--restart"] : [])], {
+    cwd: work,
+    stdin: new TextEncoder().encode(code),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { PATH: process.env.PATH!, HOME: process.env.HOME!, EMPLIO_WORK: work, EMPLIO_FAKE: `http://127.0.0.1:${fakeServer().port}/${key}`, EMPLIO_FAKE_LIB: FAKE, EZ_KEY: "eval" },
+  });
+  const timer = setTimeout(() => p.kill(), 120_000);
+  const [out, err, exitCode] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  clearTimeout(timer);
+  // the server's /work, as a person's own computer maps it back
+  return { exitCode, output: (out + err).replaceAll(work, "/work").trim() || "(no output)" };
+}
+
+// a session done with: its process stopped and its folder gone
+export function endPython(key: string) {
+  answering.delete(key);
+  const work = folders.get(key);
+  folders.delete(key);
+  if (!work) return;
+  try {
+    const info = JSON.parse(require("node:fs").readFileSync(join(work, "tmp/.emplio/sessions", `${key}.json`), "utf8"));
+    process.kill(info.pid);
+  } catch {}
+  rmSync(work, { recursive: true, force: true });
 }

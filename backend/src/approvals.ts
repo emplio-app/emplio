@@ -90,6 +90,10 @@ export async function outcome(cards: Approval[], userId: string, result: { exitC
 // alwaysAsk: asked every time, whatever "Just do it" or "Always allow" say (installing a skill from outside)
 type Own = { title: string; readOnly: boolean; appName: string; logo?: string; alwaysAsk?: boolean; run: () => Promise<unknown> };
 
+// An action that needs asking, met while code-mode code runs: not asked then (the computer would wait on the person),
+// but after the command, the usual way.
+export class Deferred extends Error {}
+
 // null: go ahead. A string: why not, for the agent. `account`: an app action's; `own`: an action that isn't an app's.
 export async function approve(s: Session, action: string, input: unknown, { account, own }: { account?: string; own?: Own } = {}): Promise<string | null> {
   // "Just do it" counts only where someone is watching; background runs change things only when "Always allow"ed
@@ -107,6 +111,8 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   if (s.automation)
     return `error: ${action} changes something, and a run nobody is watching may only do what its automation lists under actions: and ${s.user.name} allowed (or what they've said "Always allow" to). Don't do it another way: say in your last message exactly what you'd do, and that it needs adding to the automation's actions and allowing in Automations.`;
   if (s.task) return `error: ${action} needs ${s.user.name}'s OK first, and nobody can answer in a task's chat. Don't do it another way: set the task to waiting on ${s.user.name} (emplio tasks update <id> --status waiting --waiting "${s.user.name}'s OK to ...") and say exactly what you'd do, so they can say yes in their chat.`;
+  // asked live, while code-mode code runs (sandbox.ts liveRoutes): asked after the command instead, as without code mode
+  if (s.live) throw new Deferred();
   if (!s.notify) return `error: ${action} needs ${s.user.name}'s OK first, which can't be asked from here. Leave it to the main chat.`;
 
   const app = own ? { name: own.appName, logo: own.logo } : await connectCard(action.split(".")[0]!).catch(() => null);

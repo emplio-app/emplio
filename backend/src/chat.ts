@@ -33,7 +33,7 @@ import { forModel, isOwnFile, readStored, resolveFiles } from "./files";
 import { recordUploads } from "./made";
 import { listTeam } from "./team";
 import { onboarding } from "./setup";
-import { businessInstructions, computerNote, personalFiles, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
+import { businessInstructions, codeMode, computerNote, inPython, personalFiles, pythonCommand, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
 import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld } from "./compact";
 import { settingsFor } from "./settings";
 import { model, modelForJob } from "./models";
@@ -168,13 +168,15 @@ export const forScreen = (id: string, parts: ScreenPart[]) =>
     .filter((p) => p.type !== "reasoning")
     .map(({ callProviderMetadata: _call, resultProviderMetadata: _result, providerMetadata: _provider, ...p }) => {
       const part = p as ScreenPart;
-      const command = part.input?.command;
+      // code mode's parts carry code where bash's carry a command
+      const field = part.input && "code" in part.input ? "code" : "command";
+      const command = part.input?.[field];
       const output = part.output?.output;
-      if (part.type !== "tool-bash" || (!tooLong(command) && !tooLong(output))) return part;
+      if (!isCommandPart(part.type) || (!tooLong(command) && !tooLong(output))) return part;
       return {
         ...part,
         cut: id,
-        ...(tooLong(command) && { input: { ...part.input, command: `${command.slice(0, LOG_KEPT)}…` } }),
+        ...(tooLong(command) && { input: { ...part.input, [field]: `${command.slice(0, LOG_KEPT)}…` } }),
         ...(tooLong(output) && { output: { ...part.output, output: undefined } }),
       };
     });
@@ -372,7 +374,8 @@ export function contextNote(current: Record<string, string>, earlier: UIMessage[
   const prev = lastFull < 0 ? null : earlier.slice(lastFull).flatMap((m) => noteOf(m) ?? []).at(-1)!.state;
   const lines = Object.entries(current).flatMap(([k, v]) => (prev ? (v === (prev[k] ?? "") && !(v && EVERY_TIME.has(k)) ? [] : [v || GONE[k] || ""]) : v ? [v] : []));
   if (!lines.filter(Boolean).length) return null;
-  return { state: current, full: !prev, text: `${CONTEXT_MARK}\n${lines.filter(Boolean).join("\n\n")}\n]` };
+  const text = `${CONTEXT_MARK}\n${lines.filter(Boolean).join("\n\n")}\n]`;
+  return { state: current, full: !prev, text: codeMode() ? inPython(text) : text };
 }
 
 // Waits until no reply is running in the chat and the last one is saved.
@@ -431,7 +434,7 @@ const closeToolCalls = (message: UIMessage): UIMessage => ({
 // The bash tool as the model sees it (the evals offer the same one, without running anything)
 export const BASH_DESCRIPTION =
   "Run a bash command in this chat's own computer (python, node, curl), starting in /work. " +
-  "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is offered to the user as a download; " +
+  "Use it to compute, process files, write and run scripts, or fetch things. Anything saved to /work/out is kept there and stored in the person's Files; to give one to the user, `emplio files show <name>` puts it in the chat; " +
   "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
   "Returns the exit code and combined output (long output is cut to the last 8000 characters). " +
   "Output is text; to actually see an image or PDF, run `emplio view <file>`. " +
@@ -452,6 +455,27 @@ export const bashInput = z.object({
     .optional()
     .describe("When there's a checklist (emplio plan): the number of the step this command works on. The person's checklist moves to it, ticking off the one before."),
 });
+
+// The python tool, in code mode (sandbox.ts codeMode), in place of bash
+export const PYTHON_DESCRIPTION =
+  "Run Python in this chat's own computer, in a session that stays open between steps (imports, data and functions you define are kept), starting in /work. " +
+  "Emplio's commands are the ready-imported `emplio` library, and sh(\"...\") runs a shell command and returns its output. " +
+  "Only what you print comes back (long output is cut to the last 8000 characters), so print just what you need. Anything saved to /work/out is kept there and stored in the person's Files; to give one to the user, `emplio files show <name>` puts it in the chat; " +
+  "a text file you make for them (a draft, notes, a message) is .md, not .txt, so it opens formatted. " +
+  "To actually see an image or PDF: emplio.view(\"<file>\"). " +
+  "A run times out after 120s, keeping what was set before that point: for anything long (servers, watchers, big runs) set background: true.";
+export const pythonInput = z.object({
+  description: commandLabel.describe("Write this first, before code: what you're doing in 3-5 plain words, starting with an -ing verb, shown to the user instead of the code, e.g. \"Counting rows in sales.csv\", \"Searching mail for Pratham\""),
+  code: z.string().describe("The Python to run"),
+  restart: z.boolean().optional().describe("Start a fresh session first (everything defined before is dropped): when it's stuck or in a bad state"),
+  background: z.boolean().optional().describe("Run in a process of its own for long runs or servers (none of the session's variables). Returns at once with a pid and a log file; check later with tail on the log, stop with kill -- -<pid>."),
+  step: z.number().int().optional().describe("When there's a checklist (emplio plan): the number of the step this code works on. The person's checklist moves to it, ticking off the one before."),
+});
+// Code as the server's checks read commands: emplio.hand(...) reads as "emplio hand (", so the rules written for
+// commands (no browser in Emplio's own chat, what counts as handing off, the skill reminders) hold for code too
+export const asCommand = (code: string) => code.replace(/\bemplio((?:\.\w+)+)\s*\(/g, (_, path: string) => `emplio${path.split(".").join(" ")} (`);
+// a reply's command steps, whichever tool ran them
+export const isCommandPart = (type: string) => type === "tool-bash" || type === "tool-python";
 
 // Who Emplio is in this chat and how it talks: the top of its prompt (jobs share it, jobs.ts).
 export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">, automation?: string): string[] {
@@ -772,7 +796,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       channel:
         channel === "web"
           ? "They're in the web app."
-          : `They're on ${channel}: text like a colleague on their phone. Each paragraph you write goes out as its own message, so keep the whole reply to one or two lines, one message; several short messages only when they asked for detail. Plain text with simple **bold** and lists; no tables or headings${visual ? ", and never openui-lang" : ""}. Files you save to /work/out are sent to them there. Several messages from them in a row are one request: answer them together, once.`,
+          : `They're on ${channel}: text like a colleague on their phone. Each paragraph you write goes out as its own message, so keep the whole reply to one or two lines, one message; several short messages only when they asked for detail. Plain text with simple **bold** and lists; no tables or headings${visual ? ", and never openui-lang" : ""}. Files you show them (\`emplio files show <name>\`) are sent to them there. Several messages from them in a row are one request: answer them together, once.`,
     }),
     date: `Today is ${today} (${tz} time).`,
     computer: computerNote(session),
@@ -846,7 +870,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   const here = { role: "system" as const, content: `This chat's id is ${id.slice(0, 8)}.` };
   // a job's rules and agent go after the shared prompt, so it stays cached for Emplio and every job alike
   const asJob = job ? [{ role: "system" as const, content: job.prompt }] : [];
-  const withNotes = (n: string | null) => [...system, ...(n ? [{ role: "system" as const, content: notesBlock(n, id) }] : []), here, ...main, ...asJob];
+  // code mode: every command they mention, as the Python library spells it (sandbox.ts inPython)
+  const python = (m: SystemModelMessage) => (codeMode() ? { ...m, content: inPython(m.content) } : m);
+  const withNotes = (n: string | null) => [...system, ...(n ? [{ role: "system" as const, content: notesBlock(n, id) }] : []), here, ...main, ...asJob].map(python);
   // past settings.compactAt, everything sent so far is folded into notes (compact.ts), but for the last few
   // exchanges; the notes end just before one of their messages, so what's sent after them starts with the person
   // set once the reply's stream exists (below)
@@ -905,11 +931,16 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   // Emplio's bash, and its threads' (jobs.ts): `emplio hand` acts for whoever runs it
   // `guard`: this run's check for commands that keep failing (stuck.ts)
   const makeBash = (caller: Caller, guard: FailureGuard = failureGuard()) => tool({
-    description: BASH_DESCRIPTION,
-    inputSchema: bashInput,
+    description: codeMode() ? PYTHON_DESCRIPTION : BASH_DESCRIPTION,
+    inputSchema: (codeMode() ? pythonInput : bashInput) as typeof bashInput,
     // A generator so a command waiting on the person's OK for an app action (approvals.ts) can show the
     // card while it waits: each yield before the last is an in-progress output the chat draws.
-    async *execute({ description, command, background, step }, { abortSignal }) {
+    async *execute(input, { abortSignal }) {
+      const { description, background, step } = input;
+      // code mode: the checks read the code as commands; the computer runs it in this chat's Python session
+      const code = (input as unknown as { code?: string }).code;
+      const command = code !== undefined ? asCommand(code) : input.command;
+      const run = code !== undefined ? pythonCommand(session, code, { restart: (input as { restart?: boolean }).restart, background }) : command;
       // counted as it starts: several commands in one step run side by side
       const nth = notCounted(command) ? 0 : ++byHand;
       const refusedWith = !caller.jobId && !automation ? refusal(command, nth) : null;
@@ -921,17 +952,18 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         conversationId: id,
         kind: "command",
         summary: description,
-        detail: { command: command.slice(0, 4000), ...(background && { background }), ...(caller.jobId && { job: caller.jobId }), ...(refused && { refused }) },
+        detail: { command: (code ?? command).slice(0, 4000), ...(background && { background }), ...(caller.jobId && { job: caller.jobId }), ...(refused && { refused }) },
       });
       if (refused) {
         // through the failure guard, so a run that keeps pushing against the limit loses its commands and has to write
-        const result = { exitCode: 2, output: refusedWith, refused };
+        const result = { exitCode: 2, output: code !== undefined ? inPython(refusedWith) : refusedWith, refused };
         const note = guard.check(command, result);
         yield note ? { ...result, output: `${refusedWith}\n\n${note}` } : result;
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {
-        const note = [guard.check(command, result), ...(caller.jobId ? [] : [!automation && skillNote(nth, command), longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
+        const said = [guard.check(command, result), ...(caller.jobId ? [] : [!automation && skillNote(nth, command), longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
+        const note = code !== undefined ? inPython(said) : said;
         return note ? { ...result, output: `${String(result.output ?? "")}\n\n${note}` } : result;
       };
       // the checklist moves as the command starts, so they see where the job is while it runs
@@ -953,7 +985,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         changed = true;
         wake();
       };
-      const done = runBash({ ...session, notify, started: onStarted, signal: abortSignal }, command, background, abortSignal, caller);
+      const done = runBash({ ...session, notify, started: onStarted, signal: abortSignal }, run, background, abortSignal, caller);
       done.finally(() => ((finished = true), wake())).catch(() => {});
       while (!finished) {
         if (!changed) await new Promise<void>((resolve) => (wake = resolve));
@@ -969,7 +1001,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       void outcome([...cards.values()], ctx.userId, result).catch(() => {});
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
       if (reached?.open && !result.plan)
-        result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`emplio plan done\` before your answer. Stopping to ask them something: leave it open.]` };
+        result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }) };
     },
     // files from `emplio view` go to the model as real images/PDFs, not as JSON
@@ -1014,7 +1046,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       return folding.prepareStep(step);
     }, guard),
     tools: {
-      bash: makeBash(job?.caller ?? EMPLIO, guard),
+      [codeMode() ? "python" : "bash"]: makeBash(job?.caller ?? EMPLIO, guard),
     },
     // browser work (emplio browser) takes many small steps. A message they sent meanwhile ends the reply after the
     // command running now, so it goes in as their own message and the next reply carries on from there
@@ -1070,7 +1102,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
             summary: answer.split("\n").find((l) => l.trim()) ?? "(no answer)",
             detail: {
               answer: answer.slice(0, 4000),
-              commands: responseMessage.parts.filter((p) => p.type === "tool-bash").length,
+              commands: responseMessage.parts.filter((p) => isCommandPart(p.type)).length,
               ...(stopper.signal.aborted && { stopped: true }),
               ...(u && { tokens: { input: u.inputTokens, cacheRead: u.inputTokenDetails.cacheReadTokens, cacheWrite: u.inputTokenDetails.cacheWriteTokens, output: u.outputTokens } }),
             },
@@ -1380,7 +1412,7 @@ export async function chatRoutes(app: FastifyInstance) {
     if (!message || !(await findConversation(message.conversationId, ctx))) return reply.code(404).send({ error: "Not found" });
     const part = (message.parts as (ScreenPart & { toolCallId?: string })[]).find((p) => p.toolCallId === req.params.tool);
     if (!part) return reply.code(404).send({ error: "Not found" });
-    return { command: part.input?.command, output: part.output?.output };
+    return { command: part.input?.command ?? part.input?.code, output: part.output?.output };
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateConversationRequest }>(
