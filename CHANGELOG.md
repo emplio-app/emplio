@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.40 (2026-11-14)
+
+### What's new
+
+- When one of your agents finishes a job that used a browser, its browser tab now stays in your main chat until that browser closes, instead of vanishing the moment the job ends.
+
+### For developers
+
+- `/conversations/:id/working` also returns finished jobs whose browser is still live (`status: "done"`); the strip over the message box shows only jobs still working or asking (#151).
+
 ## 1.2.39 (2026-11-14)
 
 ### What's new
