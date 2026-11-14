@@ -207,7 +207,8 @@ const PERSON_USAGE = `usage: emplio person <email>                    a teammate
 
 // A teammate's own files, which their chats show the AI: what the background agent learns about them goes here.
 export async function personCommand(workspaceId: string, author: { name: string; email: string }, args: string[]) {
-  const [email, sub, ...rest] = args;
+  // code mode's emplio.person.prefer(email, line) arrives as `person prefer <email>`: either order
+  const [email, sub, ...rest] = ["prefer", "profile"].includes(args[0] ?? "") ? [args[1], args[0], ...args.slice(2)] : args;
   if (!email || (sub && !["prefer", "profile"].includes(sub)) || (sub && !rest.join(" ").trim())) return PERSON_USAGE;
   const [m] = await db
     .select({ id: users.id, name: users.name })

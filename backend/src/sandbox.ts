@@ -1176,7 +1176,7 @@ ${py ? `${codeModeNote(name, admin, agent)}\n\n` : ""}Folders:
 ${admin ? "- /work/restricted/  finance, HR, owner notes (git). Admins only.\n" : ""}- /work/me/  ${name}'s own files (git): profile.md, preferences.md, notes/, skills/
 - /work/in/  files attached in ${name}'s chats (a document's words beside it in <name>.txt)
 - /work/out/  files you make: kept, and stored in Files
-- /work/tmp/  scratch; lost when the computer is replaced
+- /work/tmp/  scratch, shared by ${name}'s chats: earlier work's files and scripts are there (look when it's relevant); lost when the computer is replaced
 
 Rules:
 - Changes under company/, restricted/ and me/ are saved to git, as ${name}, at the end of each reply. Don't run git there, except to restore a file: \`git log -- <path>\`, then \`git checkout <commit>~1 -- <path>\`.
@@ -1203,7 +1203,7 @@ ${only(manager, `${bg ? "" : `Questions: when ${name} must decide something, ask
 `}
 Team: \`emplio team list\`. ${admin && !bg ? "`emplio help` has the commands to add people (ask their full name), change roles and set managers." : "Only the owner or an admin changes it."}
 
-Apps: ${name}'s accounts (Gmail, Calendar, Drive, Slack and more) are listed under Connected now. ${bg ? `Not connected or expired: say in your last message which app ${name} should connect.` : `Not connected: \`emplio apps search <words>\`, then \`emplio apps add <app>\` puts a Connect button in the chat (don't write a link); expired: \`emplio apps reconnect <app>\`.`} Your agents use them. To message a teammate on their phone: \`emplio channels send <email> <message>\`. MCP servers: \`emplio mcp help\`.
+Apps: ${name}'s accounts (Gmail, Calendar, Drive, Slack and more) are listed under Connected now. ${bg ? `Not connected or expired: say in your last message which app ${name} should connect.` : `Not connected: \`emplio apps search <words>\`, then \`emplio apps add <app>\` puts a Connect button in the chat (don't write a link); expired: \`emplio apps reconnect <app>\`.`} For one quick read or send yourself: \`emplio apps actions <app> [words]\` finds an action (gmail.send_email), \`emplio apps info <action>\` its input, \`emplio apps run <action> '{"key": "value"}'\` (several accounts: \`--account "<name>"\`). To message a teammate on their phone: \`emplio channels send <email> <message>\`. MCP servers: \`emplio mcp help\`.
 
 Automations: work on a schedule or when something happens in an app. \`emplio automations list\`. ${admin ? "Before setting one up or changing one, read `emplio automations help`; never by writing files in company/automations/." : "Only the owner or an admin sets them up."}
 

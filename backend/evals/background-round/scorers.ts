@@ -18,7 +18,7 @@ export const didOf = (commands: string[]): Does[] => [
   ...(savedOf(commands).length ? (["skill"] as const) : []),
   ...(commands.some((c) => wrote(c, /knowledge\//)) ? (["knowledge"] as const) : []),
   // onto the person (`emplio person`), or for a rule about every chat, into the business's standing instructions
-  ...(commands.some((c) => /\bemplio person\s+\S+\s+(prefer|profile)\b/.test(c) || wrote(c, /AGENT\.md|preferences\.md/)) ? (["preference"] as const) : []),
+  ...(commands.some((c) => /\bemplio person\s+(\S+\s+)?(prefer|profile)\b/.test(c) || wrote(c, /AGENT\.md|preferences\.md/)) ? (["preference"] as const) : []),
   ...(commands.some((c) => /\bemplio tasks add\b/.test(c)) ? (["task"] as const) : []),
 ];
 

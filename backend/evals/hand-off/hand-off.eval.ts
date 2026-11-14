@@ -33,7 +33,7 @@ async function decide({ business, chat, world }: Input): Promise<Output> {
     12,
   );
   // EVAL_DUMP=<file>: each try's answer, one JSON line each
-  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ text: said.text, commands: said.commands })}\n`);
+  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ ask: JSON.stringify(chat.at(-1)?.content).slice(0, 200), text: said.text, commands: said.commands })}\n`);
   return { ...said, byHand };
 }
 
