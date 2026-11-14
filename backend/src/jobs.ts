@@ -20,7 +20,7 @@ import { generateReply, lastWords, loadMessages, quiet, replyUntil, steer, steer
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
 import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agents";
-import { canReopen, liveView } from "./browser";
+import { canReopen, liveView, REOPEN_MS } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
 import { cloud } from "./cloud";
@@ -792,19 +792,32 @@ export async function jobRoutes(app: FastifyInstance) {
       .select({ id: jobs.id, name: jobs.name, chatId: jobs.chatId, agent: jobs.agent, status: jobs.status, usedAt: conversations.browserUsedAt })
       .from(jobs)
       .innerJoin(conversations, eq(conversations.id, jobs.chatId))
-      .where(and(eq(jobs.conversationId, req.params.id), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId), inArray(jobs.status, ["working", "asking"]), isNull(jobs.parentId)))
+      .where(
+        and(
+          eq(jobs.conversationId, req.params.id),
+          eq(jobs.userId, ctx.userId),
+          eq(jobs.workspaceId, ctx.workspaceId),
+          isNull(jobs.parentId),
+          // finished ones too while their browser may still be open: its tab stays until the browser closes
+          or(inArray(jobs.status, ["working", "asking"]), gt(conversations.browserUsedAt, new Date(Date.now() - REOPEN_MS))),
+        ),
+      )
       .orderBy(asc(jobs.createdAt));
-    // ponytail: one browser-service look per job at work, every poll; a few at most
-    return Promise.all(
-      rows.map(async (r) => ({
-        id: r.id,
-        chatId: r.chatId!,
-        name: r.name,
-        agent: agentName(r.agent) ?? "Emplio",
-        status: r.status as "working" | "asking",
-        browser: r.status === "working" && canReopen(r.usedAt) && !!(await liveView(r.chatId!)),
-      }) satisfies WorkingJob),
+    // ponytail: one browser-service look per job, every poll; a few at most
+    const all = await Promise.all(
+      rows.map(async (r) => {
+        const status = r.status === "working" || r.status === "asking" ? r.status : "done";
+        return {
+          id: r.id,
+          chatId: r.chatId!,
+          name: r.name,
+          agent: agentName(r.agent) ?? "Emplio",
+          status,
+          browser: status !== "asking" && canReopen(r.usedAt) && !!(await liveView(r.chatId!)),
+        } satisfies WorkingJob;
+      }),
     );
+    return all.filter((w) => w.status !== "done" || w.browser);
   });
 
   // the jobs the person opened as their own chat, nested in the sidebar under the chat they came from until closed
