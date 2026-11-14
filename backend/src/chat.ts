@@ -630,8 +630,9 @@ export async function generateReply(ctx: Ctx, id: string, message: UIMessage, lo
         c.close();
       },
     });
-  // their new message answers any OK card still open in this chat: skipped (approvals.ts)
-  if (!automation) moveOn(id);
+  // their new message answers any OK card still open in this chat: skipped (approvals.ts). Only the person's own
+  // (`via`): an agent's report, a restart or a message to a job waits for the card like anything else
+  if (via) moveOn(id);
   // after the reply running here, if there is one; let go once this one is saved (onEnd), or if it never starts
   const release = await holdChat(id);
   try {
