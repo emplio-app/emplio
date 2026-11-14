@@ -9,7 +9,8 @@ import type { WebSocket } from "@fastify/websocket";
 //    (push.ts) shown inside the app they're looking at, which tells us here what that is.
 // ponytail: in this process's memory; with more than one server, move both to Redis pub/sub
 
-type Watcher = { socket: WebSocket; requestId: string };
+// skip: chunks the catch-up merged away, so its numbering stays gapless (the app drops a reply that skips one)
+type Watcher = { socket: WebSocket; requestId: string; skip?: number };
 type Reply = { userId: string; chunks: UIMessageChunk[]; watchers: Set<Watcher>; ended: boolean };
 
 const replies = new Map<string, Reply>();
@@ -29,7 +30,7 @@ export function follow(id: string, userId: string, stream: ReadableStream<UIMess
     try {
       for await (const chunk of stream) {
         const sequence = reply.chunks.push(chunk) - 1;
-        for (const w of reply.watchers) send(w.socket, { type: "chunk", requestId: w.requestId, sequence, chunk });
+        for (const w of reply.watchers) send(w.socket, { type: "chunk", requestId: w.requestId, sequence: sequence - (w.skip ?? 0), chunk });
       }
       for (const w of reply.watchers) send(w.socket, { type: "end", requestId: w.requestId });
     } catch (error) {
@@ -55,10 +56,31 @@ export const isWatched = (id: string) => !!replies.get(id)?.watchers.size;
 export function watch(id: string, w: Watcher) {
   const reply = replies.get(id);
   if (!reply) return false;
-  reply.chunks.forEach((chunk, sequence) => send(w.socket, { type: "chunk", requestId: w.requestId, sequence, chunk }));
+  const sofar = catchUp(reply.chunks);
+  sofar.forEach((chunk, sequence) => send(w.socket, { type: "chunk", requestId: w.requestId, sequence, chunk }));
+  w.skip = reply.chunks.length - sofar.length;
   if (reply.ended) send(w.socket, { type: "end", requestId: w.requestId });
   else reply.watchers.add(w);
   return true;
+}
+
+// The reply so far in as few chunks as gives the same message: words joined, and a command's progress only as it
+// is now. Sent one by one, the app drew each step on the way, so opening a chat mid-reply played its last few
+// minutes back at speed (every action's line flashing past) before showing where it is.
+export function catchUp(chunks: UIMessageChunk[]) {
+  const outputs = new Map<string, number>();
+  chunks.forEach((c, i) => c.type === "tool-output-available" && outputs.set(c.toolCallId, i));
+  const out: UIMessageChunk[] = [];
+  chunks.forEach((c, i) => {
+    const last = out.at(-1);
+    if (c.type === "tool-output-available" && c.preliminary && outputs.get(c.toolCallId) !== i) return;
+    if ((c.type === "text-delta" || c.type === "reasoning-delta") && last?.type === c.type && last.id === c.id)
+      out[out.length - 1] = { ...last, delta: last.delta + c.delta };
+    else if (c.type === "tool-input-delta" && last?.type === c.type && last.toolCallId === c.toolCallId)
+      out[out.length - 1] = { ...last, inputTextDelta: last.inputTextDelta + c.inputTextDelta };
+    else out.push(c);
+  });
+  return out;
 }
 
 // Stop sending to a watcher (it hung up, switched chats or pressed Stop); the reply goes on.
