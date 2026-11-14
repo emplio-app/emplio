@@ -1404,12 +1404,14 @@ async function saveRepos(box: Box, s: Session, summary: string) {
 
 // The stored file a .media note on the box points to, or why it can't be had: the note must be under /work/
 // and point at this business's storage.
+const climbs = (path: string) => path.split("/").includes("..");
 async function pointerAt(box: Box, s: Session, path: string): Promise<{ url: string; name: string } | string> {
-  if (!path.startsWith(`${WORK}/`) || path.includes("..")) return "only notes under /work/";
+  // a ".." folder step, not any two dots: "report....pdf.media" is a fine name
+  if (!path.startsWith(`${WORK}/`) || climbs(path)) return "only notes under /work/";
   const p = await download(box, path)
     .then((b) => JSON.parse(new TextDecoder().decode(b)) as { url?: unknown; name?: unknown })
     .catch(() => null);
-  if (typeof p?.url !== "string" || !p.url.startsWith(`/files/${s.workspaceId}/`) || p.url.includes("..")) return "not a note for a stored file of this business";
+  if (typeof p?.url !== "string" || !p.url.startsWith(`/files/${s.workspaceId}/`) || climbs(p.url)) return "not a note for a stored file of this business";
   const name = (typeof p.name === "string" ? p.name : path.split("/").at(-1)!.replace(/\.media$/, "")).replace(/[/\0]/g, "_");
   return { url: p.url, name };
 }

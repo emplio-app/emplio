@@ -1184,7 +1184,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </h2>
                 <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
                 {composer}
-                {!job && <JobCards onPick={send} />}
+                {/* gone once typing starts: the box and the message are what matter then */}
+                {!job && !input.trim() && <JobCards onPick={send} />}
               </div>
             </div>
           ) : (
