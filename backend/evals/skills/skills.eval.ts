@@ -13,22 +13,22 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
   // the app's files are loaded when first needed, not at the top (hand-off/hand-off.eval.ts says why)
   data: async () => (await import("./cases")).cases().map((c) => ({ input: { chat: c.chat, world: c.world ?? [] }, expected: c.expect, metadata: { name: c.name, category: c.category, source: c.source, save: c.expect.save !== undefined }, tags: [c.category] })),
   task: async ({ chat, world }, { metadata }) => {
-    const { reply, pretend } = await import("../emplio");
+    const { reply, pretend, counted } = await import("../emplio");
     const { SKILLS } = await import("./cases");
     // the server's reminder on the first command of a reply, as in the app (src/chat.ts)
     const { notCounted, skillNote } = await import("../../src/chat");
-    let byHand = 0;
-    const noted = (command: string, result: string) => [result, skillNote(notCounted(command) ? 0 : ++byHand, command)].filter(Boolean).join("\n\n");
+    const count = counted();
+    const noted = (command: string, step: number, result: string) => [result, skillNote(count(step, !notCounted(command)), command)].filter(Boolean).join("\n\n");
     // "use" cases end at the first piece of real work: by then it has read the skill or it hasn't. "save" cases
     // go on (on pretend results) until a skill is written or the reply ends.
     return reply(
       { skills: SKILLS },
       chat,
-      (command) => {
+      (command, step) => {
         const read = readOf([command])[0];
         if (savedOf([command]).length) return null;
-        if (read) return noted(command, SKILL(read));
-        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, pretend(command, world));
+        if (read) return noted(command, step, SKILL(read));
+        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, step, pretend(command, world));
         return null;
       },
       14,

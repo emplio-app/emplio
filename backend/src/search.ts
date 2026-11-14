@@ -120,8 +120,8 @@ function plain(parts: Record<string, any>[]) {
     .flatMap((p): string[] => {
       if (p.type === "text") return [p.text];
       if (p.type === "file") return [`[attached: ${p.filename ?? "file"}]`];
-      if (p.type === "tool-bash")
-        return [`$ ${p.input?.command ?? ""}`, clip(String(p.output?.output ?? p.errorText ?? ""), 800)];
+      if (p.type === "tool-bash" || p.type === "tool-python")
+        return [`$ ${p.input?.command ?? p.input?.code ?? ""}`, clip(String(p.output?.output ?? p.errorText ?? ""), 800)];
       return [];
     })
     .join("\n")

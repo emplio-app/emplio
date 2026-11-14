@@ -12,15 +12,17 @@ const app = () => import("../emplio");
 // Each command gets a believable result (pretend), with the server's own reminders and refusals (src/chat.ts); the
 // run ends when Emplio hands off or answers.
 async function decide({ business, chat, world, carriesOn }: Input): Promise<Output> {
-  const { reply, pretend } = await app();
+  const { reply, pretend, counted } = await app();
   const { longRunNote, notCounted, refusal, remindAt, skillNote } = await import("../../src/chat");
   let byHand = 0;
+  const count = counted();
   const said = await reply(
     business,
     chat,
-    (command) => {
+    (command, step) => {
       if (/\bemplio hand\b/.test(command)) return null;
-      const nth = notCounted(command) ? 0 : ++byHand;
+      const nth = count(step, !notCounted(command));
+      byHand = Math.max(byHand, nth);
       const refused = refusal(command, nth);
       if (refused) return refused;
       const result = [pretend(command, world), skillNote(nth, command)].filter(Boolean).join("\n\n");

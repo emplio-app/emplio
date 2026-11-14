@@ -448,7 +448,10 @@ export const line = (t: Task, tz: string) =>
   ].join("\t");
 
 // A repeating task is an automation underneath (automations.ts): `repeat` saves one, as this chat's person.
-export async function tasksCommand(w: Who, conversationId: string, args: string[], repeat?: (name: string, file: string) => Promise<string>) {
+// asked by code (the Python library): a task as data
+const asData = (t: Task) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt ? new Date(t.dueAt).toISOString() : null, assignee: t.assigneeName, waiting_on: t.waitingOn ?? null, asked_by: t.requesterName ?? null });
+
+export async function tasksCommand(w: Who, conversationId: string, args: string[], repeat?: (name: string, file: string) => Promise<string>, data = false) {
   const [sub, ...rest] = args;
   const tz = await timezoneOf(w.userId);
   const words: string[] = [];
@@ -503,6 +506,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     // the repeating and event ones too, so the work list is one list (only in the plain list, not a filtered one)
     const plain = !Object.keys(opts).length;
     const repeating = plain ? (await listAutomations(w.workspaceId).catch(() => [])).filter((a) => a.enabled && !a.error && a.when !== "manual") : [];
+    if (data) return JSON.stringify([...list.map(asData), ...repeating.map((a) => ({ repeats: a.when === "schedule" ? a.schedule : `on ${a.trigger}`, agent: a.agent ?? null, name: a.name }))]);
     const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : `on ${a.trigger}`}\t${a.agent ?? "you"}\t${a.name}`);
     if (!list.length && !rep.length) return "No tasks match.";
     return [...list.map((t) => line(t, tz)), ...rep, "", "In full: emplio tasks show <id>; repeating ones: emplio automations show <name>."].join("\n");
@@ -510,6 +514,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   if (sub === "search" && words.length) {
     const terms = words.map((x) => x.toLowerCase());
     const list = (await listTasks(w, {})).filter((t) => terms.every((x) => [t.title, t.notes, t.waitingOn].join(" ").toLowerCase().includes(x)));
+    if (data) return JSON.stringify(list.map(asData));
     if (!list.length) return "No tasks match.";
     const more = list.length - 30;
     return [...list.slice(0, 30).map((t) => line(t, tz)), "", ...(more > 0 ? [`${more} more not shown: add words.`] : []), "In full: emplio tasks show <id>."].join("\n");

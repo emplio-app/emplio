@@ -120,12 +120,12 @@ const domains = (s?: string) => s?.split(",").map((d) => d.trim()).filter(Boolea
 // ponytail: in memory, last 500
 const CACHE_MS = 20 * 60_000;
 const recent = new Map<string, { at: number; answer: Promise<string> }>();
-export function webCommand(args: string[], spend: (usd: number) => void) {
-  if (args.includes("--fresh")) return askWeb(args, spend);
-  const key = JSON.stringify(args);
+export function webCommand(args: string[], spend: (usd: number) => void, data = false) {
+  if (args.includes("--fresh")) return askWeb(args, spend, data);
+  const key = JSON.stringify([args, data]);
   const hit = recent.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.answer;
-  const answer = askWeb(args, spend);
+  const answer = askWeb(args, spend, data);
   recent.delete(key);
   recent.set(key, { at: Date.now(), answer });
   if (recent.size > 500) recent.delete(recent.keys().next().value!);
@@ -138,7 +138,11 @@ export function webCommand(args: string[], spend: (usd: number) => void) {
 // Exa's own price for a call it answered
 const paid = <T>(spend: (usd: number) => void, data: T) => (spend(Number((data as { costDollars?: { total?: number } }).costDollars?.total ?? 0)), data);
 
-async function askWeb(args: string[], spend: (usd: number) => void) {
+// asked by code (the Python library): each result as data
+const asData = (results: Result[]) =>
+  JSON.stringify(results.map((r) => ({ title: r.title ?? null, url: r.url, date: day(r.publishedDate) || null, text: r.text ?? (r.highlights ?? []).join(" … ") })));
+
+async function askWeb(args: string[], spend: (usd: number) => void, data = false) {
   const key = process.env.EXA_API_KEY;
   if (!key) return "error: web search isn't set up on this server (EXA_API_KEY)";
   const [sub, ...rest] = args;
@@ -159,7 +163,7 @@ async function askWeb(args: string[], spend: (usd: number) => void) {
           endPublishedDate: opts.until,
           textCharacters: "full" in opts ? 5000 : undefined,
         }));
-        return listed(results);
+        return data ? asData(results) : listed(results);
       }
       case "read": {
         if (!words.length) break;
@@ -171,7 +175,8 @@ async function askWeb(args: string[], spend: (usd: number) => void) {
       }
       case "similar": {
         if (!words[0]) break;
-        return listed(paid(spend, await similar(key, words[0], count(opts.n))).results);
+        const { results } = paid(spend, await similar(key, words[0], count(opts.n)));
+        return data ? asData(results) : listed(results);
       }
       case "answer": {
         if (!words.length) break;

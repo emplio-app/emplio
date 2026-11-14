@@ -19,6 +19,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { startVoice } from "./show-voice";
 import { transcribe } from "./voice-input";
+import { isStep } from "@/components/chat/tool-calls";
 
 // The chat's browser, watched live beside the chat. The agent drives it with `emplio browser`;
 // the server stops it after 10 minutes unused, so the link is checked while it's showing. For 24 hours after that
@@ -29,7 +30,7 @@ import { transcribe } from "./voice-input";
 const browsersOf = (messages: UIMessage[]) =>
   messages.flatMap((m) =>
     m.parts.flatMap((p) => {
-      const b = p.type === "tool-bash" && "output" in p ? (p.output as { browser?: { id?: string; liveUrl?: string } })?.browser : undefined;
+      const b = isStep(p.type) && "output" in p ? (p.output as { browser?: { id?: string; liveUrl?: string } })?.browser : undefined;
       const mark = b?.id ?? b?.liveUrl;
       return mark ? [mark] : [];
     }),

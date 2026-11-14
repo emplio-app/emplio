@@ -1,5 +1,5 @@
 // Files: what the AI employee made, and what people attached to chats. Everything it puts in /work/out lands
-// here (sandbox.ts collectOut) as well as in the chat; made again under the same name in the same chat, it's the
+// here (sandbox.ts collectOut), and in the chat only once it's shown (emplio files show); made again under the same name in the same chat, it's the
 // next version of that file, not a new one. Attachments land here when they're sent (recordUploads), each its
 // own file, and get their words once Emplio's computer has opened them (uploadRead). The Files page, `emplio files` and the share links all go through these functions.
 // The person whose chat made it sees it; the owner and admins see everyone's (like chats).
@@ -154,12 +154,12 @@ export async function shareMade(w: Who, id: string, on: boolean, conversationId?
 
 const USAGE = `usage: emplio files list                       what you've made, newest first (with each one's id)
        emplio files search <words>             by name or the words inside
-       emplio files show <id>                  put it in this chat again, to see or download
+       emplio files show <name or id>          put it in this chat, to see or download (a name: the file in /work/out/)
        emplio files get <id>                   a copy in /work/tmp/files/ to read, edit or attach
        emplio files rename <id> <new name>
        emplio files share <id>                 a link anyone can open, no sign-in (for clients); unshare <id> stops it
        emplio files remove <id>
-Files you put in /work/out/ are added here on their own; the same name again in the same chat is its next version.`;
+Files you put in /work/out/ stay there and are added here on their own; the same name again in the same chat is its next version. The person sees one only when you show it.`;
 
 const size = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 const line = (f: MadeFile) =>

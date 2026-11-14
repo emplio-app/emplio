@@ -21,7 +21,9 @@ type Output = { steps: StepResult[] };
 const nameOf = (line: string) => ({ name: /^- (.+?) \(agents\//.exec(line)![1]!, slug: /\(agents\/([^,)]+)/.exec(line)![1]! });
 
 async function run({ scenario, carriesOn }: Input): Promise<Output> {
-  const [{ reply, pretend, person }, { longRunNote, notCounted, refusal, remindAt, skillNote }, { reportsNote }, { AGENTS }] = await app();
+  const [{ reply, pretend, person, counted, endPython }, { longRunNote, notCounted, refusal, remindAt, skillNote }, { reportsNote }, { AGENTS }] = await app();
+  // code mode: one Python session for the whole conversation, as a chat keeps one
+  const session = crypto.randomUUID();
   const agents = AGENTS.map(nameOf);
   const jobs: Job[] = [];
   let routes: Route[] = [];
@@ -69,11 +71,12 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
 
   // the files jobs reported are there, so a look at one finds it
   const made: string[] = [];
+  const holds = new Map<string, string>(); // a reported file: what its report says is in it, written out
   const look = (command: string) => {
     if (!made.length) return null;
     if (/\bemplio files\b|^\s*(ls|find)\b/.test(command)) return made.join("\n");
     const file = made.find((f) => command.includes(f.split("/").at(-1)!));
-    return file ? `${file}: the job's file, as its report describes it` : null;
+    return file ? (holds.get(file) ?? `${file}: the job's file, as its report describes it`) : null;
   };
   let chat: ModelMessage[] = [];
   const steps: StepResult[] = [];
@@ -86,21 +89,26 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
       const r = step.report;
       const j = (r.from === "latest" ? lastJob : latestOf(r.from)) ?? (start(r.from === "latest" ? "Data Entry" : r.from, "(work)"), jobs.at(-1)!);
       j.status = /^\W*question\b/i.test(r.text) ? "asking" : "done";
-      made.push(...(r.text.match(/\/work\/\S+\.\w+/g) ?? []));
+      for (const f of r.text.match(/\/work\/\S+\.\w+/g) ?? []) {
+        made.push(f);
+        holds.set(f, r.files?.[f] ?? `${r.text.replace(f, "this file")}\n\n(full contents: every item the report names, each filled in)`);
+      }
       const full = `${head(j)}: ${j.status}, 14 actions\n${r.text}${r.apps ? `\nApps, as recorded: ${r.apps}` : ""}`;
       message = reportsNote([full], jobs.filter((x) => x !== j && x.status === "working").map((x) => x.name), j.status === "asking");
     }
     routes = [];
     let byHand = 0;
+    const count = counted();
     let browser = false;
     const said = await reply(
       business(),
       [...chat, person(message)],
-      (command) => {
+      (command, step) => {
         if (/\bemplio hand\b/.test(command)) return hand(command);
         if (/\bemplio threads (list|show)\b/.test(command)) return jobs.length ? jobs.map((j) => `${head(j)}: ${j.status}`).join("\n") : "You haven't handed anything off yet.";
         if (/\bemplio threads wait\b/.test(command)) return "Not in a chat with the person: end your reply now, in a line. Their reports come to this chat when they finish.";
-        const nth = notCounted(command) ? 0 : ++byHand;
+        const nth = count(step, !notCounted(command));
+        byHand = Math.max(byHand, nth);
         if (/\bemplio browser\b/.test(command.split("<<")[0]!)) browser = true;
         const refused = refusal(command, nth);
         if (refused) return refused;
@@ -110,12 +118,15 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
         return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
       },
       12,
+      false,
+      session,
     );
     chat = [...chat, person(message), ...(said.messages ?? [{ role: "assistant", content: said.text }])];
     // what the person sees: its words, and the questions it put on cards
     const shown = [said.text, ...said.commands.filter((c) => /\bemplio ask\b/.test(c))].join("\n");
     steps.push({ step: i + 1, ...check(step.expect, routes, shown, said.text, byHand), routes, byHand, browser, said: shown.slice(0, 400), commands: said.commands.map((c) => c.slice(0, 200)), usage: said.usage });
   }
+  endPython(session);
   return { steps };
 }
 

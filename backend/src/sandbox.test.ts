@@ -2,48 +2,74 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ask, collectOut, commandEnded, commandStarted, EZ, findOut, MAX_COMMANDS, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
+import { ask, collectOut, commandEnded, commandStarted, EZ, LIST_OUT, MAX_COMMANDS, outPath, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-test("a command with no start marker finds no files, and find's complaint doesn't read as one", () => {
-  const dir = mkdtempSync(join(tmpdir(), "find-out-"));
-  mkdirSync(join(dir, "out"));
+test("out/ is listed with each file's time and size, so a changed file reads as changed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "list-out-"));
+  mkdirSync(join(dir, "out/sub"), { recursive: true });
   writeFileSync(join(dir, "out/a.txt"), "x");
-  const run = (others: boolean) => {
-    const command = findOut(join(dir, "gone"), others).replaceAll("/work", dir);
-    return new TextDecoder().decode(Bun.spawnSync(["bash", "-c", `{ ${command}\n} 2>&1`]).stdout).trim();
-  };
-  expect(run(true)).toBe("");
-  expect(run(false)).toBe(join(dir, "out/a.txt"));
+  writeFileSync(join(dir, "out/sub/b c.txt"), "yy");
+  const list = () =>
+    new TextDecoder()
+      .decode(Bun.spawnSync(["bash", "-c", LIST_OUT.replaceAll("/work", dir)]).stdout)
+      .trim()
+      .split("\n")
+      .map((l) => l.split("\t"))
+      .sort();
+  const before = list();
+  expect(before.map(([p, , size]) => [p, size])).toEqual([
+    [join(dir, "out/a.txt"), "1"],
+    [join(dir, "out/sub/b c.txt"), "2"],
+  ]);
+  writeFileSync(join(dir, "out/a.txt"), "xyz");
+  expect(list()[0]![2]).toBe("3");
   rmSync(dir, { recursive: true });
 });
 
-test("a made file that can't be picked up doesn't throw, stays in out/, and doesn't stop the next one being tried", async () => {
+const who = { workspaceId: "w", conversationId: "c", role: "owner", user: { id: "u", name: "A", email: "a@example.com" } };
+
+test("a file in out/ that can't be stored stays there, isn't marked done, and doesn't stop the next one", async () => {
   const tried: string[] = [];
   const removed: string[] = [];
+  const uploaded: string[] = [];
   const box = {
-    run: async () => ({ exitCode: 0, result: "/work/out/a.txt\n/work/out/b.txt\n" }),
+    run: async () => ({ exitCode: 0, result: "\u001f\n/work/out/a.txt\t1.5\t1\n/work/out/b.txt\t2.5\t2\n\u001f\n" }),
     read: async (path: string) => {
       tried.push(path);
       throw new Error("no such file");
     },
     remove: async (path: string) => void removed.push(path),
+    write: async (path: string) => void uploaded.push(path),
+    files: { write: async (path: string) => void uploaded.push(path) },
   };
-  // these aren't real ids, so the problem's log line is refused and nothing is kept
-  const who = { workspaceId: "w", conversationId: "c", role: "owner", user: { id: "u", name: "A", email: "a@example.com" } };
-  const made = await collectOut(box as never, who as never, "/work/tmp/.started-x", false);
-  expect(made).toEqual({ saved: [], failed: ["a.txt", "b.txt"] });
+  const made = await collectOut(box as never, who as never, false, ["/work/out/a.txt"]);
+  expect(made).toEqual({ stored: [], shown: [], failed: ["a.txt", "b.txt", "a.txt"] });
   expect(tried).toEqual(["/work/out/a.txt", "/work/out/b.txt"]);
   expect(removed).toEqual([]);
+});
+
+test("files already stored, unchanged, aren't stored again", async () => {
+  const tried: string[] = [];
+  const box = { run: async () => ({ exitCode: 0, result: "/work/out/a.txt\t1.5:1\tid1\n\u001f\n/work/out/a.txt\t1.5\t1\n\u001f\n" }), read: async (p: string) => void tried.push(p) };
+  expect(await collectOut(box as never, who as never, false)).toEqual({ stored: [], shown: [], failed: [] });
+  expect(tried).toEqual([]);
 });
 
 test("a computer that didn't answer has no made files, rather than its timeout message read as one", async () => {
   const tried: string[] = [];
   const box = { run: async () => ({ exitCode: 124, result: "Command timed out after 60s" }), read: async (path: string) => void tried.push(path) };
-  const who = { workspaceId: "w", conversationId: "c", role: "owner", user: { id: "u", name: "A", email: "a@example.com" } };
-  expect(await collectOut(box as never, who as never, "/work/tmp/.started-x", false)).toEqual({ saved: [], failed: [] });
+  expect(await collectOut(box as never, who as never, false)).toEqual({ stored: [], shown: [], failed: [] });
   expect(tried).toEqual([]);
+});
+
+test("files show takes a name or a path in out/, nothing outside it", () => {
+  expect(outPath("report.xlsx")).toBe("/work/out/report.xlsx");
+  expect(outPath("out/a/b.csv")).toBe("/work/out/a/b.csv");
+  expect(outPath("/work/out/x.pdf")).toBe("/work/out/x.pdf");
+  expect(outPath("/work/tmp/x.pdf")).toBe("");
+  expect(outPath("../me/x")).toBe("");
 });
 
 test("an emplio request that throws keeps the command's output and the requests after it", async () => {

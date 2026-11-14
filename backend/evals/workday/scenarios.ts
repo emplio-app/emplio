@@ -3,10 +3,11 @@
 // comes, on the chat as it went so far. Written for a made-up business: these may be sent to Braintrust.
 
 // person: they write. report: a job ends and its report reaches the chat. from: whose job, by agent; "latest": the
-// job of the latest hand-off. apps: the server's own record of what it sent or changed.
+// job of the latest hand-off. apps: the server's own record of what it sent or changed. files: what a file it names
+// holds (a sheet: a line per row, cells split by tabs), so a look at it agrees with the report.
 export type Step =
   | { person: string; expect: Expect }
-  | { report: { from: string; text: string; apps?: string }; expect: Expect };
+  | { report: { from: string; text: string; apps?: string; files?: Record<string, string> }; expect: Expect };
 
 // hand: each piece that must be handed off in this reply. agent: any of these is right; left out, any agent but a
 // plain copy. cont: true, to the job that agent already has here; false, a fresh one. say: words (regular
@@ -16,6 +17,23 @@ export type Step =
 export type Expect = { hand?: { agent?: string[]; cont?: boolean; say?: string[] }[]; none?: true; tell?: string[]; silent?: boolean; own?: number; anyOf?: Expect[] };
 
 export type Scenario = { name: string; steps: Step[] };
+
+const sheet = (rows: (string | number)[][]) => rows.map((r) => r.join("\t")).join("\n");
+const SURAT = [["Supplier", "Price per m (₹)", "Phone"], ["Shree Textiles", 142, "+91 98250 41122"], ["Laxmi Fab", 155, "+91 99090 30215"], ["Om Weaves", 138, "+91 97277 18840"]];
+// 40 curtains: cheaper than HomeCraft on 22, dearer on 18; the biggest gap Velvet Blackout 7ft, ₹600 dearer
+const CURTAINS = (() => {
+  const kinds = ["Blackout", "Sheer", "Linen", "Cotton", "Velvet", "Jacquard", "Eyelet", "Pleated"];
+  const sizes = ["5ft", "7ft", "9ft", "Door 7ft", "Window 5ft"];
+  const rows: (string | number)[][] = [["Curtain", "Our price (₹)", "HomeCraft (₹)", "Urban Ladder (₹)", "Gap to HomeCraft (₹)", "Gap to Urban Ladder (₹)"]];
+  for (let i = 0; i < 40; i++) {
+    const name = i === 0 ? "Velvet Blackout 7ft" : `${kinds[i % 8]} ${sizes[i % 5]} ${["Ivory", "Grey", "Teal", "Rust", "Beige"][Math.floor(i / 8)]}`;
+    const ours = 899 + ((i * 137) % 1600);
+    const hc = i === 0 ? ours - 600 : i <= 22 ? ours + 50 + ((i * 31) % 250) : ours - 40 - ((i * 23) % 300);
+    const ul = ours + (((i * 53) % 400) - 200);
+    rows.push([name, ours, hc, ul, ours - hc, ours - ul]);
+  }
+  return rows;
+})();
 
 export const scenarios = (): Scenario[] => [
   {
@@ -27,7 +45,7 @@ export const scenarios = (): Scenario[] => [
         expect: { hand: [{ agent: ["Invoice Chaser"], say: ["october"] }, { agent: ["Supplier Finder"], say: ["surat", "200"] }], tell: ["18"] },
       },
       {
-        report: { from: "Supplier Finder", text: "Found 3 in Surat for 200 m of cotton: Shree Textiles ₹142/m, Laxmi Fab ₹155/m, Om Weaves ₹138/m. Sheet: /work/out/surat-cotton.xlsx" },
+        report: { from: "Supplier Finder", text: "Found 3 in Surat for 200 m of cotton: Shree Textiles ₹142/m, Laxmi Fab ₹155/m, Om Weaves ₹138/m. Sheet: /work/out/surat-cotton.xlsx", files: { "/work/out/surat-cotton.xlsx": sheet(SURAT) } },
         // of use on its own while the invoices still run: told now
         expect: { none: true, tell: ["138|om weaves"], silent: false },
       },
@@ -47,7 +65,7 @@ export const scenarios = (): Scenario[] => [
         expect: { anyOf: [{ hand: [{ agent: ["Invoice Chaser"], cont: true }] }, { tell: ["green ?leaf"] }] },
       },
       {
-        report: { from: "Supplier Finder", text: "Added each one's minimum order: Shree Textiles 300 m, Laxmi Fab 500 m, Om Weaves 200 m. Sheet updated: /work/out/surat-cotton.xlsx" },
+        report: { from: "Supplier Finder", text: "Added each one's minimum order: Shree Textiles 300 m, Laxmi Fab 500 m, Om Weaves 200 m. Sheet updated: /work/out/surat-cotton.xlsx", files: { "/work/out/surat-cotton.xlsx": sheet(SURAT.map((r, i) => [...r, ["Minimum order (m)", 300, 500, 200][i]!])) } },
         expect: { none: true, tell: ["300|500|200"] },
       },
       // answered in the chat from the reports it has, without opening the sheet
@@ -66,7 +84,7 @@ export const scenarios = (): Scenario[] => [
         expect: { hand: [{ agent: ["Price Checker", "Report Maker"], say: ["40", "homecraft", "urban ladder"] }] },
       },
       {
-        report: { from: "latest", text: "Compared 14 of the 40 so far; stopped at the step limit. Partial sheet: /work/out/curtain-prices.xlsx (14 rows)." },
+        report: { from: "latest", text: "Compared 14 of the 40 so far; stopped at the step limit. Partial sheet: /work/out/curtain-prices.xlsx (14 rows).", files: { "/work/out/curtain-prices.xlsx": sheet(CURTAINS.slice(0, 15)) } },
         // sent back, and nothing to tell the person yet: they see the job at work again
         expect: { hand: [{ agent: ["Price Checker", "Report Maker"], cont: true }], silent: true },
       },
@@ -74,6 +92,7 @@ export const scenarios = (): Scenario[] => [
         report: {
           from: "latest",
           text: "All 40 compared with HomeCraft and Urban Ladder. Sheet: /work/out/curtain-prices.xlsx (40 rows: our price, HomeCraft's, Urban Ladder's, the gap to each). We're cheaper on 22 and dearer on 18. Biggest gap: Velvet Blackout 7ft, ₹600 dearer than HomeCraft.",
+          files: { "/work/out/curtain-prices.xlsx": sheet(CURTAINS) },
         },
         expect: { none: true, tell: ["22|18"] },
       },
@@ -98,7 +117,7 @@ export const scenarios = (): Scenario[] => [
       },
       { person: "482913", expect: { hand: [{ cont: true, say: ["482913"] }] } },
       {
-        report: { from: "latest", text: "Downloaded 6 October invoices, total ₹48,250. Sheet: /work/out/delhivery-oct-2026.xlsx with each invoice and the total." },
+        report: { from: "latest", text: "Downloaded 6 October invoices, total ₹48,250. Sheet: /work/out/delhivery-oct-2026.xlsx with each invoice and the total.", files: { "/work/out/delhivery-oct-2026.xlsx": sheet([["Invoice", "Date", "Amount (₹)"], ["DLV-OCT-0412", "2026-10-03", 7850], ["DLV-OCT-0587", "2026-10-08", 9120], ["DLV-OCT-0733", "2026-10-13", 6400], ["DLV-OCT-0901", "2026-10-18", 8930], ["DLV-OCT-1066", "2026-10-24", 7250], ["DLV-OCT-1210", "2026-10-30", 8700], ["Total", "", 48250]]) } },
         expect: { none: true, tell: ["48,250"] },
       },
     ],
@@ -111,7 +130,7 @@ export const scenarios = (): Scenario[] => [
         expect: { hand: [{ agent: ["Community Manager"], say: ["pune", "don'?t post"] }] },
       },
       {
-        report: { from: "Community Manager", text: "Found 3 threads (r/pune, r/IndianHomeDecor, r/india). Drafts in /work/out/reddit-drafts.md. Nothing posted." },
+        report: { from: "Community Manager", text: "Found 3 threads (r/pune, r/IndianHomeDecor, r/india). Drafts in /work/out/reddit-drafts.md. Nothing posted.", files: { "/work/out/reddit-drafts.md": "# Reddit drafts (not posted)\n\n## 1. r/pune: \"Where to buy good blackout curtains in Pune?\"\nFor a west-facing room, look for triple-weave blackout fabric with a thermal lining; it keeps out light and some heat. Measure the window plus 15 cm each side. We run Kaveri Home Furnishings on FC Road: 10% off for r/pune this month.\n\n## 2. r/IndianHomeDecor: \"Blackout curtains that don't look like hotel curtains?\"\nVelvet or linen-look blackout in a warm colour (rust, olive) reads as decor rather than hotel. Double rods let you pair a sheer in front.\n\n## 3. r/india: \"Do blackout curtains help with heat?\"\nYes, a thermal-lined blackout curtain can cut the heat from a sunny window noticeably; hang it close to the glass and floor-length." } },
         expect: { none: true, tell: ["3|three"] },
       },
       {

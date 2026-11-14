@@ -37,10 +37,10 @@ export function transcript(history: UIMessage[]) {
     .map((m) => {
       const parts = m.parts.flatMap((p) => {
         if (p.type === "text" && p.text.trim()) return [clip(p.text.trim(), 4000)];
-        if (p.type !== "tool-bash") return [];
-        const t = p as { input?: { command?: string }; output?: { output?: string; exitCode?: number }; errorText?: string };
+        if (p.type !== "tool-bash" && p.type !== "tool-python") return [];
+        const t = p as { input?: { command?: string; code?: string }; output?: { output?: string; exitCode?: number }; errorText?: string };
         const out = t.output?.output ?? t.errorText ?? "";
-        return [`$ ${clip(t.input?.command ?? "", 1000)}${t.output?.exitCode ? `  (exit ${t.output.exitCode})` : ""}\n${clip(out, 1000)}`];
+        return [`$ ${clip(t.input?.command ?? t.input?.code ?? "", 1000)}${t.output?.exitCode ? `  (exit ${t.output.exitCode})` : ""}\n${clip(out, 1000)}`];
       });
       return parts.length ? `### ${m.role === "user" ? "Person" : "AI employee"}\n${parts.join("\n\n")}` : "";
     })

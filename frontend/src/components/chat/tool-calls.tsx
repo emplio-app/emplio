@@ -20,11 +20,15 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 
+// a step the agent ran on its computer: a bash command, or Python in code mode
+export const isStep = (type: string) => type === "tool-bash" || type === "tool-python";
+
 type BashPart = {
-  type: "tool-bash";
+  // code mode's steps are Python (input.code) where bash's are commands
+  type: "tool-bash" | "tool-python";
   toolCallId: string;
   state: string;
-  input?: { description?: string; command?: string; background?: boolean };
+  input?: { description?: string; command?: string; code?: string; background?: boolean };
   // a saved reply's long command or output stays on the server: the message to ask for it, when its line is opened
   cut?: string;
   output?: {
@@ -71,7 +75,7 @@ export function AssistantParts({
       if (!p.text.trim()) continue;
       if (last && "text" in last) last.text += "\n\n" + p.text;
       else segments.push({ text: p.text });
-    } else if (p.type === "tool-bash" && !(p as unknown as BashPart).output?.refused) {
+    } else if (isStep(p.type) && !(p as unknown as BashPart).output?.refused) {
       // an approval card ends the run, so what came after it shows below it, in order
       if (last && "tools" in last && !last.tools.at(-1)!.output?.approvals?.length) last.tools.push(p as unknown as BashPart);
       else segments.push({ tools: [p as unknown as BashPart] });
@@ -81,7 +85,7 @@ export function AssistantParts({
     }
   }
   // one checklist card per reply: where the agent first made it, showing its latest state
-  const planned = message.parts.filter((p) => p.type === "tool-bash" && (p as unknown as BashPart).output?.plan) as unknown as BashPart[];
+  const planned = message.parts.filter((p) => isStep(p.type) && (p as unknown as BashPart).output?.plan) as unknown as BashPart[];
   const plan = planned.at(-1)?.output?.plan;
   const planAt = planned[0]?.toolCallId;
   return segments.map((s, i) => {
@@ -108,7 +112,7 @@ const isPending = (p: BashPart) => p.state === "input-streaming" || p.state === 
 
 // mid-stream the command may arrive before its label: don't flash the raw command
 const label = (p: BashPart) =>
-  p.input?.description || (p.state === "input-streaming" ? "…" : p.input?.command) || "…";
+  p.input?.description || (p.state === "input-streaming" ? "…" : (p.input?.command ?? p.input?.code)) || "…";
 
 // A run of commands behind one line: "Ran 3 actions". Open, it's each command.
 // Downloads stay outside the fold: they're what the user came for.
@@ -282,7 +286,7 @@ function Job({ id, run }: { id: string; run?: string }) {
 // What a reply in progress is doing below its last line: the command running now (its label), or thinking.
 // Null while it's writing text.
 export const doing = (message?: UIMessage) => {
-  const last = message?.parts.filter((p) => p.type === "text" || p.type === "tool-bash").at(-1) as
+  const last = message?.parts.filter((p) => p.type === "text" || isStep(p.type)).at(-1) as
     | BashPart
     | { type: "text" }
     | undefined;
@@ -294,7 +298,7 @@ export const doing = (message?: UIMessage) => {
 
 // A search or check that ended the command and found nothing (grep, test) exits 1: not a failure.
 const foundNothing = (p: BashPart) =>
-  p.output?.exitCode === 1 && /(^|[;&|]\s*)(grep|egrep|rg|test|\[\[?)\s[^;&|]*$/.test(p.input?.command?.trim() ?? "");
+  p.output?.exitCode === 1 && /(^|[;&|]\s*)(grep|egrep|rg|test|\[\[?)\s[^;&|]*$/.test(p.input?.command?.trim() ?? "") && p.type === "tool-bash";
 
 // One command the agent ran in the sandbox: a line, click to see the output.
 function ToolCall({
@@ -316,7 +320,7 @@ function ToolCall({
     enabled: opened && !!p.cut,
     staleTime: Infinity,
   });
-  const command = full.data?.command ?? p.input?.command;
+  const command = full.data?.command ?? p.input?.command ?? p.input?.code;
   const result = p.errorText ?? full.data?.output ?? p.output?.output ?? p.output?.note ?? (p.cut && full.isPending ? "Loading…" : full.isError ? "Couldn't load this. Close and open it to try again." : "");
   return (
     <div className="flex w-full flex-col gap-1.5">
