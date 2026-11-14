@@ -229,6 +229,9 @@ function restart(hidden) {
   config.reopenHidden = hidden;
   config.save();
   fullQuit = true;
+  // A Mac's updater closes every window first and quits only once they're gone: closing the window must not just hide
+  // it here, or the app went into the background and never came back as the new version.
+  quitting = true;
   // a Mac's updater quits the app itself
   if (updater.apply() && process.platform !== "darwin") app.quit();
 }
