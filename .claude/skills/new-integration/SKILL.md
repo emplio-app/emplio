@@ -109,7 +109,7 @@ signed in as them, not the built-in browser, in a new tab. Close the tab when fi
    | --- | --- |
    | Name | `Emplio` |
    | Homepage | `https://emplio.app` |
-   | Description, if asked | What Emplio does in the app, in one plain line |
+   | Descriptions | Every short and long one the app has, even if optional: what Emplio does in that app, in plain words. People read these on the consent screen and app page |
    | Callback / redirect URL | `https://api.emplio.app/oauth/<app>/callback`, exactly |
    | Scopes, if set here | The same list as `authorizeUrl` |
    | Expiring tokens | Off, if the app allows it |
