@@ -56,6 +56,9 @@ def fetch(r):
     # a file the business has but this folder doesn't yet: from the stand-ins, once
     if not isinstance(r, str) or not r.startswith(W) or _exists(r) or r in asked or "/tmp/.emplio" in r:
         return
+    # ponytail: a name with no dot is taken for a folder (company/knowledge), never made a file; Makefile-like names miss out
+    if "." not in os.path.basename(r):
+        return
     asked.add(r)
     try:
         got = ask({"read": shown(r)})["out"]
