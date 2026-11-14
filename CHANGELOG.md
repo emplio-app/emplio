@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.43 (2026-11-15)
+
+### What's new
+
+- When an agent needs a decision from you, it asks you itself: its question shows above your message box with answers to tap, and your answer goes straight to it, so it gets back to work sooner. Answer there or in the agent's own chat; either way the question closes in both.
+- Before asking, agents look back through what you already said in your chat, so you're asked less.
+- Coming back to a chat that's still working jumps straight to where it is, instead of quickly replaying every step.
+
+### For developers
+
+- Agents (one level down) ask with `emplio ask`; the job goes to `asking` without waking Emplio, `/conversations/:id/working` carries its open cards, and `POST /jobs/:id/answer` posts the answer in the job's chat. When the person last wrote from their phone, Emplio still relays the question (#162).
+- Reopening a chat mid-reply sends the reply so far merged (words joined, each command's latest progress only), with gapless sequence numbers after it (#161).
+
 ## 1.2.42 (2026-11-15)
 
 ### What's new
