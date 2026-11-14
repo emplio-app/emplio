@@ -5,7 +5,7 @@
 //  - iPhone app, sent straight to Apple: APNS_KEY_ID, APNS_TEAM_ID and APNS_KEY (the .p8 file, base64)
 //  - browsers: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (webpush.ts)
 import { createHmac, sign, timingSafeEqual } from "node:crypto";
-import { connect } from "node:http2";
+import { connect, type SecureClientSessionOptions } from "node:http2";
 import { and, eq, gt } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { currentUser } from "./auth";
@@ -127,7 +127,9 @@ async function pushToPhone(userId: string, note: Note) {
     // "reply": the category the app registers with a text field (mobile/ios/App/App/AppDelegate.swift)
     const reply = chatId ? { reply: replyToken(userId, chatId), replyUrl: `${apiBase()}/push/reply` } : {};
     const payload = JSON.stringify({ aps: { alert: { title: note.title, body: note.body }, sound: "default", ...(chatId && { category: "reply" }) }, path: note.path, ...reply });
-    const client = connect(`https://${host}`);
+    // ponytail: IPv4 only. Over IPv6 the connection to Apple mostly failed ("h2 is not supported") and no iPhone got
+    // its notification; a server with IPv6 only would need this lifted.
+    const client = connect(`https://${host}`, { family: 4 } as SecureClientSessionOptions);
     client.on("error", (error) => console.error("push connection failed", error));
     await Promise.all(devices.map((d) => deliver(client, d.token, authorization, payload)));
     client.close();

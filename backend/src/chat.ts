@@ -53,7 +53,7 @@ import { NEXT_STEP_MODEL, writeNextStep } from "./next-step";
 import { holdRead, readLater, SILENT } from "./reader";
 import { TASK } from "./tasks";
 import { pushTo } from "./push";
-import { addApp, follow, isReplying, isWatched, notify, send, settle, unwatch, watch } from "./live";
+import { addApp, follow, isLooking, isReplying, isWatched, notify, send, settle, unwatch, watch } from "./live";
 import { z } from "zod";
 
 // a reply's time limit; waiting on jobs ends before it (jobs.ts), and they pick the chat up when done
@@ -1113,13 +1113,15 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           }),
         );
       const seen = isWatched(id);
+      // an open page isn't someone reading it: the Mac app's hidden window, or a tab in the background, still follows the reply
+      const inFront = isLooking(ctx.userId, `/chat/${id}`);
       void store(responseMessage)
         .then(async () => {
           // a reply that says nothing ([SILENT], after a job's report) neither marks the chat nor buzzes their phone
-          if (seen || answer.includes(SILENT)) return;
-          await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
-          // they left before it finished; background work speaks up through post(), Telegram replies arrive on Telegram
-          if (answer && !automation && !job && via !== "telegram" && !stopper.signal.aborted) void pushTo(ctx.userId, answer, id);
+          if (answer.includes(SILENT)) return;
+          if (!seen) await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
+          // they aren't looking at it; background work speaks up through post(), Telegram replies arrive on Telegram
+          if (!inFront && answer && !automation && !job && via !== "telegram" && !stopper.signal.aborted) void pushTo(ctx.userId, answer, id);
         })
         .catch((error) => log.error(error, "marking reply unread failed"))
         .finally(() => {

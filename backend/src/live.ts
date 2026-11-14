@@ -84,6 +84,10 @@ export function addApp(userId: string, socket: WebSocket) {
   });
 }
 
+// Whether this chat is in front of them right now (a page showing it, in a window with focus). A page that's open but
+// hidden (the Mac app keeps its window's page alive in the background, a background tab) doesn't count.
+export const isLooking = (userId: string, path: string) => [...(apps.get(userId)?.values() ?? [])].includes(path);
+
 // This person's chat list changed: their open apps fetch it again.
 export function notify(userId: string) {
   for (const socket of apps.get(userId)?.keys() ?? []) send(socket, { type: "chats" });
