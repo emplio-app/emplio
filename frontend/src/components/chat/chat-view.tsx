@@ -110,7 +110,9 @@ const sentLinks = (message: UIMessage) =>
           ? [[`@${m.label}`, `/chat/${m.id}`]]
           : m.kind === "task"
             ? [[`@${m.label}`, `/tasks?task=${m.id}`]]
-            : [],
+            : m.kind === "agent"
+              ? [[`@${m.label}`, "/team"]]
+              : [],
     ),
   );
 
@@ -335,6 +337,24 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       else if (dropped && d.messages.at(-1)?.role === "assistant") clearError();
     });
   }, [change, busy, dropped, reconnecting, id, setMessages, resumeStream, clearError]);
+
+  // Still waiting on a reply the server says is over (#56: after "Show Emplio how" the chat sat on "Thinking…" until
+  // a reload): the chat list's nudge above is skipped while busy, so nothing else would end the wait. Give the
+  // last words a moment to arrive, then, if the server agrees nothing is running, show what was saved.
+  const ended = busy && summary?.running === false ? change : null;
+  useEffect(() => {
+    if (!ended) return;
+    const at = sends.current;
+    const t = setTimeout(async () => {
+      const d = await fetchChat().catch(() => null);
+      if (!d || d.running || sends.current !== at) return;
+      await stopRef.current(); // stops following only; there's nothing left at the server to stop
+      setMessages(d.messages);
+      setOlder(d.older);
+    }, 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once for each ended reply
+  }, [ended]);
   const empty = messages.length === 0;
   // a job's chat: its line in the sidebar spins while it replies
   useEffect(() => {

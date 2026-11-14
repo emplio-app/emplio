@@ -99,7 +99,7 @@ export type ActionDetail = ActionInfo & {
 // GET /mentions?q=: something the chat box's @ menu offers. id: a teammate's user id, a file's path under /work
 // (company/..., me/..., restricted/...), a chat id, a connection id or a table name. Picked ones go in the
 // message as a part { type: "data-mentions", data: Mention[] }.
-export type MentionKind = "person" | "record" | "task" | "file" | "chat" | "app" | "table";
+export type MentionKind = "person" | "agent" | "record" | "task" | "file" | "chat" | "app" | "table";
 export type Mention = { kind: MentionKind; id: string; label: string; detail?: string; logo?: string };
 
 // GET /commands?q=: what the chat box's / menu offers. A skill or app is put in the message as /name; an

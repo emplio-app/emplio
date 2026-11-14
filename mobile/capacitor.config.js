@@ -7,6 +7,12 @@ module.exports = {
   server: { url: process.env.CAP_SERVER_URL || "https://emplio.app", appStartPath: "/login" },
   // how the site knows it is inside the app (cloud/frontend/client.tsx hides buying)
   appendUserAgent: "EmplioApp",
-  ios: { contentInset: "never", allowsLinkPreview: false },
-  plugins: { SplashScreen: { launchAutoHide: true, launchShowDuration: 800, backgroundColor: "#1a613f" } },
+  // scrollEnabled false: the page itself never scrolls (each screen scrolls inside), so iOS can't slide the whole app
+  // up to a box being typed in and back down again (#34)
+  ios: { contentInset: "never", allowsLinkPreview: false, scrollEnabled: false },
+  plugins: {
+    // the keyboard shrinks the app to the space above it, like a native app, instead of covering the page
+    Keyboard: { resize: "native", resizeOnFullScreen: true },
+    SplashScreen: { launchAutoHide: true, launchShowDuration: 800, backgroundColor: "#1a613f" },
+  },
 };
