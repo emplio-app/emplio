@@ -368,6 +368,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     enabled: !job,
     refetchInterval: 5_000,
   });
+  // finished ones only come back for their still-open browser: not on the strip
+  const busyJobs = useMemo(() => working.filter((w) => w.status !== "done"), [working]);
   const agentBrowsers = useMemo<BrowserTab[]>(() => working.filter((w) => w.browser).map((w) => ({ chatId: w.chatId, name: w.agent })), [working]);
   const [tab, setTab] = useState<string | null>(null);
   const seenTabs = useRef<Set<string> | null>(null);
@@ -1025,9 +1027,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     <div className="relative">
       {skillMenu.menu ?? mentionMenu.menu}
       {/* what's still going, however far up it was asked: each opens its chat */}
-      {working.length > 0 && (
+      {busyJobs.length > 0 && (
         <div className="mb-2 flex flex-col gap-1">
-          {working.map((w) => (
+          {busyJobs.map((w) => (
             <Link
               key={w.id}
               href={`/chat/${w.chatId}`}

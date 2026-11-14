@@ -21,7 +21,7 @@ import { z } from "zod";
 // user to solve a CAPTCHA or enter a code in the live view after the agent asks
 const IDLE_MS = 10 * 60_000;
 // how long after that the chat's Live browser button can still start it again
-const REOPEN_MS = 24 * 60 * 60_000;
+export const REOPEN_MS = 24 * 60 * 60_000;
 
 export const canReopen = (usedAt: Date | null, now = Date.now()) => !!usedAt && now - usedAt.getTime() < REOPEN_MS;
 
