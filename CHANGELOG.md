@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.38 (2026-11-14)
+
+### What's new
+
+- If a chat had to use the cloud browser while your Mac was away, it moves back to the browser on your Mac as soon as your Mac is back, on the same page and still signed in.
+- Sites you sign in to in the browser on your Mac are now signed in in the cloud browser too, not only the other way round.
+
+### For developers
+
+- `browserFor` in `backend/src/browser.ts` moves a chat's cloud browser to the person's computer when it reconnects (`moveToComputer`): stops it (saving state and page), starts the computer's Chrome and opens the same page. A cloud browser started because the computer's Chrome failed is not moved again (`stayInCloud`).
+- Saved sign-ins are restored into every browser, Browser Use included; `RESTORE_SIGN_INS` is gone. Its profile never got sign-ins made in the computer's Chrome.
+- The desktop app pings the server itself and reconnects after 25 s of silence (`desktop/src/link.js`); ships with the next desktop release (#144).
+
 ## 1.2.37 (2026-11-14)
 
 ### What's new
