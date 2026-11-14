@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { FROM_EMPLIO, runRef, splitRef, type Approval } from "@emplio/shared";
+import { FROM_EMPLIO, runRef, splitRef, type Approval, type AskCard } from "@emplio/shared";
 import { eq } from "drizzle-orm";
 import { notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -98,7 +98,7 @@ test("chatting in a job's chat stays quiet until Emplio's next reply; answering 
     const chatId = crypto.randomUUID();
     await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: chatId, ...who, title: "job", kind: "job" }]);
     await db.insert(jobs).values({ ...who, conversationId: main, chatId, depth: 1, name: "check", status: "done", report: "first" });
-    const reply = async (answer: string) => (await (await jobReply(chatId))!.began(() => {}))(answer, "completed");
+    const reply = async (answer: string, cards: AskCard[] = []) => (await (await jobReply(chatId))!.began(() => {}))(answer, "completed", false, false, cards);
 
     await reply("hello, how are you");
     expect(await untoldReports(main)).toContain("hello, how are you");
@@ -108,6 +108,12 @@ test("chatting in a job's chat stays quiet until Emplio's next reply; answering 
     await untoldReports(main);
     await db.update(jobs).set({ status: "asking" }).where(eq(jobs.chatId, chatId));
     await reply("Used the work account.");
+    expect(await untoldReports(main)).toBeNull();
+
+    // a question on a card: it waits for the person, and Emplio hears nothing of it
+    await reply("Asked which account.", [{ id: "q", question: "Which account?", options: ["Work", "Personal"] }]);
+    const asking = await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) });
+    expect(asking).toMatchObject({ status: "asking", report: "Question: Which account? [Work / Personal]" });
     expect(await untoldReports(main)).toBeNull();
   } finally {
     await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
@@ -193,4 +199,18 @@ test("a new agent that nearly copies one already there is caught; clearly differ
   expect(closeTo("Invoice Chasers Team", have)).toBeNull();
   expect(closeTo("Balance Checker", have)).toBeNull();
   expect(closeTo("Science Project Researcher", have)).toBeNull();
+});
+
+test("an agent's question card waits over the chat box until a message answers it", () => {
+  const q = { id: "q", question: "Which supplier?", options: ["Acme", "Bharat"] };
+  const asked = { role: "assistant", parts: [{ type: "tool-bash", output: { asks: [q] } }, { type: "text" }] };
+  expect(openAsks([{ role: "user", parts: [] }, asked])).toEqual([q]);
+  expect(openAsks([asked, { role: "user", parts: [{ type: "text", text: "Acme" }] }])).toEqual([]);
+  expect(openAsks([])).toEqual([]);
+});
+
+test("Emplio's agents ask the person with a card; deeper threads ask in their report", () => {
+  expect(RULES(1, "0123456789")).toContain("emplio ask");
+  expect(RULES(1, "0123456789")).toContain("--chat 01234567");
+  expect(RULES(2, "0123456789")).not.toContain("emplio ask");
 });

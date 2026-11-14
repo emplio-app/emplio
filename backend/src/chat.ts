@@ -19,7 +19,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
+import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -1136,6 +1136,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
                 stopper.signal.aborted ? "stopped" : outcome.status === "failed" || outcome.status === "aborted" ? "failed" : "completed",
                 interrupted || steered(id),
                 steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === "tool-calls",
+                // it asked the person with a card (emplio ask), which waits for their answer
+                (responseMessage.parts as unknown as ScreenPart[]).flatMap((p) => (p.output?.asks as AskCard[] | undefined) ?? []),
               ),
             )
             .catch((error) => log.error(error, "ending the job failed"));
