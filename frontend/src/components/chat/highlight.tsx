@@ -1,15 +1,53 @@
 "use client";
 
+import { LinkIcon } from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
+// A web address as a short highlighted link: the site and the start of the path, cut with … ("example.com/blog/how…").
+// The cut-off start (https://www.) is still there for copying, only not shown; hovering shows the whole address.
+export const URL_PATTERN = /(https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}])/;
+export function ShortLink({ href, children, className }: { href: string; children?: ReactNode; className?: string }) {
+  const lead = /^https?:\/\/(www\.)?/.exec(href)?.[0] ?? "";
+  return (
+    <span title={href} className={cn("inline-flex max-w-[min(100%,18rem)] items-baseline gap-1 rounded-sm bg-primary/10 px-1 align-bottom text-primary", className)}>
+      <LinkIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+      <span className="truncate">
+        {children ?? (
+          <>
+            <span className="sr-only">{lead}</span>
+            {href.slice(lead.length)}
+          </>
+        )}
+      </span>
+    </span>
+  );
+}
+
+// the links in a piece of plain text, opened in a new tab
+function linked(text: string, key: number): ReactNode {
+  const parts = text.split(new RegExp(URL_PATTERN.source, "g"));
+  if (parts.length === 1) return text;
+  return parts.map((p, i) =>
+    i % 2 ? (
+      <a key={`${key}-${i}`} href={p} target="_blank" rel="noopener noreferrer" className="hover:underline">
+        <ShortLink href={p} />
+      </a>
+    ) : (
+      p
+    ),
+  );
+}
+
 // Text with some exact pieces marked: "/menu-cards" (a / command) and "@Priya Nair" (a mention).
 // Only colour and background change, never size or weight, so the same text lines up exactly when it's
-// drawn under the message box (HighlightLayer). A mark with an entry in `links` opens that page.
-export function Marked({ text, marks, links, className }: { text: string; marks: string[]; links?: Record<string, string>; className?: string }): ReactNode {
+// drawn under the message box (HighlightLayer). A mark with an entry in `links` opens that page. `web`: web
+// addresses become short links (a sent message; never the box's layer, where the text must line up).
+export function Marked({ text, marks, links, className, web }: { text: string; marks: string[]; links?: Record<string, string>; className?: string; web?: boolean }): ReactNode {
   const pieces = [...new Set(marks.filter(Boolean))].sort((a, b) => b.length - a.length);
-  if (!pieces.length) return text;
+  const plain = (t: string, i: number) => (web ? linked(t, i) : t);
+  if (!pieces.length) return plain(text, 0);
   const pattern = new RegExp(`(${pieces.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "g");
   return text.split(pattern).map((piece, i) =>
     pieces.includes(piece) ? (
@@ -23,7 +61,7 @@ export function Marked({ text, marks, links, className }: { text: string; marks:
         )}
       </mark>
     ) : (
-      piece
+      plain(piece, i)
     ),
   );
 }

@@ -2,7 +2,7 @@
 
 import { FUZZY, matchScore, NO_MATCH, type Mention, type MentionKind } from "@emplio/shared";
 import { keepPreviousData, type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2Icon, ClipboardListIcon, FileTextIcon, MessageSquareIcon, TableIcon } from "lucide-react";
+import { BotIcon, Building2Icon, ClipboardListIcon, FileTextIcon, MessageSquareIcon, TableIcon } from "lucide-react";
 import { type KeyboardEvent, type SyntheticEvent, useEffect, useState } from "react";
 import { AppLogo } from "@/components/chat/connect-card";
 import { api } from "@/lib/api";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 
 const GROUP: Record<MentionKind, string> = {
   person: "People",
+  agent: "Agents",
   record: "Clients & suppliers",
   task: "Tasks",
   file: "Files",
@@ -19,7 +20,7 @@ const GROUP: Record<MentionKind, string> = {
 };
 
 // as the server orders them (backend/src/mentions.ts)
-const ORDER: MentionKind[] = ["person", "app", "record", "task", "file", "chat", "table"];
+const ORDER: MentionKind[] = ["person", "agent", "app", "record", "task", "file", "chat", "table"];
 
 // a name being typed after @ (at the start or after a space), up to the cursor; names have spaces, so up to 3 words
 const TOKEN = /(?:^|\s)@([^\s@](?:[^@\n]{0,40})?)?$/;
@@ -91,7 +92,7 @@ export function MentionIcon({ m, className }: { m: Pick<Mention, "kind" | "label
   if (m.kind === "app") return <AppLogo src={m.logo} className={cn("size-7", className)} />;
   if (m.kind === "person")
     return <span className={cn(box, "rounded-full text-[0.65rem] font-medium")}>{m.label.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>;
-  const Icon = { record: Building2Icon, task: ClipboardListIcon, file: FileTextIcon, chat: MessageSquareIcon, table: TableIcon }[m.kind];
+  const Icon = { agent: BotIcon, record: Building2Icon, task: ClipboardListIcon, file: FileTextIcon, chat: MessageSquareIcon, table: TableIcon }[m.kind];
   return (
     <span className={box}>
       <Icon />

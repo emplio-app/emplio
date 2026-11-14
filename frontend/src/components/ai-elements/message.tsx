@@ -28,7 +28,8 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { defaultComponents, Streamdown } from "streamdown";
+import { ShortLink } from "@/components/chat/highlight";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -334,6 +335,21 @@ const mermaid: DiagramPlugin = {
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+// Links in a reply look like the ones in sent messages: highlighted, with a link icon, a bare address cut short.
+// Streamdown's own link stays underneath (it asks before opening a site).
+const bare = (text: unknown, href?: string) =>
+  typeof text === "string" && !!href && text.replace(/^https?:\/\//, "").replace(/\/$/, "") === href.replace(/^https?:\/\//, "").replace(/\/$/, "");
+const components = {
+  a: ({ children, ...props }: ComponentProps<NonNullable<typeof defaultComponents.a>>) => {
+    const A = defaultComponents.a!;
+    return (
+      <A {...props} className="no-underline hover:underline">
+        <ShortLink href={props.href ?? ""}>{bare(children, props.href) ? undefined : children}</ShortLink>
+      </A>
+    );
+  },
+};
+
 // While a reply streams, each new word fades in (opacity only, so the browser does it off the main thread),
 // linear over 0.7s like the Claude app, so the last few lines trail off from faint to full. The stagger follows the
 // server's one word every 25ms, so speed is unchanged. A reply already partway written when it appears (the chat
@@ -383,6 +399,7 @@ export const MessageResponse = memo(
           className
         )}
         plugins={streamdownPlugins}
+        components={components}
         {...props}
         isAnimating={animating}
       >

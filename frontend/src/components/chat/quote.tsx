@@ -190,7 +190,7 @@ export const QuoteInBubble = ({ quote }: { quote: string }) => (
 export const QuotedText = ({ text, marks, links }: { text: string; marks: string[]; links?: Record<string, string> }) => (
   <span className="flex flex-col gap-1.5">
     {quotePieces(text).map((p, i) =>
-      p.quote ? <QuoteInBubble key={i} quote={p.text} /> : <span key={i} className="font-medium"><Marked text={p.text} marks={marks} links={links} className="font-medium" /></span>,
+      p.quote ? <QuoteInBubble key={i} quote={p.text} /> : <span key={i} className="font-medium"><Marked text={p.text} marks={marks} links={links} className="font-medium" web /></span>,
     )}
   </span>
 );
