@@ -42,7 +42,7 @@ import { failureGuard, outOfUsage, unlessStuck, type FailureGuard } from "./stuc
 import type { Bill } from "./credit";
 import { cloud } from "./cloud";
 import { slashCommand } from "./skills";
-import { allowedIn } from "./automations";
+import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
 import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
@@ -1485,6 +1485,15 @@ async function authorize(req: FastifyRequest, reply: FastifyReply) {
   if (!allowed) return reply.code(403).send({ error: "Forbidden" });
   const ctx = await context(req, reply);
   if (ctx) authorized.set(req, ctx);
+}
+
+// A reply typed into a notification (push.ts), in the business that chat belongs to: Emplio carries on from it as if
+// it had been typed in the chat, and its answer comes back as the next notification. An error, or null.
+export async function replyFromNotification(userId: string, chatId: string, text: string, log: Log) {
+  const chat = await db.query.conversations.findFirst({ where: and(eq(conversations.id, chatId), eq(conversations.userId, userId)), columns: { workspaceId: true } });
+  const ctx = chat && (await personFor(chat.workspaceId, userId));
+  if (!ctx) return "Not found";
+  return startReply(ctx, chatId, { id: generateId(), role: "user", parts: [{ type: "text", text }] }, log);
 }
 
 // Start a reply to `message` in conversation `id` (created on its first message). An error to show, or null.

@@ -85,6 +85,10 @@ function drop(conn: Conn) {
   for (const fn of goneListeners) fn(conn.id);
 }
 
+// Something typed into a notification this computer showed (push.ts takes it).
+let onReply: (userId: string, path: string, text: string) => void = () => {};
+export const whenReplied = (fn: typeof onReply) => void (onReply = fn);
+
 // A device that has connected. A second connection from the same device replaces the first.
 export function attach(device: { id: string; userId: string; name: string; platform?: string }, socket: Socket, now = Date.now()): Conn {
   const old = online.get(device.id);
@@ -122,6 +126,7 @@ export function attach(device: { id: string; userId: string; name: string; platf
       conn.cdp.get(m.conn)?.closed();
       conn.cdp.delete(m.conn);
     } else if (m.ev === "mcp.data") conn.mcp.get(m.key)?.data(String(m.data));
+    else if (m.ev === "notify.reply" && typeof m.path === "string" && typeof m.text === "string") onReply(conn.userId, m.path, m.text);
     else if (m.ev === "mcp.closed") {
       conn.mcp.get(m.key)?.closed(m.e ? String(m.e) : undefined);
       conn.mcp.delete(m.key);

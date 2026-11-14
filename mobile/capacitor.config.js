@@ -9,7 +9,9 @@ module.exports = {
   appendUserAgent: "EmplioApp",
   // scrollEnabled false: the page itself never scrolls (each screen scrolls inside), so iOS can't slide the whole app
   // up to a box being typed in and back down again (#34)
-  ios: { contentInset: "never", allowsLinkPreview: false, scrollEnabled: false },
+  // handleApplicationNotifications false: AppDelegate.swift takes notification events itself (replies from the lock
+  // screen) and hands Capacitor the rest
+  ios: { contentInset: "never", allowsLinkPreview: false, scrollEnabled: false, handleApplicationNotifications: false },
   plugins: {
     // the keyboard shrinks the app to the space above it, like a native app, instead of covering the page
     Keyboard: { resize: "native", resizeOnFullScreen: true },

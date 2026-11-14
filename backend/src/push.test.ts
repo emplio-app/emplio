@@ -1,6 +1,6 @@
 import { createECDH, createDecipheriv, createPublicKey, hkdfSync, randomBytes, verify } from "node:crypto";
 import { expect, test } from "bun:test";
-import { plain, route, type Senders } from "./push";
+import { plain, readReplyToken, replyToken, route, type Senders } from "./push";
 import { encrypt, vapidHeader } from "./webpush";
 
 test("a lock screen shows plain words", () => {
@@ -85,4 +85,15 @@ test("web push: what we encrypt is what the browser decrypts, and the sender's p
   expect(JSON.parse(Buffer.from(c!, "base64url").toString()).aud).toBe("https://fcm.googleapis.com");
   const spki = createPublicKey({ key: { kty: "EC", crv: "P-256", x: pub.subarray(1, 33).toString("base64url"), y: pub.subarray(33).toString("base64url") }, format: "jwk" });
   expect(verify("sha256", Buffer.from(`${h}.${c}`), { key: spki, dsaEncoding: "ieee-p1363" }, Buffer.from(sig!, "base64url"))).toBe(true);
+});
+
+test("a notification's reply token works for its chat for a week, and not once changed", () => {
+  process.env.ENCRYPTION_KEY ||= "test-key";
+  const chat = "0b6c6f2e-6a8e-4c1e-9b1a-2f0d8c4e7a11";
+  const t = replyToken("u1", chat, 0);
+  expect(readReplyToken(t, 6 * 86_400_000)).toEqual({ userId: "u1", chatId: chat });
+  expect(readReplyToken(t, 8 * 86_400_000)).toBeNull();
+  expect(readReplyToken(t.replace("u1", "u2"), 0)).toBeNull();
+  expect(readReplyToken(`${t}x`, 0)).toBeNull();
+  expect(readReplyToken("nonsense", 0)).toBeNull();
 });

@@ -161,9 +161,15 @@ function notify({ title, body, path }) {
       if (new URL(win.webContents.getURL()).pathname === path) return { shown: false };
     } catch {}
   }
-  const n = new Notification({ title: String(title ?? "Emplio").slice(0, 100), body: String(body ?? "").slice(0, 300) });
+  // a chat's notification takes a reply right there (macOS), sent back over the link (backend/src/push.ts)
+  const chat = path.startsWith("/chat/");
+  const n = new Notification({ title: String(title ?? "Emplio").slice(0, 100), body: String(body ?? "").slice(0, 300), hasReply: chat, replyPlaceholder: "Reply to Emplio" });
   shown.add(n);
   n.on("click", () => openChat(path));
+  n.on("reply", (_e, text) => {
+    shown.delete(n);
+    if (text?.trim()) link.send({ ev: "notify.reply", path, text });
+  });
   n.on("close", () => shown.delete(n));
   n.show();
   console.log("notification shown:", path);
