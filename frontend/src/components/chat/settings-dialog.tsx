@@ -62,9 +62,10 @@ type Field = (typeof SETTING_FIELDS)[number];
 type Value = Settings[keyof Settings];
 const ICONS = { work: BrainIcon, memory: MessagesSquareIcon, computer: MonitorIcon, schedule: CalendarClockIcon };
 // The tabs run down the side on wide screens and across the top on a phone: there the line under the open one
-// sits on the row's bottom border (its p-2 and 1px border), not up the tab's right edge.
+// sits just above the row's bottom border (inside its p-2, which the sideways scroll clips to), not up the tab's right edge.
+// A phone is too narrow for all seven: the row scrolls sideways.
 const TAB =
-  "h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px] max-sm:after:inset-x-0! max-sm:after:top-auto! max-sm:after:-bottom-[9px]! max-sm:after:h-0.5! max-sm:after:w-auto!";
+  "h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px] max-sm:after:inset-x-0! max-sm:after:top-auto! max-sm:after:-bottom-2! max-sm:after:h-0.5! max-sm:after:w-auto!";
 
 // what Quality shows once any model was picked by hand
 const CUSTOM = "custom";
@@ -202,7 +203,7 @@ export function SettingsDialog({
           >
             <TabsList
               variant="line"
-              className="w-full shrink-0 flex-row! border-b p-2 sm:h-auto! sm:w-60 sm:flex-col! sm:justify-start sm:gap-1 sm:self-stretch sm:border-r sm:border-b-0 sm:p-3"
+              className="w-full shrink-0 flex-row! justify-start! overflow-x-auto [scrollbar-width:none] border-b p-2 sm:h-auto! sm:overflow-visible sm:w-60 sm:flex-col! sm:justify-start sm:gap-1 sm:self-stretch sm:border-r sm:border-b-0 sm:p-3"
             >
               {SETTING_SECTIONS.map((s) => {
                 const Icon = ICONS[s.key];

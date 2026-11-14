@@ -560,6 +560,11 @@ export async function appsCommand(
         }
         // which account first, so an Allow card is never shown for a run that can't happen
         await findConnection(who, appOf(name), account);
+        // and the required fields: a blank {} (an input file that was never written) is turned back here, not
+        // shown on an Allow card that can only fail
+        const given = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+        const missing = (await getAction(name, who))?.input.filter((p) => p.required && given[p.name] == null).map((p) => p.name) ?? [];
+        if (missing.length) return `error: ${name} needs ${missing.join(", ")}, missing from the input. See emplio apps info ${name}.`;
         const refused = await approve?.(name, input, account);
         if (refused) return refused;
         const output = await mapDeep(await runAction(who, name, input, { conversationId, account, readFile }), async (v) =>
