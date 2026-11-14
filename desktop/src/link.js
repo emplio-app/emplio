@@ -3,10 +3,16 @@
 import WebSocket from "ws";
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// The server drops a computer that goes quiet, but its goodbye can be lost (sleep, a changed network), leaving this side
+// sure it's still connected. So this side checks too: a connection that hears nothing back for this long is ended and made again.
+const PING_MS = 10_000;
+const SILENT_MS = 25_000;
 
 export class Link {
   // handlers: { request(method, params, id) -> result, note(method, params) }
-  constructor({ handlers, onState, platform = () => process.platform }) {
+  constructor({ handlers, onState, platform = () => process.platform, pingMs = PING_MS, silentMs = SILENT_MS }) {
+    this.pingMs = pingMs;
+    this.silentMs = silentMs;
     this.handlers = handlers;
     this.platform = platform;
     this.onState = onState;
@@ -64,16 +70,34 @@ export class Link {
     const url = `${target.apiUrl.replace(/^http/, "ws")}/devices/connect`;
     const ws = new WebSocket(url, { headers: { authorization: `Bearer ${target.token}`, "x-emplio-platform": this.platform() }, maxPayload: 256 * 1024 * 1024, perMessageDeflate: false });
     this.ws = ws;
+    let heard = Date.now();
+    const check = setInterval(() => {
+      // stop() and pause() let go of it without a close
+      if (this.ws !== ws) return clearInterval(check);
+      if (Date.now() - heard > this.silentMs) return ws.terminate();
+      try {
+        ws.ping();
+      } catch {}
+    }, this.pingMs);
     ws.on("open", () => {
+      heard = Date.now();
       this.try = 0;
       this.onState?.("online");
     });
-    ws.on("message", (raw) => void this.#message(ws, raw));
+    ws.on("pong", () => (heard = Date.now()));
+    ws.on("ping", () => (heard = Date.now()));
+    ws.on("message", (raw) => {
+      heard = Date.now();
+      void this.#message(ws, raw);
+    });
     ws.on("unexpected-response", (_req, res) => {
       // the server answered but wouldn't upgrade: not a connection problem
       this.#closed(ws, res.statusCode === 401 || res.statusCode === 403 ? 4001 : 0);
     });
-    ws.on("close", (code) => this.#closed(ws, code));
+    ws.on("close", (code) => {
+      clearInterval(check);
+      this.#closed(ws, code);
+    });
     ws.on("error", () => {});
   }
 
