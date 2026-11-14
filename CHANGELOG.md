@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.42 (2026-11-15)
+
+### What's new
+
+- Emplio and its agents now each get only the instructions their part of the work needs, so every step costs less: about a third to a half less read per step, with the same results in our tests.
+- Agents get the how-to for working a website when they first open one, instead of with every step.
+- Saving how someone likes things done works whichever way Emplio words it.
+
+### For developers
+
+- System prompt split by role: `sandboxPrompt(s, agent)`, `agentRules(ctx, automation, agent)` and `emplioPrompt({ agent })`; jobs skip the voice rules and the manager sections, the manager skips the hands-on sections; the browser site guide (`browserGuide`) rides on a reply's first browser result.
+- `emplio person` takes `prefer|profile <email>` in either order.
+- Code-mode translator: a backticked flag alone and short flags (`-i`) come out as Python; the evals' fake computer no longer turns a folder into a file on first read (background check-ins 88% → 97%).
+
 ## 1.2.41 (2026-11-14)
 
 ### What's new
