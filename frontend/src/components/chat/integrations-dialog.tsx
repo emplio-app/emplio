@@ -326,6 +326,7 @@ function Browse({
           <Input
             placeholder="Search apps"
             aria-label="Search apps"
+            autoFocus
             className="h-10 pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
