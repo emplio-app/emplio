@@ -9,7 +9,7 @@ import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
 import { deviceFor, localBox, type Conn } from "./devices";
 import { browserKindFor, isDeviceBrowser } from "./device-browser";
-import { browserFor, browserLocal, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
+import { browserFor, browserLocal, browserOpen, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -2310,7 +2310,9 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     // a command that drives the browser gets this chat's browser, started on first use
     let env: Record<string, string> = { TZ: await timezoneOf(s.user.id), EMPLIO_WORK: WORK };
     let browserId: string | undefined;
-    if (usesBrowser(command)) {
+    // code mode: a function an earlier step wrote that drives the browser doesn't say so when it's called, so while
+    // this chat's browser is up every step gets it
+    if (usesBrowser(command) || (codeMode() && browserOpen(s.conversationId))) {
       const owner = { workspaceId: s.workspaceId, userId: s.user.id };
       const live = await browserFor(s.conversationId, owner);
       await connectionFor(live, owner, command).catch((error) => console.error("browser connection not chosen:", error));

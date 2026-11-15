@@ -301,6 +301,9 @@ export function holdOpen(conversationId: string, live: LiveBrowser) {
   return () => idle(conversationId, live);
 }
 
+// whether this chat's browser is up now, without starting one
+export const browserOpen = (conversationId: string) => open.has(conversationId);
+
 // The chat's browser, found or started on first use; each call pushes the idle stop back.
 export async function browserFor(conversationId: string, owner: Owner): Promise<LiveBrowser> {
   if (moving.has(conversationId)) return moving.get(conversationId)!;

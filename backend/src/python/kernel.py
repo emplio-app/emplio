@@ -130,6 +130,9 @@ def run_code(ns, code, interrupted=None):
     except BaseException as e:  # noqa: BLE001 -- the AI reads every failure
         status = 1
         print(trimmed(e), file=sys.stderr)
+        # a name set in an earlier step that's gone: that step failed before setting it, or the session is new
+        if isinstance(e, NameError):
+            print("[Not set in this session: an earlier step that set it stopped at an error first, or this is a new session (another computer, or it ended). Set it again here; don't assume other earlier values are there either.]", file=sys.stderr)
     finally:
         sys.stdout.flush()
         sys.stderr.flush()
