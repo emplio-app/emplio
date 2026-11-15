@@ -25,19 +25,34 @@ export function ShortLink({ href, children, className }: { href: string; childre
   );
 }
 
-// the links in a piece of plain text, opened in a new tab
+// Emplio's own pages (emplio.app, or a path like /chat/...): the path to open inside the app, else null.
+// Those open in the same tab with no outside-site question; other addresses are left as they are.
+export function ownPath(href: string): string | null {
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  try {
+    const u = new URL(href);
+    if ((u.protocol === "https:" || u.protocol === "http:") && /^(www\.)?emplio\.app$/.test(u.hostname)) return u.pathname + u.search + u.hash;
+  } catch {}
+  return null;
+}
+
+// the links in a piece of plain text: Emplio's own pages open in the app, other links in a new tab
 function linked(text: string, key: number): ReactNode {
   const parts = text.split(new RegExp(URL_PATTERN.source, "g"));
   if (parts.length === 1) return text;
-  return parts.map((p, i) =>
-    i % 2 ? (
+  return parts.map((p, i) => {
+    if (!(i % 2)) return p;
+    const inside = ownPath(p);
+    return inside ? (
+      <Link key={`${key}-${i}`} href={inside} className="hover:underline">
+        <ShortLink href={p} />
+      </Link>
+    ) : (
       <a key={`${key}-${i}`} href={p} target="_blank" rel="noopener noreferrer" className="hover:underline">
         <ShortLink href={p} />
       </a>
-    ) : (
-      p
-    ),
-  );
+    );
+  });
 }
 
 // Text with some exact pieces marked: "/menu-cards" (a / command) and "@Priya Nair" (a mention).
