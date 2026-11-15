@@ -376,7 +376,12 @@ async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "re
   const span = runSpan(await loadMessages(w.chatId), run);
   if (!span) return { status: "working", report: null, actions: [] };
   const actions = actionsIn(span.msgs);
-  if (span.latest) return { status: w.status, report: w.report, actions };
+  if (span.latest) {
+    // just handed it, not begun: the job still holds the run before's status and report, and a finished card stops checking
+    const asked = (span.msgs[0]?.metadata as { createdAt?: Date } | undefined)?.createdAt;
+    const stale = asked && w.finishedAt && w.finishedAt < new Date(asked);
+    return stale && w.status !== "working" ? { status: "working", report: null, actions } : { status: w.status, report: w.report, actions };
+  }
   const last = [...span.msgs].reverse().find((m) => m.role === "assistant" && textOf(m).trim());
   const text = last ? textOf(last).trim() : "";
   return { status: asks(text) ? "asking" : "done", report: text || null, actions };
