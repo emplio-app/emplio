@@ -29,7 +29,8 @@ import {
   useState,
 } from "react";
 import { defaultComponents, Streamdown } from "streamdown";
-import { ShortLink } from "@/components/chat/highlight";
+import Link from "next/link";
+import { ownPath, ShortLink } from "@/components/chat/highlight";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -336,15 +337,20 @@ const mermaid: DiagramPlugin = {
 const streamdownPlugins = { cjk, code, math, mermaid };
 
 // Links in a reply look like the ones in sent messages: highlighted, with a link icon, a bare address cut short.
-// Streamdown's own link stays underneath (it asks before opening a site).
+// Streamdown's own link stays underneath (it asks before opening a site), except for Emplio's own pages: those go
+// straight to the app's router, so no "Open external link?" question and no new tab.
 const bare = (text: unknown, href?: string) =>
   typeof text === "string" && !!href && text.replace(/^https?:\/\//, "").replace(/\/$/, "") === href.replace(/^https?:\/\//, "").replace(/\/$/, "");
 const components = {
   a: ({ children, ...props }: ComponentProps<NonNullable<typeof defaultComponents.a>>) => {
     const A = defaultComponents.a!;
+    const href = props.href ?? "";
+    const label = <ShortLink href={href}>{bare(children, href) ? undefined : children}</ShortLink>;
+    const inside = ownPath(href);
+    if (inside) return <Link href={inside} className="no-underline hover:underline">{label}</Link>;
     return (
       <A {...props} className="no-underline hover:underline">
-        <ShortLink href={props.href ?? ""}>{bare(children, props.href) ? undefined : children}</ShortLink>
+        {label}
       </A>
     );
   },
