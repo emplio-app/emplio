@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.44 (2026-11-15)
+
+### What's new
+
+- Notifications reach the Mac app again: a reply now notifies you whenever you aren't looking at that chat, even while the app is open in the background.
+- iPhone notifications arrive reliably again.
+- Links to Emplio's own pages in a chat open right inside the app, with no "Open external link?" question and no new tab.
+
+### For developers
+
+- A reply's push is skipped only when the person's focused page is that chat (`isLooking`), not when any page streams it; APNs connects over IPv4, since IPv6 to Apple mostly failed with "h2 is not supported" (#160).
+- `ownPath()` routes emplio.app and relative links through the app's router (#165).
+
 ## 1.2.43 (2026-11-15)
 
 ### What's new
