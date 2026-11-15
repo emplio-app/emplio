@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.45 (2026-11-15)
+
+### What's new
+
+- Emplio's work in the background is now cheaper and steadier: it only wakes up when something actually changed, and it no longer opens websites on its own (it adds a task for that instead).
+- Once a day it tidies up: closes tasks that are already done, removes duplicate tasks, and keeps everyone's saved rules short enough that it always reads all of them.
+- Every Monday it checks the company's goals, notes how each is going and adds the next tasks to move them forward.
+
+### For developers
+
+- Background rounds (HEARTBEAT) always use the model set's `backgroundModel`, skip the manager prompt, and `runBash` refuses the browser when `Session.background` is set; `changesSince` (readers' notes, failed automation runs, new emails) replaces `worthWaking`, and a check-in with no changes doesn't run. The report round (or the brief when reports are off) does the daily cleanup; Monday's brief does the goals review. New `emplio person <email> rewrite prefer|profile` replaces a whole file. Background-round evals: 7 new ideal-behaviour cases, 54/54 (#167).
+
 ## 1.2.44 (2026-11-15)
 
 ### What's new
