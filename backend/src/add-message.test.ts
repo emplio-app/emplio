@@ -23,3 +23,14 @@ test("a reply with a binary file's NUL in a command's output is still saved", as
   const saved = await db.query.messages.findFirst({ where: eq(messages.id, id) });
   expect(saved!.parts).toEqual([{ type: "tool-bash", output: { output: "PKfinal" } }, { type: "text", text: "Done." }]);
 });
+
+test("a reply's late save doesn't push the message after it out of the chat", async () => {
+  const chat = crypto.randomUUID();
+  await db.insert(conversations).values({ id: chat, workspaceId: ws!.id, userId: user!.id, title: "t", kind: "main" });
+  const reply = { id: `${chat}-r`, role: "assistant" as const, parts: [{ type: "text", text: "Working" }] };
+  await addMessage(chat, reply);
+  await addMessage(chat, { id: `${chat}-m`, role: "user", parts: [{ type: "text", text: "Also this" }] });
+  await addMessage(chat, { ...reply, parts: [{ type: "text", text: "Done." }] });
+  const c = await db.query.conversations.findFirst({ where: eq(conversations.id, chat) });
+  expect(c!.headId).toBe(`${chat}-m`);
+});

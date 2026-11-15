@@ -232,6 +232,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // Leaving the chat stops following its reply (it goes on, and shows as unread when it ends unseen).
   const stopRef = useRef(stop);
   stopRef.current = stop;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   useEffect(() => () => void stopRef.current(), []);
 
   // Typing outside any text field (nothing focused, or a button or link) goes into the message box
@@ -347,8 +349,12 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     const at = sends.current;
     const t = setTimeout(async () => {
       const d = await fetchChat().catch(() => null);
-      if (!d || d.running || sends.current !== at) return;
+      // a message just sent can still be waiting its turn (an agent's report reply took the chat first): not in
+      // the load yet, so showing the load would wipe it
+      const sent = messagesRef.current.findLast((m) => m.role === "user");
+      if (!d || d.running || sends.current !== at || (sent && !d.messages.some((m) => m.id === sent.id))) return;
       await stopRef.current(); // stops following only; there's nothing left at the server to stop
+      if (sends.current !== at) return; // stopping let a queued message go out
       setMessages(d.messages);
       setOlder(d.older);
     }, 3000);
@@ -400,7 +406,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
 
   const attachments = useAttachments(() => keptDraft<FileUIPart>(`${draftKey}:files`));
   useEffect(() => keepDraft(`${draftKey}:files`, attachments.items.flatMap((a) => (a.part ? [a.part] : []))), [draftKey, attachments.items]);
-  const [queue, setQueue] = useState<Queued[]>([]);
+  // kept like the draft: leaving the chat (its agents strip, another chat, a reload) mustn't drop what's waiting.
+  // The reply it was told about may be gone by then, so each is told again.
+  const [queue, setQueue] = useState<Queued[]>(() => keptDraft<Queued>(`${draftKey}:queue`).map((x) => ({ ...x, steered: false })));
+  useEffect(() => keepDraft(`${draftKey}:queue`, queue), [draftKey, queue]);
   const [pinLatest, setPinLatest] = useState(false);
 
   const dispatch = ({ text, files, mentions, command }: Omit<Queued, "id">) => {
@@ -503,6 +512,17 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     dispatch(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dispatch is recreated every render
   }, [status, queue]);
+
+  // Back with messages left waiting and nothing running at the server: nothing will end to send them, so send now
+  const waited = useRef(queue.length > 0);
+  useEffect(() => {
+    if (!waited.current || !summary || summary.running || busy || !queue.length) return;
+    waited.current = false;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    dispatch(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the chat is known to be idle
+  }, [summary, busy]);
 
   // Editing a sent message forks the chat there: the edit goes out after the message before it, the old
   // version stays a switch away ("‹ 1 / 2 ›"). Messages loaded from the server know their versions

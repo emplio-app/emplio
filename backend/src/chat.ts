@@ -227,11 +227,16 @@ const headOf = (conversationId: string) => sql`(select ${conversations.headId} f
 export async function addMessage(conversationId: string, m: { id: string; role: "user" | "assistant"; parts: unknown }) {
   // a NUL in anything (a binary file a command printed): Postgres refuses the whole message, so the reply was lost
   const parts = JSON.parse(JSON.stringify(m.parts, (_, v) => (typeof v === "string" ? v.replaceAll("\0", "") : v)));
-  await db
+  const [row] = await db
     .insert(messages)
     .values({ ...m, parts, conversationId, parentId: headOf(conversationId) })
-    .onConflictDoUpdate({ target: messages.id, set: { parts }, setWhere: eq(messages.conversationId, conversationId) });
-  await db.update(conversations).set({ headId: m.id, updatedAt: new Date() }).where(eq(conversations.id, conversationId));
+    .onConflictDoUpdate({ target: messages.id, set: { parts }, setWhere: eq(messages.conversationId, conversationId) })
+    .returning({ added: sql<boolean>`xmax = 0` });
+  // only a new message ends the chat: a reply's save landing late, after the next message, would push that one off it
+  await db
+    .update(conversations)
+    .set(row?.added ? { headId: m.id, updatedAt: new Date() } : { updatedAt: new Date() })
+    .where(eq(conversations.id, conversationId));
 }
 
 // One reply at a time per chat, whoever starts it (the person, a task, a check-in, jobs reporting back), and
