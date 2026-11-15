@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { didOf, rightCall, staysInside } from "./scorers";
+import { didOf, ideal, lean, noBrowser, rightCall, staysInside } from "./scorers";
 
 const args = (commands: string[], does: ("skill" | "knowledge" | "preference" | "task")[]) => ({ input: null, output: { text: "", commands }, expected: { does } });
 const skill = "mkdir -p /work/company/skills/packing-slip && cat > /work/company/skills/packing-slip/SKILL.md <<'EOF'\nx\nEOF";
@@ -32,4 +32,36 @@ test("a changed fact has to mark the old one replaced", () => {
 test("a journal line that names a knowledge file isn't a knowledge write", () => {
   expect(didOf(["cat > /work/restricted/journal.md <<'EOF'\nalready in company/knowledge/suppliers/shree-foam.md\nEOF"])).toEqual([]);
   expect(didOf(["cd /work/company && cat >> knowledge/topics/shop.md <<'EOF'\nx\nEOF"])).toEqual(["knowledge"]);
+});
+
+const run = (commands: string[], expect: Record<string, unknown>) => ideal({ input: null, output: { text: "", commands }, expected: { does: [], ...expect } as never }).score;
+
+test("tasks: done ones closed, others left open, one of each pair of duplicates", () => {
+  expect(run(["emplio tasks done a1b2c3d4"], { done: ["a1b2c3d4"], open: ["e5f6a7b8"] })).toBe(1);
+  expect(run(["emplio tasks done a1b2c3d4", "emplio tasks done e5f6a7b8"], { done: ["a1b2c3d4"], open: ["e5f6a7b8"] })).toBe(0);
+  expect(run(["emplio tasks update c0ffee02 --status cancelled"], { cancelled: [["c0ffee01", "c0ffee02"]] })).toBe(1);
+  expect(run(["emplio tasks remove c0ffee01", "emplio tasks remove c0ffee02"], { cancelled: [["c0ffee01", "c0ffee02"]] })).toBe(0);
+});
+
+test("a rewrite keeps what must stay, drops the rest, and fits", () => {
+  const rewrite = { email: "m@k.example", file: "prefer", max: 200, keep: ["emoji"], drop: ["order 43\\d\\d"], once: ["short"] };
+  expect(run(["emplio person m@k.example rewrite prefer <<'EOF'\n# Preferences\n- No emojis\n- Short replies\nEOF"], { rewrite })).toBe(1);
+  expect(run(["emplio person rewrite m@k.example prefer <<'EOF'\n# Preferences\n- Short replies\n- short answers\n- No emojis\nEOF"], { rewrite })).toBe(0);
+  expect(run(["emplio person m@k.example rewrite prefer <<'EOF'\n# Preferences\n- No emojis\n- order 4301 packed\nEOF"], { rewrite })).toBe(0);
+  expect(run(["emplio person m@k.example prefer 'No emojis'"], { rewrite })).toBe(0);
+  expect(run(["cat > /work/tmp/p.md <<'EOF'\n# Preferences\n- No emojis\nEOF", "emplio person m@k.example rewrite prefer < /work/tmp/p.md"], { rewrite })).toBe(1);
+  expect(run(["emplio person 'm@k.example rewrite prefer' <<'EOF'\n# Preferences\n- No emojis\nEOF"], { rewrite })).toBe(1);
+  expect(run(["cat > /work/me/preferences.md <<'EOF'\n# Preferences\n- No emojis\nEOF"], { rewrite })).toBe(1);
+});
+
+test("goals: progress written, goals kept, tasks added", () => {
+  const goals = { headings: ["Grow online orders"], tasks: 1 };
+  expect(run(["cat > /work/company/goals.md <<'EOF'\n# Goals\n## Grow online orders\n- 2026-11-10: 37%\nEOF", 'emplio tasks add "Push online offer" --to ai'], { goals })).toBe(1);
+  expect(run(["cat > /work/company/goals.md <<'EOF'\n# Goals\n## Grow web orders\n- 37%\nEOF", 'emplio tasks add "x" --to ai'], { goals })).toBe(0);
+  expect(run(['emplio tasks add "x" --to ai'], { goals })).toBe(0);
+});
+
+test("no browser, and few commands", () => {
+  expect(noBrowser({ input: null, output: { text: "", commands: ['emplio.browser.open("https://x.example")'] }, expected: { does: [] } }).score).toBe(0);
+  expect(lean({ input: null, output: { text: "", commands: Array(16).fill("emplio search x") }, expected: { does: [] } }).score).toBe(0);
 });

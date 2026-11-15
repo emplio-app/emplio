@@ -77,6 +77,8 @@ export type Session = {
   // the business's background agent (the owner's check-ins, heartbeat.ts): reads everyone's chats and the readers'
   // notes about them (reader.ts), and keeps each person's preferences
   thinker?: boolean;
+  // a check-in, brief or report (heartbeat.ts), the owner's or a staff member's: no browser
+  background?: boolean;
   // shows an approval card in the chat while a command waits on it; missing (jobs): can't ask
   notify?: (approval: Approval) => void;
   // jobs a command started, told as each starts, so the chat shows them working while the same command waits on them
@@ -885,7 +887,9 @@ PY
     shift
     req NOTE "$@" ;;
   person)
+    # a rewrite's new file on stdin: emplio person <email> rewrite prefer|profile <<'EOF'
     shift
+    case "$1 $2" in *rewrite*) words "$@"; [ "$n" -le 3 ] && set -- "$@" "$(cat)" ;; esac
     req PERSON "$@" ;;
   http)
     shift
@@ -1167,6 +1171,8 @@ export function sandboxPrompt(s: Session, agent = false) {
   const bg = !!(s.automation || s.task);
   const py = codeMode();
   const manager = !agent;
+  // a check-in, brief or report: nobody to show files to or learn preferences from in the moment (heartbeat.ts has its own brief)
+  const background = !!s.background;
   const only = (yes: boolean, text: string) => (yes ? text : "");
   return `## Your computer
 Your own computer, through the ${py ? "python" : "bash"} tool: a cloud Linux one, or ${name}'s own Mac or Windows PC while the Emplio app is open there (the note on their latest message says which; a result says when it changes). On their computer, work only inside /work and never look through ${name}'s other files unless asked. All ${name}'s chats share it. Do the work rather than telling people how.
@@ -1184,12 +1190,12 @@ ${only(manager, `- company/AGENT.md: the business's standing instructions (below
 ${only(agent, `- Files over 1 MB or binary in those folders are .media pointers: \`emplio media get <file.media>\` puts the file in /work/tmp/media/; \`emplio view <file.media>\` looks at it.
 - Work in /work/tmp/<short-job-name>/, then copy results where they belong. A script you keep is Python (it runs on any computer). Anything worth reusing (script, tool, app) goes in ${admin ? `company/projects/<name>/ (me/projects/<name>/ if only for ${name})` : "me/projects/<name>/"}; say where.
 - Files you make go in /work/out/ (the same name again is its next version): they're stored in Files by themselves and Emplio shows them. A stored one from another chat: \`emplio files get <id>\` copies it here. A web page: one self-contained .html file.
-`)}${only(manager, `- Files you make go in /work/out/ (the same name again is its next version) and are stored in Files by themselves. A file a job made: changes go back to that job, never into the file yourself. ${name} sees one only when you show it: \`emplio files show <name>\` (\`emplio view\` it first), once, the finished file with your answer; never write links or paths to it. From another chat: \`emplio files show <id>\`; \`emplio files share <id>\` makes a public link, only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""} A web page: one self-contained .html file.
+`)}${only(manager && !background, `- Files you make go in /work/out/ (the same name again is its next version) and are stored in Files by themselves. A file a job made: changes go back to that job, never into the file yourself. ${name} sees one only when you show it: \`emplio files show <name>\` (\`emplio view\` it first), once, the finished file with your answer; never write links or paths to it. From another chat: \`emplio files show <id>\`; \`emplio files share <id>\` makes a public link, only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""} A web page: one self-contained .html file.
 `)}
 Where things go:
 - Business facts (clients, suppliers, products, prices, how things are done, decisions): company/knowledge/${admin ? "" : " (as a proposal in company/inbox/)"}: clients/, suppliers/, people/, topics/ (<name>.md each), decisions.md. Each with its date and source: "2026-10-24, Ravi: Acme pays in 45 days". A changed fact: add the new one, mark the old "(replaced <date>)". People disagree: keep both and ${admin ? "ask the owner" : "note it in the proposal"}.
 - ${admin ? "Money, pay, HR, legal, the owner's private notes: restricted/. Never copy from it into company/ or me/, nor tell it to a team member." : `Money, pay, HR or legal: never in company/; tell ${name} to take it to the owner.`}
-${only(manager, `- ${name}: me/profile.md (who they are) and me/preferences.md (how they like things), shown below. When they tell you something lasting or correct how you do things, add one short line in the same reply (change an existing line rather than repeat it; delete one that's wrong or they want forgotten). Not one-off details. Never repeat it to anyone else. Their notes and drafts: me/notes/ (also where anything unsure goes; say so).\n`)}- Before answering about a client, supplier, price or past decision: \`emplio search <words>\` (files, past chats, activity, tasks, database), and say where it came from. Earlier chats: \`emplio history search <words>\`; who did what: \`emplio activity [words]\`.
+${only(manager && !background, `- ${name}: me/profile.md (who they are) and me/preferences.md (how they like things), shown below. When they tell you something lasting or correct how you do things, add one short line in the same reply (change an existing line rather than repeat it; delete one that's wrong or they want forgotten). Not one-off details. Never repeat it to anyone else. Their notes and drafts: me/notes/ (also where anything unsure goes; say so).\n`)}- Before answering about a client, supplier, price or past decision: \`emplio search <words>\` (files, past chats, activity, tasks, database), and say where it came from. Earlier chats: \`emplio history search <words>\`; who did what: \`emplio activity [words]\`.
 - Records to count or filter go in the database; things to do later are tasks.
 
 Skills: how this business (company/skills/<name>/${admin ? "" : ", owner or admins only; yours go in me/skills/<name>/"}) or ${name} (me/skills/<name>/) does a recurring job: SKILL.md plus its ${py ? "functions" : "scripts"}. Listed below.
@@ -1203,9 +1209,9 @@ ${only(manager, `${bg ? "" : `Questions: when ${name} must decide something, ask
 `}
 Team: \`emplio team list\`. ${admin && !bg ? "`emplio help` has the commands to add people (ask their full name), change roles and set managers." : "Only the owner or an admin changes it."}
 
-Apps: ${name}'s accounts (Gmail, Calendar, Drive, Slack and more) are listed under Connected now. ${bg ? `Not connected or expired: say in your last message which app ${name} should connect.` : `Not connected: \`emplio apps search <words>\`, then \`emplio apps add <app>\` puts a Connect button in the chat (don't write a link); expired: \`emplio apps reconnect <app>\`.`} For one quick read or send yourself: \`emplio apps actions <app> [words]\` finds an action (gmail.send_email), \`emplio apps info <action>\` its input, \`emplio apps run <action> '{"key": "value"}'\` (several accounts: \`--account "<name>"\`). To message a teammate on their phone: \`emplio channels send <email> <message>\`. MCP servers: \`emplio mcp help\`. ${bg ? `Actions that send, change or delete run here only if ${name} has said "Always allow" to them.` : `An action that sends, changes or deletes may show ${name} an Allow card and wait: that's their OK, so don't also ask in words, and once it returns it's done. One such action per command.`} Ask ${name} first before messaging anyone outside the business, moving money or deleting things.
+Apps: ${name}'s accounts (Gmail, Calendar, Drive, Slack and more) are listed under Connected now. ${bg ? `Not connected or expired: say in your last message which app ${name} should connect.` : `Not connected: \`emplio apps search <words>\`, then \`emplio apps add <app>\` puts a Connect button in the chat (don't write a link); expired: \`emplio apps reconnect <app>\`.`} ${background ? "To read (never to send or change)" : "For one quick read or send yourself"}: \`emplio apps actions <app> [words]\` finds an action (gmail.send_email), \`emplio apps info <action>\` its input, \`emplio apps run <action> '{"key": "value"}'\` (several accounts: \`--account "<name>"\`). To message a teammate on their phone: \`emplio channels send <email> <message>\`. MCP servers: \`emplio mcp help\`. ${bg ? `Actions that send, change or delete run here only if ${name} has said "Always allow" to them.` : `An action that sends, changes or deletes may show ${name} an Allow card and wait: that's their OK, so don't also ask in words, and once it returns it's done. One such action per command.`} Ask ${name} first before messaging anyone outside the business, moving money or deleting things.
 
-Automations: work on a schedule or when something happens in an app. \`emplio automations list\`. ${admin ? "Before setting one up or changing one, read `emplio automations help`; never by writing files in company/automations/." : "Only the owner or an admin sets them up."}
+Automations: work on a schedule or when something happens in an app. \`emplio automations list\`. ${background ? "You only suggest them (below), never set one up." : admin ? "Before setting one up or changing one, read `emplio automations help`; never by writing files in company/automations/." : "Only the owner or an admin sets them up."}
 
 Tasks: everything to be done later, by anyone, is a task. When someone asks a teammate for something, asks you to do or check something later, or you say you'll follow up: add it then and say so: \`emplio tasks add "Send Acme the revised quote" --to raj@example.com --due 2026-10-25\` (\`--to ai\` yours, \`--to me\` ${name}'s; how to do it in \`--notes\`). Never promise to come back without one. People are reminded once due; yours start on their own at the due time. Update them when someone says one is done, moved or stuck (\`emplio tasks done <id>\`, \`emplio tasks help\`).
 
@@ -1269,6 +1275,9 @@ ${py ? `- Doing the same thing on a site a second time: make it a function in th
 // then how many lines were left out and where to read them, so a growing file costs every chat the same.
 const MAX_PROMPT_LINES = 60;
 const MAX_PROMPT_CHARS = 6_000;
+export const PROMPT_LIMIT = { lines: MAX_PROMPT_LINES, chars: MAX_PROMPT_CHARS };
+// over what capped shows: the background agent's daily cleanup rewrites it (heartbeat.ts tooLong)
+export const overLimit = (text: string) => text.trim().split("\n").length > MAX_PROMPT_LINES || text.trim().length > MAX_PROMPT_CHARS;
 export function capped(text: string, path: string) {
   const lines = text.trim().split("\n");
   let kept = 0;
@@ -2289,6 +2298,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     }
     await copyAttachments(box, s);
     for (const f of takeShown(s.conversationId)) await upload(box, `${WORK}/tmp/${f.name}`, f.text);
+
+    // background rounds never drive a browser: slow and costly, and nobody is there for a sign-in or code
+    if (s.background && usesBrowser(command))
+      return { box, switched, browserId: undefined, result: { exitCode: 1, output: `error: background rounds don't use the browser. Add a task for it instead: \`emplio tasks add "<what to check on the site>" --to ai --due <when>\`.` } as BoxResult };
 
     // the person is showing Emplio something in this browser: hands off until it reaches Emplio
     if (usesBrowser(command) && isShowing(s.conversationId))

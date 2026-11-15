@@ -203,13 +203,20 @@ export async function notesCommand(workspaceId: string, userId: string, args: st
 
 const PERSON_USAGE = `usage: emplio person <email>                    a teammate's profile and preferences (their me/profile.md and me/preferences.md)
        emplio person <email> prefer <line>      add a line to their preferences (how they like things done)
-       emplio person <email> profile <line>     add a line to their profile (who they are, what they do)`;
+       emplio person <email> profile <line>     add a line to their profile (who they are, what they do)
+       emplio person <email> rewrite prefer|profile <<'EOF'
+                                                replace that whole file with what follows (the daily cleanup)`;
 
 // A teammate's own files, which their chats show the AI: what the background agent learns about them goes here.
 export async function personCommand(workspaceId: string, author: { name: string; email: string }, args: string[]) {
+  // "rewrite prefer" given as one word (code mode: emplio.person(email, "rewrite prefer", input=...)) is two
+  // and so is "<email> rewrite prefer" as one
+  args = args.flatMap((a, i) => (i < 3 && /^(\S+@\S+ )?rewrite (prefer|profile)$/.test(a) ? a.split(" ") : [a]));
   // code mode's emplio.person.prefer(email, line) arrives as `person prefer <email>`: either order
-  const [email, sub, ...rest] = ["prefer", "profile"].includes(args[0] ?? "") ? [args[1], args[0], ...args.slice(2)] : args;
-  if (!email || (sub && !["prefer", "profile"].includes(sub)) || (sub && !rest.join(" ").trim())) return PERSON_USAGE;
+  const [email, sub, ...rest] = ["prefer", "profile", "rewrite"].includes(args[0] ?? "") ? [args[1], args[0], ...args.slice(2)] : args;
+  if (!email || (sub && !["prefer", "profile", "rewrite"].includes(sub)) || (sub && !rest.join(" ").trim())) return PERSON_USAGE;
+  // rewrite: which file, then its whole new text (an argument, or stdin as the last argument)
+  if (sub === "rewrite" && (!["prefer", "profile"].includes(rest[0] ?? "") || !rest.slice(1).join(" ").trim())) return PERSON_USAGE;
   const [m] = await db
     .select({ id: users.id, name: users.name })
     .from(workspaceMembers)
@@ -222,8 +229,16 @@ export async function personCommand(workspaceId: string, author: { name: string;
     const [profile, prefs] = await Promise.all(["profile.md", "preferences.md"].map((f) => readFile(workspaceId, repo, f)));
     return `== profile.md\n${profile?.trim() || "(empty)"}\n\n== preferences.md\n${prefs?.trim() || "(empty)"}`;
   }
-  const file = sub === "prefer" ? "preferences.md" : "profile.md";
-  const before = (await readFile(workspaceId, repo, file)) ?? `# ${sub === "prefer" ? "Preferences" : "Profile"}\n`;
+  const kind = sub === "rewrite" ? rest[0] : sub;
+  const file = kind === "prefer" ? "preferences.md" : "profile.md";
+  if (sub === "rewrite") {
+    const text = rest.slice(1).join(" ").trim();
+    // a rewrite that would lose the file's heading or most of it by mistake (an empty heredoc, one line) is refused
+    if (text.split("\n").filter((l) => l.trim()).length < 3) return `error: that would leave ${file} with almost nothing. Send the whole new file.`;
+    await writeFile(workspaceId, repo, file, `${text}\n`, `Tidied ${m.name ?? email}'s ${file}`, author);
+    return `Rewrote ${m.name ?? email}'s ${file}: ${text.split("\n").length} lines, ${text.length.toLocaleString("en-US")} characters.`;
+  }
+  const before = (await readFile(workspaceId, repo, file)) ?? `# ${kind === "prefer" ? "Preferences" : "Profile"}\n`;
   const line = rest.join(" ").trim().replace(/^-\s*/, "");
   await writeFile(workspaceId, repo, file, `${before.trimEnd()}\n- ${line}\n`, `Learned about ${m.name ?? email}`, author);
   return `Added to ${m.name ?? email}'s ${file}: ${line}`;
