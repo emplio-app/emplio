@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.47 (2026-11-15)
+
+### What's new
+
+- Emplio runs quick commands on its computer the simple way again, so small checks take fewer, cleaner steps.
+
+### For developers
+
+- The `sh()` line in the code-mode notes is no longer agents-only: since 1.2.42 the manager wrote `subprocess.run(...)` by hand in about 1 step in 6 (#174).
+
 ## 1.2.46 (2026-11-15)
 
 ### What's new
