@@ -59,6 +59,8 @@ const untold = new Set<string>();
 // from) runs out. In memory: a restart ends the job anyway (markOrphanedJobs).
 const carryUntil = new Map<string, number>();
 const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
+const RESTARTED =
+  "The server restarted and cut your last run off mid-work. Carry on from where you stopped, without redoing what's done: what you found is in your files and this chat. Threads you started were cut off too: check them with `emplio threads` before starting any again.";
 export const CARRY_ON =
   "That run used up its steps, so this is a fresh one: carry on from where you stopped. What you found is in your files; keep building the result as you go.";
 // What happens to a report when a job's reply ends: wake Emplio, keep it for its next reply, or nothing.
@@ -181,8 +183,22 @@ async function resume(w: Pick<Row, "id" | "workspaceId" | "userId" | "conversati
 // chat, so it can have them carry on from their last step (`emplio hand <id>`).
 // ponytail: one server, so anything working at startup is dead; with several, claim each one first
 export async function markOrphanedJobs() {
+  const cut = await db.select().from(jobs).where(eq(jobs.status, "working"));
+  // Emplio's own jobs started within their time carry on by themselves, so nobody has to say "start again".
+  // Once only: one cut off again after carrying on fails as before (something in it may be what stops the server).
+  const again = async (r: Row) => {
+    if (r.depth !== 1 || !r.chatId || Date.now() - r.createdAt.getTime() > JOB_MINUTES * 60_000) return false;
+    const prompt = (await loadMessages(r.chatId)).reverse().find((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
+    return !prompt || textOf(prompt) !== FROM_EMPLIO + RESTARTED;
+  };
+  const carried = new Set<string>();
+  // ponytail: a fixed wait for the person's computer to link back up after the restart; wait for its link if 20 s falls short
+  for (const r of cut) if (await again(r)) carried.add(r.id), setTimeout(() => void send(r, RESTARTED), 20_000);
+  if (carried.size) console.log(`carrying on ${carried.size} job(s) cut off by the restart`);
   const report = "Cut off by a server restart. Its work so far is kept: `emplio hand <id>` with \"carry on\" picks it up from where it stopped.";
-  const rows = await db.update(jobs).set({ status: "failed", report, finishedAt: new Date() }).where(eq(jobs.status, "working")).returning();
+  const rest = cut.filter((r) => !carried.has(r.id)).map((r) => r.id);
+  if (!rest.length) return;
+  const rows = await db.update(jobs).set({ status: "failed", report, finishedAt: new Date() }).where(and(eq(jobs.status, "working"), inArray(jobs.id, rest))).returning();
   const chats = new Map(rows.filter((r) => r.depth === 1).map((r) => [r.conversationId, r]));
   for (const r of rows) if (r.depth === 1) unseen.add(r.id);
   for (const r of chats.values()) void resume(r).catch((error) => console.error(`job ${r.id}: resuming the chat failed`, error));
