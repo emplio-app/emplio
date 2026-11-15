@@ -1,9 +1,10 @@
 "use client";
 
-import type { SaveLoginCard } from "@emplio/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { OnePasswordStatus, SaveLoginCard } from "@emplio/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, KeyRoundIcon, LockKeyholeIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AppLogo, useConnect, useConnections } from "@/components/chat/connect-card";
 import { loginsQueryKey, SaveLoginDialog, useLogins } from "@/components/logins/save-login";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -28,6 +29,16 @@ export function LoginsPage() {
     const fields = q.get("fields")?.split(",").filter(Boolean).slice(0, 6);
     if (name && site) setAsked({ name, site, kind: q.get("kind") === "key" ? "key" : "login", ...(fields?.length ? { fields } : {}) });
   }, []);
+  // 1Password: connected here or in Integrations, its logins list below with the saved ones
+  const onePassword = useQuery({ queryKey: [...loginsQueryKey, "onepassword"], queryFn: () => api<OnePasswordStatus>("/logins/onepassword") });
+  const { connect, connecting, keyDialog } = useConnect();
+  const connections = useConnections();
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: loginsQueryKey });
+  }, [connections.dataUpdatedAt, queryClient]);
+  const op = onePassword.data;
+  const connectOnePassword = () =>
+    op && connect({ app: "onepassword", name: "1Password", logo: "/logos/onepassword.svg", keyField: op.keyField, connection: op.connection ?? undefined });
   const remove = useMutation({
     mutationFn: (id: string) => api(`/logins/${id}`, undefined, "DELETE"),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: loginsQueryKey }),
@@ -38,6 +49,7 @@ export function LoginsPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {confirmDialog}
+      {keyDialog}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Passwords & keys</h1>
@@ -59,6 +71,30 @@ export function LoginsPage() {
           <p className="text-sm text-muted-foreground">
             Kept encrypted. Emplio signs in or uses a key for you by its name, only on its own site, and never sees what you typed.
           </p>
+          {op && (
+            <div className={`flex items-center gap-3 rounded-xl border p-3 text-sm ${op.connection ? "" : "border-dashed"}`}>
+              <AppLogo src="/logos/onepassword.svg" className="size-9" />
+              <div className="min-w-0 flex-1">
+                {op.connection ? (
+                  <>
+                    <div className="font-medium">1Password connected{op.label ? ` · ${op.label}` : ""}</div>
+                    <div className={op.error ? "text-destructive" : "text-muted-foreground"}>
+                      {op.error ??
+                        `${op.items} ${op.items === 1 ? "login" : "logins and keys"} Emplio can use${op.skipped ? `, ${op.skipped} left out (add a website to an item in 1Password to use it)` : ""}`}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-medium">Keep your passwords in 1Password?</div>
+                    <div className="text-muted-foreground">Connect it and Emplio uses them from there, without seeing them.</div>
+                  </>
+                )}
+              </div>
+              <Button size="sm" variant="outline" disabled={connecting === (op.connection ?? "onepassword")} onClick={connectOnePassword}>
+                {op.connection ? "Replace token" : "Connect"}
+              </Button>
+            </div>
+          )}
           {isPending ? (
             <Skeleton className="h-32 rounded-xl" />
           ) : !data?.length ? (
@@ -73,25 +109,27 @@ export function LoginsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{l.site}</div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {[l.name, l.username, l.usedAt ? `used ${when(l.usedAt)}` : "not used yet"].filter(Boolean).join(" · ")}
+                      {[l.name, l.username, l.from === "1password" ? "from 1Password" : l.usedAt ? `used ${when(l.usedAt)}` : "not used yet"].filter(Boolean).join(" · ")}
                     </div>
                   </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-8 text-muted-foreground"
-                    aria-label={`Delete ${l.name}`}
-                    disabled={remove.isPending}
-                    onClick={() =>
-                      confirm({
-                        title: `Delete ${l.name}?`,
-                        description: "Emplio won't be able to use it any more.",
-                        onConfirm: () => remove.mutate(l.id),
-                      })
-                    }
-                  >
-                    <Trash2Icon className="size-4" />
-                  </Button>
+                  {l.from !== "1password" && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 text-muted-foreground"
+                      aria-label={`Delete ${l.name}`}
+                      disabled={remove.isPending}
+                      onClick={() =>
+                        confirm({
+                          title: `Delete ${l.name}?`,
+                          description: "Emplio won't be able to use it any more.",
+                          onConfirm: () => remove.mutate(l.id),
+                        })
+                      }
+                    >
+                      <Trash2Icon className="size-4" />
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

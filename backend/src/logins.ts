@@ -4,17 +4,20 @@
 // swaps a key into a request (`emplio http`, `{{NAME}}`), and only on the site it was saved for (or a subdomain).
 // The value is never handed to the sandbox, the chat or the model, and anything a site echoes back is scrubbed. But once
 // it's typed into a page, the agent can read it back from that browser (the field, or the cookies the sign-in left).
+// Logins and keys in the person's connected 1Password (integrations/own/onepassword.ts) are listed and used the same
+// way, read from 1Password each time; a saved one wins a clash of names (the 1Password one gets _1PASSWORD).
 // ponytail: each person's own; shared company keys (an admin saves one for everyone) when someone needs them.
 // Top frame only: a login form inside an iframe from another site isn't filled.
 import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { networkInterfaces } from "node:os";
-import { DEFAULT_LOGIN_FIELDS, isSecretField, type Login, type LoginInput, type LoginKind, type SaveLoginCard } from "@emplio/shared";
+import { DEFAULT_LOGIN_FIELDS, isSecretField, type Login, type LoginInput, type LoginKind, type OnePasswordStatus, type SaveLoginCard } from "@emplio/shared";
 import { record } from "./activity";
 import { context } from "./auth";
 import { devtools, openBrowser } from "./browser";
 import { db } from "./db";
-import { logins } from "./db/schema";
+import { connections, logins } from "./db/schema";
+import { onepassword, onePasswordItems, onePasswordValues } from "./integrations/own/onepassword";
 import { decrypt, encrypt } from "./secrets";
 
 // The web app's address as a phone can open it. In dev FRONTEND_URL is localhost, which on a phone means the
@@ -52,8 +55,48 @@ export function siteOf(s: string) {
 }
 const onSite = (host: string, site: string) => host === site || host.endsWith(`.${site}`);
 
+const savedLogins = async (w: Who) => (await db.select().from(logins).where(own(w)).orderBy(desc(logins.updatedAt))).map(toLogin);
+
+// The person's 1Password items as logins, named so they don't clash with saved ones or each other. Null: not connected.
+async function onePassword(w: Who, saved: Login[]) {
+  const found = await onePasswordItems(w);
+  if (!found) return null;
+  const taken = new Set(saved.map((l) => l.name));
+  const named: Login[] = [];
+  for (const item of found.items) {
+    const base = nameOf(item.title) || "ITEM";
+    let name = taken.has(base) ? `${base}_1PASSWORD` : base;
+    for (let n = 2; taken.has(name); n++) name = `${base}_${n}`;
+    taken.add(name);
+    named.push({ id: item.id, name, kind: item.kind, site: item.site, username: item.username, fields: item.fields, usedAt: null, createdAt: "", from: "1password" });
+  }
+  return { logins: named, skipped: found.skipped };
+}
+
+// Saved ones first, then 1Password's (left out, with the reason, when it can't be read)
+async function allLogins(w: Who) {
+  const saved = await savedLogins(w);
+  try {
+    const op = await onePassword(w, saved);
+    return { all: [...saved, ...(op?.logins ?? [])], op, error: null };
+  } catch (error) {
+    return { all: saved, op: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function listLogins(w: Who) {
-  return (await db.select().from(logins).where(own(w)).orderBy(desc(logins.updatedAt))).map(toLogin);
+  return (await allLogins(w)).all;
+}
+
+export async function onePasswordStatus(w: Who): Promise<OnePasswordStatus> {
+  const [row] = await db
+    .select()
+    .from(connections)
+    .where(and(eq(connections.workspaceId, w.workspaceId), eq(connections.userId, w.userId), eq(connections.app, "onepassword"), eq(connections.status, "active")));
+  const keyField = onepassword.keyField!;
+  if (!row) return { connection: null, label: null, items: 0, skipped: 0, error: null, keyField };
+  const { op, error } = await allLogins(w);
+  return { connection: row.id, label: row.label, items: op?.logins.length ?? 0, skipped: op?.skipped ?? 0, error, keyField };
 }
 
 // Saving one under a name that's taken replaces it (a changed password).
@@ -92,8 +135,21 @@ export async function removeLogin(w: Who, idOrName: string) {
   return !!row;
 }
 
-const find = (w: Who, name: string) => db.query.logins.findFirst({ where: and(own(w), eq(logins.name, nameOf(name))) });
-const used = (row: Row) => db.update(logins).set({ usedAt: new Date() }).where(eq(logins.id, row.id));
+// A login or key by name, wherever it's kept: what it's for, and its values only when asked for
+type Entry = { name: string; kind: LoginKind; site: string; values(): Promise<Record<string, string>>; used(): Promise<unknown> };
+const savedEntry = (row: Row): Entry => ({
+  name: row.name,
+  kind: row.kind,
+  site: row.site,
+  values: async () => (row.kind === "key" ? { "the key": decrypt(row.value) } : JSON.parse(decrypt(row.value))),
+  used: () => db.update(logins).set({ usedAt: new Date() }).where(eq(logins.id, row.id)),
+});
+async function find(w: Who, name: string): Promise<Entry | undefined> {
+  const row = await db.query.logins.findFirst({ where: and(own(w), eq(logins.name, nameOf(name))) });
+  if (row) return savedEntry(row);
+  const op = (await allLogins(w)).all.find((l) => l.from === "1password" && l.name === nameOf(name));
+  return op && { name: op.name, kind: op.kind, site: op.site, values: () => onePasswordValues(w, op.id), used: async () => {} };
+}
 
 // --- typing into the chat's browser, over its DevTools connection -------------------------------------------
 
@@ -145,7 +201,8 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     const run = async (expression: string) => (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result?.value;
     // the page itself, not just the tab's address: it could have moved on
     if (!onSite(String(await run("location.hostname")), row.site)) return `error: that tab has left ${row.site}`;
-    const saved: Record<string, string> = row.kind === "key" ? { "the key": decrypt(row.value) } : JSON.parse(decrypt(row.value));
+    const saved = await row.values().catch((error: Error) => error);
+    if (saved instanceof Error) return `error: ${saved.message}`;
     const pick = field && Object.keys(saved).find((label) => label.toLowerCase() === field.toLowerCase());
     if (field && !pick) return `error: ${nameOf(name)} has no field "${field}"; it has ${Object.keys(saved).join(", ")}`;
     const filled: string[] = [];
@@ -159,7 +216,7 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     const missed = Object.keys(saved).filter((label) => !filled.includes(label));
     if (!filled.length)
       return `error: found no box for ${row.kind === "key" || pick ? "it; click into the box first" : `${missed.join(", ")} on ${siteOf(tab.url)}; go to the sign-in page, or click into a box and use emplio logins fill ${nameOf(name)} "<field>"`}`;
-    await used(row);
+    await row.used();
     record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "connection", summary: `Filled ${nameOf(name)} on ${row.site}` });
     return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}. Now press the sign-in or next button yourself.`;
   } finally {
@@ -211,14 +268,15 @@ export async function withKeys(w: Who, host: string, texts: string[]) {
   const named = (text: string) => [...text.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]!);
   const wanted = [...new Set(texts.flatMap(named))];
   if (!wanted.length) return { put: (t: string) => t, scrub: (t: string) => t, wanted, swaps: [] as [string, string][] };
-  const saved = await db.select().from(logins).where(own(w));
   const swaps: [string, string][] = [];
   for (const name of wanted) {
-    const row = saved.find((r) => r.name === name);
+    const row = await find(w, name);
     if (!row) return `error: nothing saved as ${name} (emplio logins list)`;
     if (!onSite(host, row.site)) return `error: ${name} is only for ${row.site}, not ${host}`;
-    swaps.push([`{{${name}}}`, decrypt(row.value)]);
-    await used(row);
+    const values = await row.values().catch((error: Error) => error);
+    if (values instanceof Error) return `error: ${values.message}`;
+    swaps.push([`{{${name}}}`, row.kind === "key" ? values["the key"]! : JSON.stringify(values)]);
+    await row.used();
   }
   const put = (text: string) => swaps.reduce((t, [k, v]) => t.replaceAll(k, v), text);
   const scrub = (text: string) => swaps.reduce((t, [k, v]) => (v ? t.replaceAll(v, k) : t), text);
@@ -245,11 +303,18 @@ export async function loginsCommand(w: Who, conversationId: string, channel: str
   const site = rest[rest.indexOf("--site") + 1];
   const fields = rest.includes("--fields") ? (rest[rest.indexOf("--fields") + 1] ?? "").split(",").map((f) => f.trim()).filter(Boolean).slice(0, 6) : [];
   if (sub === "list") {
-    const all = await listLogins(w);
-    if (!all.length) return "Nothing saved yet.";
-    return all
-      .map((l) => [l.name, l.kind, l.site, l.kind === "login" ? `${l.username ?? ""} (${l.fields.join(", ")})` : "", l.usedAt ? `last used ${l.usedAt.slice(0, 10)}` : "never used"].join("\t"))
-      .join("\n");
+    const { all, op, error } = await allLogins(w);
+    const notes = [
+      error && `(1Password couldn't be read: ${error})`,
+      op?.skipped && `(${op.skipped} more in 1Password have no website or aren't a login or key; the person can add a website to an item there to use it)`,
+    ].filter(Boolean);
+    if (!all.length) return ["Nothing saved yet.", ...notes].join("\n");
+    return [
+      ...all.map((l) =>
+        [l.name, l.kind, l.site, l.kind === "login" ? `${l.username ?? ""} (${l.fields.join(", ")})` : "", l.from === "1password" ? "in 1Password" : l.usedAt ? `last used ${l.usedAt.slice(0, 10)}` : "never used"].join("\t"),
+      ),
+      ...notes,
+    ].join("\n");
   }
   if (sub === "ask" && words[0] && rest.includes("--site") && site) {
     const kind: LoginKind = rest.includes("--key") ? "key" : "login";
@@ -271,6 +336,12 @@ export async function loginRoutes(app: FastifyInstance) {
     const ctx = await context(req, reply);
     if (!ctx) return;
     return listLogins(ctx);
+  });
+
+  app.get("/logins/onepassword", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    return onePasswordStatus(ctx);
   });
 
   app.post<{ Body: LoginInput }>(
