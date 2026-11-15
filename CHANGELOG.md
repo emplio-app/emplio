@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.46 (2026-11-15)
+
+### What's new
+
+- Steps Emplio wrote earlier that use a website keep working when it uses them again, instead of losing the browser.
+- When something Emplio set up earlier is gone (it moved to another computer, or that step had failed), it's told so and sets it up again, instead of getting confused.
+
+### For developers
+
+- Code mode: while a chat's browser is open (`browserOpen`), every Python step gets it, so a function that drives the browser works when called later (was "no browser attached"). A `NameError` adds a note that the step that set it failed or the session is new (#171).
+
 ## 1.2.45 (2026-11-15)
 
 ### What's new
