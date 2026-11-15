@@ -35,7 +35,10 @@ export function useConnect() {
     url.searchParams.set("popup", "1");
     const left = window.screenX + (window.outerWidth - 520) / 2;
     const win = window.open(url.href, `connect-${app}`, `popup,width=520,height=720,left=${left},top=${window.screenY + 60}`);
-    if (!win) {
+    // the Mac/PC app opens it in the browser and hands back no window: going there too would start a second
+    // sign-in, which wipes the first one's secret, so the one being finished fails
+    const inApp = !!(window as { emplioDesktop?: unknown }).emplioDesktop;
+    if (!win && !inApp) {
       window.location.href = API_URL + path;
       return;
     }
