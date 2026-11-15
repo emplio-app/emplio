@@ -35,7 +35,7 @@ async function op<T>(fn: () => Promise<T>): Promise<T> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/service account token|unauthori[sz]ed|authenticat|revoked|expired/i.test(message))
-      throw new AppsError("1Password didn't accept that token. Make a new one in 1Password (Developer → Service accounts) and paste it again.", true);
+      throw new AppsError("1Password didn't accept that token. Make a new one on 1password.com (Developer → Directory → Service account) and paste it again.", true);
     throw new AppsError(`1Password: ${message}`);
   }
 }
@@ -154,7 +154,7 @@ export const onepassword: OwnApp = {
   logo: "/logos/onepassword.svg",
   keyField: {
     label: "Service account token",
-    help: "In 1Password, make a vault called Emplio and move in the logins it may use. Then Developer → Service accounts → New, give it read access to that vault only, and paste the token here. Your passwords stay in 1Password.",
+    help: "In 1Password, make a vault called Emplio and move in the logins it may use. Then on 1password.com open Developer → Directory → Service account, give it read access to that vault only, and paste the token here. Your passwords stay in 1Password.",
     placeholder: "ops_…",
   },
   // the vaults it can read name the connection
