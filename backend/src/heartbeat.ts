@@ -5,8 +5,9 @@ import { personFor } from "./automations";
 import { foldIdleChats, generateReply, quiet } from "./chat";
 import { chatLink, heldBack, mainChat, post } from "./channels";
 import { db } from "./db";
-import { activity, automationRuns, chatNotes, connections, conversations, messages, workspaceMembers, workspaces } from "./db/schema";
+import { activity, automationRuns, chatNotes, connections, conversations, messages, users, workspaceMembers, workspaces } from "./db/schema";
 import { createFile, ensureRepo, readFile } from "./gitea";
+import { overLimit, PROMPT_LIMIT } from "./sandbox";
 import { runAction } from "./integrations";
 import { isReplying, notify } from "./live";
 import { settingsFor } from "./settings";
@@ -60,36 +61,40 @@ const MAX_NOTES = 150;
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}\n… (cut: read the file for the rest)` : s);
 
 // The words of thinkerBrief, from pieces already read; the evals (backend/evals/background-round) use it too.
-export const backgroundBrief = (p: { name: string; chat: string; today: string; goals: string; journal: string; notes: string }) =>
+// changes: what the server found new since the last round (changesSince); tooLong: memory files over the prompt's
+// limit, for the daily cleanup to rewrite.
+export const backgroundBrief = (p: { name: string; chat: string; today: string; goals: string; journal: string; notes: string; changes?: string; tooLong?: string }) =>
   `## You, in the background
-This is a round of your background work. You are the business's background agent: you keep ${p.name} moving toward its goals, and you improve yourself. The AI employee in everyone's chats is you, so every fact, preference and skill you save makes every later chat better.
-You see everything: everyone's chats (\`emplio history list|search|show\` reads anyone's), the readers' notes on them (below; older ones: \`emplio notes\`), activity, tasks, all files including restricted/, the database and the apps.
+You are ${p.name}'s background agent: the same Emplio as in everyone's chats, working between them as the owner. Nobody is watching or will answer. Your job: keep the business's memory, tasks and goals true, so every chat goes better and nothing falls through. You see everything: anyone's chats (\`emplio history search <words>\`, \`emplio history show <chat>\`), activity, tasks, all files including restricted/, the database, and the apps (to read).
 
-What you change yourself, the business's own setup:
-- Knowledge: facts into company/knowledge/ (the "Where things go" rules); what you learn about a teammate or how they like things: \`emplio person <email> prefer|profile "<line>"\`. Check it's not already there first (\`emplio search\`).
-- Skills: a way of doing a job that was worked out after tries or corrected: update the skill that covers it, else a broader one, else a new one named for the kind of job (company/skills/<name>/SKILL.md).
-- Tasks: a promise or follow-up with no task gets one (one task per thing, never two joined with "and"); late ones get chased or reassigned (\`emplio tasks\`).
-- Goals: dated progress lines in company/goals.md under the goal they move. Never change the goals themselves.
-- Your journal, restricted/journal.md (below): keep it short; drop what's settled.
-What you don't do yourself: outside work (emailing or messaging customers or suppliers, changing data in apps, paying, deleting). Hand it to the AI employee as a task (\`emplio tasks add "<what>" --to ai --due <when> --notes "<how>"\`) or to the person it belongs to.
-Automations: only suggest them, never create one: to the person whose work it is, saying what would run and when (staff can't set them up: tell the owner too). Only for work done by hand again and again, and never the same suggestion twice (your journal).
-Messaging: the team only, never customers: \`emplio channels send <email> "<message>"\`. Only when something needs that person; everything you have for them in one message; at most 3 a day per person (\`emplio activity "channels send" --since ${p.today} --chat ${p.chat}\`). Not on a channel: a task for them instead.
-Learning from yourself: every suggestion, change or nudge goes in your journal's "Tried" with date and who. Each round, check the open ones (their tasks, \`emplio activity\`, their answer with \`emplio history search\`) and write how each turned out: accepted, ignored, undone, done. Do more of what worked and less of what didn't. Your own past rounds: \`emplio activity --chat ${p.chat}\`.
+Yours to change:
+- Knowledge: facts in company/knowledge/: one file per client, supplier, person or topic (clients/, suppliers/, people/, topics/), each line dated with its source and the person's own words; a changed fact: add the new line and mark the old one "(replaced <date>)".
+- People: \`emplio person <email>\` shows someone's profile and preferences; \`emplio person <email> prefer "<line>"\` adds a preference (\`profile\` for who they are); \`emplio person <email> rewrite prefer <<'EOF'\` replaces the whole preferences file (\`rewrite profile\` the profile). Preferences hold only rules for all of that person's work; anything about one client, person or job goes in that one's knowledge file or the job's skill.
+- Skills: a way of doing a job that was worked out or corrected: fix the skill that covers it, else make one for the kind of job (company/skills/<name>/SKILL.md).
+- Tasks: \`emplio tasks add "<what>" --to <email or ai> --due <when>\`, \`emplio tasks done <id>\`, \`emplio tasks update <id> --status cancelled\`; one per thing, never two joined with "and".
+- Goals: dated progress lines in company/goals.md under the goal they move; never the goals themselves.
+- Your journal (restricted/journal.md): open matters and what you tried, short; drop what's settled.
+Never yourself: email or message customers or suppliers, change data in apps, pay, delete, or use the browser. That becomes a task for the AI (\`emplio tasks add "<what>" --to ai --due <when> --notes "<how>"\`) or for the person it belongs to.
+Automations: only suggest one, to the person whose work it is, for work done by hand again and again; never create one, never the same suggestion twice (journal).
+Messaging: the team only, \`emplio channels send <email> "<message>"\`, only when something needs that person, all in one message, at most 3 a day each.
+What you need is below: look further only where something below points. Check a thing isn't saved already (\`emplio search\`) before saving it. Do your changes in as few steps as you can.
 
+## What changed since your last round
+${p.changes?.trim() || "(nothing new beyond the notes below)"}
+
+## Readers' notes on people's chats since your last round
+${p.notes}
+A note isn't enough? Read the chat: \`emplio history show <chat>\`.
+${p.tooLong ? `\n## Memory files over their limit (shown cut short in every chat)\n${p.tooLong}\n` : ""}
 ## Goals (company/goals.md)
-${clip(p.goals.trim(), 8000)}${p.goals.trim() === DEFAULT_GOALS.trim() ? "\n(Not set yet: ask the owner for the business's goals in your next brief, once.)" : ""}
+${clip(p.goals.trim(), 8000)}${p.goals.trim() === DEFAULT_GOALS.trim() ? "\n(Not set yet.)" : ""}
 
 ## Your journal (restricted/journal.md)
 ${clip(p.journal.trim(), 8000)}
-
-## New in people's chats since your last round
-${p.notes}
-Act on these as above. A note isn't enough? Read the chat: \`emplio history show <chat>\`.
-
 `;
 
-// What every round of the background agent starts from, before the round's own instructions.
-async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, last: Date | null, tz: string) {
+// What every round of the background agent starts from, after the round's own instructions.
+async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, last: Date | null, tz: string, changes: string, daily: boolean) {
   await ensureRepo(w.id, "restricted", "Finance, HR and owner notes");
   let [goals, journal] = await Promise.all([readFile(w.id, "company", "goals.md"), readFile(w.id, "restricted", "journal.md")]);
   if (goals === null) await createFile(w.id, "company", "goals.md", (goals = DEFAULT_GOALS), "Add the goals file");
@@ -103,6 +108,8 @@ async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, l
     today,
     goals,
     journal,
+    changes,
+    tooLong: daily ? await tooLong(w.id) : "",
     notes: notes.length ? `${more > 0 ? `(${more} earlier ones: \`emplio notes --since ${last ? day(last, tz) : today}\`)\n\n` : ""}${notes.map((n) => n.line).join("\n\n")}` : "(nothing)",
   });
 }
@@ -122,42 +129,32 @@ What the AI employee looks at on its own every few hours. The owner edits this l
 
 type Kind = "check-in" | "brief" | "report";
 
-const since = (last: Date | null, tz: string) =>
-  last ? `since the last check-in (${time(last, tz)}): \`emplio activity --since ${day(last, tz)}\`, and look at the entries after that time` : "recently: `emplio activity --n 60`";
-const look = `Go through "Always check" in company/heartbeat.md, using the apps. Handle routine things yourself. Don't email or message customers, pay, or delete anything: say what you'd do and ask.
-For anything to come back to later, add a task for yourself with a due date (\`emplio tasks add "<what>" --to ai --due <when>\`); it starts on its own then. One task per thing to do, each with its own due date: never join two in one task with "and".`;
+// every round of the background agent starts with these (the notes, changes and journal are below the round's message)
+const FILE = `First, everything new below ("What changed", "Readers' notes"): file each thing where it belongs (a fact: knowledge; how someone likes things done: \`emplio person\`; a way of doing a job: its skill; a promise or follow-up with no task: a task) and handle each change (a failed automation: find why and add a task to fix it; an email or message that needs an answer: a task for whoever it's on). Nothing new: skip this.`;
+const JOURNAL = `Update your journal (restricted/journal.md) only if something is open or you tried something: open matters as they stand, and how earlier tries turned out.`;
+// once a day, in the day's last round (the report, else the brief): the bigger look
+const DAILY = `Today's cleanup (do each part now):
+a. Tasks (all open ones are listed below): close each one that's already done (a chat, an email or the activity shows it, by \`emplio search <words>\` or \`emplio history search <words>\`: \`emplio tasks done <id>\`); tasks that are the same thing: keep one, cancel the rest (\`emplio tasks update <id> --status cancelled\`); cancel ones that no longer matter; chase or reassign late ones (the person's own reminder covers a task due today).
+b. Memory: rewrite each file under "Memory files over their limit" so it fits in half its limit: merge repeated lines into one, drop rules that are stale or that a later line contradicts, move lines about one client, person or job into that one's knowledge file or skill (their exact words), keep every rule that still holds for all their work, one short line each without dates or backstory. Rules where a slip would hurt stay in the file even when they name someone: who never to contact, money, what needs their OK before it goes out. People's files with the \`emplio person <email> rewrite\` command named beside each; company files in place.
+c. A job that went wrong or was corrected today: fix its skill. Work done by hand again and again: suggest an automation (journal first).`;
+// Mondays, in the brief
+const WEEKLY = `This week's goals review (do it now, before the rest): for each goal in company/goals.md, look at the real numbers (apps to read, \`emplio db sql\`, tasks, activity), then write company/goals.md again with one new dated line under each goal ("- 2026-11-16: 31% of sales online, up from 28%"), every goal heading and earlier line left as it was. Add up to 3 tasks for this week that would move it most (to the AI or the person whose work it is), unless open ones already cover it. A goal with no progress in two weeks: one line in the brief. No goals set: ask the owner for them in the brief.`;
 
-// every round of the background agent starts and ends with these (the notes and the journal are below the round's message)
-const NOTES = `0. First the readers' notes below ("New in people's chats"): for each line, do what it calls for, the way "You, in the background" says. A fact: company/knowledge/. A preference or something about a teammate: \`emplio person\`. A way of doing a job: the skill. A promise with no task: a task. Something the AI couldn't do or work done by hand again and again: fix the skill, or suggest an automation. Check first that it isn't already saved. Write each change and suggestion in your journal's "Tried".`;
-const JOURNAL = `Before you answer, update your journal (restricted/journal.md): "Open matters" as they stand now, and how each open "Tried" turned out.`;
-
-export const instructions = (kind: Kind, last: Date | null, tasks: string, tz: string) =>
-  kind === "brief"
-    ? `${BRIEF_PREFIX}Morning brief. Nobody asked for this; the owner reads it first thing.
-${NOTES}
-1. See what came in ${since(last, tz)}.
-2. ${look}
-3. Always write the brief (never ${SILENT}): at most 5 short bullets, one fact each, most important first, empty parts left out. If a calendar is connected, today's meetings come first (time, who; a clash or something to prepare). Then only what's late (and who it's on), due today, needs their decision (including new staff proposals in company/inbox/: who, what, one line), or came in overnight that matters. Rank by consequence and time, not by how many messages there are. Don't repeat what an earlier message in this chat already said unless it changed or is now late; old open items go in one line at most ("Still open: Gmail login, Rahul's question"). More than 5? Pick the 5 that most need the owner (money, customers, deadlines first), group alike ones ("3 supplier emails unanswered") and end with one line counting the rest ("Also: 14 late tasks, 9 emails; all in Tasks"). No greeting, no sign-off, nothing routine you already handled.
-${JOURNAL}
-
-Tasks:
-${tasks}`
-    : kind === "report"
-      ? `${REPORT_PREFIX}End-of-day report. Nobody asked for this; the owner reads it this evening.
-${NOTES}
-1. See what was done today, by you and the team: \`emplio activity --since ${day(new Date(), tz)}\`.
-2. Write the report as up to five labelled lines, leaving out empty ones: **Done:** (the few that matter, comma-separated); **Not done:** (and when); **Couldn't:** (why, what you need); **Assumed:** (what you decided on your own); **Tomorrow:** (the first thing or two, and any early meeting). At most one line each, no intro or wrap-up; on a busy day name the few that matter and count the rest ("Done: GST filing, Mehta quote, 12 more"). Don't do new work now; add a task for anything that needs doing.
-3. If nothing at all happened today, reply with exactly ${SILENT} and nothing else.
-${JOURNAL}
-
-Tasks:
-${tasks}`
-      : `${CHECK_IN_PREFIX}Scheduled check-in. Nobody asked for this; the owner reads this chat later.
-${NOTES}
-1. See what happened ${since(last, tz)}.
-2. ${look}
-3. ${JOURNAL}
-4. If nothing needs the owner's attention, reply with exactly ${SILENT} and nothing else. Otherwise one to three short lines: only what needs their eyes or decision. Nothing routine you handled.`;
+export const instructions = (kind: Kind, last: Date | null, tasks: string, tz: string, more: { daily?: boolean; weekly?: boolean } = {}) => {
+  const steps = (...list: string[]) => list.filter(Boolean).map((t, i) => `${i + 1}. ${t}`).join("\n");
+  const tail = `${JOURNAL}\n\nTasks:\n${tasks}`;
+  if (kind === "brief")
+    return `${BRIEF_PREFIX}Morning brief. Nobody asked for this; the owner reads it first thing.
+${steps(FILE, more.weekly ? WEEKLY : "", `Go through "Always check" in company/heartbeat.md once, with the apps (to read). Something to do later: a task.`, more.daily ? DAILY : "", `Always write the brief (never ${SILENT}): at most 5 short bullets, one fact each, most important first, empty parts left out. If a calendar is connected, today's meetings come first (time, who; a clash or something to prepare). Then only what's late (and who it's on), due today, needs their decision (including new staff proposals in company/inbox/: who, what, one line), or came in overnight that matters. Rank by consequence and time, not by how many messages there are. Don't repeat what an earlier message in this chat already said unless it changed or is now late; old open items go in one line at most ("Still open: Gmail login, Rahul's question"). More than 5? Pick the 5 that most need the owner (money, customers, deadlines first), group alike ones ("3 supplier emails unanswered") and end with one line counting the rest ("Also: 14 late tasks, 9 emails; all in Tasks"). No greeting, no sign-off, nothing routine you already handled.`)}
+${tail}`;
+  if (kind === "report")
+    return `${REPORT_PREFIX}End-of-day report. Nobody asked for this; the owner reads it this evening.
+${steps(FILE, more.daily ? DAILY : "", `Write the report from what was done today (below, and \`emplio activity --since ${day(new Date(), tz)}\` if you need more), as up to five labelled lines, leaving out empty ones: **Done:** (the few that matter, comma-separated); **Not done:** (and when); **Couldn't:** (why, what you need); **Assumed:** (what you decided on your own); **Tomorrow:** (the first thing or two, and any early meeting). At most one line each, no intro or wrap-up; on a busy day name the few that matter and count the rest ("Done: GST filing, Mehta quote, 12 more"). Don't do new work now; add a task for anything that needs doing. If nothing at all happened today, reply with exactly ${SILENT} and nothing else.`)}
+${tail}`;
+  return `${CHECK_IN_PREFIX}Check-in: something changed since your last round. Nobody asked for this; the owner reads this chat later.
+${steps(FILE, `Reply with exactly ${SILENT} unless the owner must see or decide something now; then one to three short lines, only that. Nothing routine you handled.`)}
+${tail}`;
+};
 
 const staffBrief = (name: string, last: Date | null, tasks: string, tz: string) => `${BRIEF_PREFIX}Morning brief for ${name}. Nobody asked for this; ${name} reads it first thing. It's about their day only, never the owner's matters or anyone else's.
 1. If their calendar is connected (\`emplio apps list\`), today's meetings. If their email is connected, what came in ${last ? `since ${time(last, tz)}` : "since yesterday"} that needs a reply from them.
@@ -354,7 +351,7 @@ export async function checkIn(w: typeof workspaces.$inferSelect, kind: Kind) {
     if (kind !== "brief") return;
     const tz = await timezoneOf(person.userId);
     const dueOrLate = /^(Late|Due today) \(/m.test(await taskSummary(w.id, person.userId, tz));
-    if (!dueOrLate && !(await changedSince(w.id, person.userId, w.heartbeatAt ?? new Date(Date.now() - 86_400_000)))) return;
+    if (!dueOrLate && !(await changesSince(w.id, person.userId, w.heartbeatAt ?? new Date(Date.now() - 86_400_000), tz)).length) return;
   }
   if (!chatId) {
     chatId = crypto.randomUUID();
@@ -364,15 +361,53 @@ export async function checkIn(w: typeof workspaces.$inferSelect, kind: Kind) {
   await ensureRepo(w.id, "company", "Shared company files");
   const checklist = await readFile(w.id, "company", "heartbeat.md");
   if (checklist === null) await createFile(w.id, "company", "heartbeat.md", DEFAULT_CHECKLIST, "Add the check-in checklist");
-  else if (kind === "check-in" && !(await worthWaking(w.id, person.userId, w.heartbeatAt!))) return;
-
   const tz = await timezoneOf(person.userId);
+  const changes = await changesSince(w.id, person.userId, w.heartbeatAt ?? new Date(Date.now() - 86_400_000), tz);
+  // a check-in only when something changed: the brief and the report run anyway
+  if (kind === "check-in" && !changes.length) return;
+  const settings = await settingsFor(w.id);
+  // the day's bigger look goes in its last round: the report, or the brief when there's no report
+  const daily = kind === "report" || (kind === "brief" && settings.reportHour === "off");
+  const weekly = kind === "brief" && new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(new Date()) === "Mon";
   const since = kind === "report" ? at(day(new Date(), tz), "00:00", tz) : (w.heartbeatAt ?? new Date(Date.now() - 86_400_000));
-  const tasks = kind === "check-in" ? "" : (await taskSummary(w.id, person.userId, tz)) + (await taskResults(w.id, since, tz));
+  const tasks =
+    (await taskSummary(w.id, person.userId, tz)) + (kind === "check-in" ? "" : await taskResults(w.id, since, tz)) + (daily ? await openTasks(w.id, person.userId, tz) : "");
   // the round's own instructions start the message, so the chat still shows it as a check-in, brief or report
-  const text = `${instructions(kind, w.heartbeatAt, tasks, tz)}\n\n${await thinkerBrief(w, chatId, w.heartbeatAt, tz)}`;
+  const text = `${instructions(kind, w.heartbeatAt, tasks, tz, { daily, weekly })}\n\n${await thinkerBrief(w, chatId, w.heartbeatAt, tz, changes.join("\n"), daily)}`;
   const note = await run(person, chatId, { id: generateId(), role: "user", parts: [{ type: "text", text }] });
   if (note) await post(w.id, person.userId, `**${LABEL[kind]}**\n\n${note}\n\n[See how I got there](${chatLink(chatId)})`, { from: chatId });
+}
+
+// Every open task, with its id, for the daily cleanup to close what's done and tidy the rest.
+// ponytail: listTasks' first 500, 80 shown; a busier business gets the rest from \`emplio tasks list --all\`
+async function openTasks(workspaceId: string, userId: string, tz: string) {
+  const open = (await listTasks({ workspaceId, userId, role: "owner" }, {})).filter((t) => ["todo", "doing", "waiting"].includes(t.status));
+  if (!open.length) return "";
+  return [`\n\nAll open tasks (${open.length}; id, status, due, who, what):`, ...open.slice(0, 80).map((t) => line(t, tz)), ...(open.length > 80 ? [`…and ${open.length - 80} more: \`emplio tasks list --all\``] : [])].join("\n");
+}
+
+// The memory files every chat's prompt carries that have grown past its limit (sandbox.ts capped), for the daily
+// cleanup to rewrite: the business's standing instructions and description, and each person's profile and preferences.
+export async function tooLong(workspaceId: string) {
+  const people = await db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(workspaceMembers)
+    .innerJoin(users, eq(users.id, workspaceMembers.userId))
+    .where(eq(workspaceMembers.workspaceId, workspaceId));
+  const files: [string, string, string][] = [
+    ["company", "AGENT.md", "company/AGENT.md (edit in place)"],
+    ["company", "README.md", "company/README.md (edit in place)"],
+    ...people.flatMap((p): [string, string, string][] => [
+      [`me-${p.id}`, "preferences.md", `${p.name ?? p.email}'s preferences (\`emplio person ${p.email} rewrite prefer\`)`],
+      [`me-${p.id}`, "profile.md", `${p.name ?? p.email}'s profile (\`emplio person ${p.email} rewrite profile\`)`],
+    ]),
+  ];
+  const over: string[] = [];
+  for (const [repo, file, label] of files) {
+    const text = await readFile(workspaceId, repo, file).catch(() => null);
+    if (text && overLimit(text)) over.push(`- ${label}: ${text.trim().split("\n").length} lines, ${text.length.toLocaleString("en-US")} characters (limit ${PROMPT_LIMIT.lines} lines, ${PROMPT_LIMIT.chars.toLocaleString("en-US")} characters)`);
+  }
+  return over.join("\n");
 }
 
 // A reader flagged something since the last round that can't wait for the next one.
@@ -409,35 +444,35 @@ export async function quietDays(w: Pick<typeof workspaces.$inferSelect, "id" | "
   return (Date.now() - (row?.at ?? w.createdAt).getTime()) / 86_400_000;
 }
 
-// Anything since the last check-in that the AI should look at? Only asked after the day's first check-in (the
-// morning brief, which always runs, as does the report): only for a failed automation or new mail. (The AI's own tasks start on their own: tasks.ts.)
-// ponytail: owner-written "Always check" items get one look a day unless one of these fires; a per-item
-// check script if someone needs them more often
-export async function worthWaking(workspaceId: string, userId: string, since: Date) {
-  const tz = await timezoneOf(userId);
-  return day(since, tz) !== day(new Date(), tz) || changedSince(workspaceId, userId, since);
-}
-
-// A reader's note, a failed automation or new mail since then.
-async function changedSince(workspaceId: string, userId: string, since: Date) {
-  if (await db.query.chatNotes.findFirst({ where: and(eq(chatNotes.workspaceId, workspaceId), gt(chatNotes.createdAt, since)), columns: { id: true } })) return true;
-  const failed = await db.query.automationRuns.findFirst({
-    where: and(eq(automationRuns.workspaceId, workspaceId), eq(automationRuns.status, "failed"), gt(automationRuns.startedAt, since)),
-    columns: { id: true },
-  });
-  if (failed) return true;
+// What's new since the last round, a line each, for the round to start from (and a check-in to wake for at all):
+// readers' notes, failed automations, new mail in the owner's inbox. The AI's own tasks start on their own (tasks.ts).
+export async function changesSince(workspaceId: string, userId: string, since: Date, tz: string) {
+  const lines: string[] = [];
+  const notes = await db.select({ id: chatNotes.id }).from(chatNotes).where(and(eq(chatNotes.workspaceId, workspaceId), gt(chatNotes.createdAt, since)));
+  if (notes.length) lines.push(`- ${notes.length} new readers' note${notes.length === 1 ? "" : "s"} on people's chats (below)`);
+  const failed = await db
+    .select({ name: automationRuns.name, startedAt: automationRuns.startedAt, error: automationRuns.error })
+    .from(automationRuns)
+    .where(and(eq(automationRuns.workspaceId, workspaceId), eq(automationRuns.status, "failed"), gt(automationRuns.startedAt, since)))
+    .orderBy(asc(automationRuns.startedAt));
+  for (const f of failed.slice(-10)) lines.push(`- Automation "${f.name}" failed at ${time(f.startedAt, tz)}${f.error ? `: ${f.error.slice(0, 200)}` : ""}`);
   const gmails = await db.query.connections.findMany({
     where: and(eq(connections.workspaceId, workspaceId), eq(connections.userId, userId), eq(connections.app, "gmail"), eq(connections.status, "active")),
     columns: { id: true },
   });
   const query = `in:inbox after:${Math.floor(since.getTime() / 1000)} -category:promotions -category:social`;
   for (const g of gmails) {
-    const out = await runAction({ workspaceId, userId }, "gmail.fetch_emails", { query, max_results: 1, include_payload: false }, { account: g.id, quiet: true })
+    const out = (await runAction({ workspaceId, userId }, "gmail.fetch_emails", { query, max_results: 10, include_payload: false }, { account: g.id, quiet: true }).catch(
       // can't tell: let the AI look
-      .catch(() => ({ messages: [1] }));
-    if ((out as { messages?: unknown[] })?.messages?.length) return true;
+      () => ({ messages: [{ subject: "(couldn't read the inbox: look with the apps)" }] }),
+    )) as { messages?: Record<string, any>[] };
+    for (const m of out?.messages ?? []) {
+      const from = m.sender ?? m.from ?? "";
+      const subject = m.subject ?? m.preview?.subject ?? "";
+      lines.push(`- New email${from ? ` from ${from}` : ""}${subject ? `: ${String(subject).slice(0, 120)}` : ""}`);
+    }
   }
-  return false;
+  return lines;
 }
 
 // The check-in's final words, or null when it had nothing to say: then it isn't sent anywhere or marked unread,

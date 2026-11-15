@@ -19,7 +19,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { FROM_EMPLIO, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
+import { FROM_EMPLIO, MODEL_SETS, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -743,6 +743,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     sitesShown: new Set(),
     // the owner's check-ins are the background agent; staff briefs run as HEARTBEAT too, as their person
     thinker: automation === HEARTBEAT && ctx.role === "owner",
+    background: automation === HEARTBEAT,
     channel,
     attachments: history.flatMap((m) =>
       m.parts.flatMap((p) =>
@@ -862,7 +863,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           },
         ),
         visual,
-        agent: !!job,
+        // a background round hands nothing off: how Emplio manages agents is no use to it
+        agent: !!job || automation === HEARTBEAT,
       }),
     },
   ];
@@ -1039,7 +1041,10 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     // check-ins, automations and tasks: nobody waits on them, so a cheaper model
     model: job
       ? modelForJob(settings, job.strong ? "chatModel" : "jobModel", { ...bill, agent: job.agent })
-      : modelForJob(settings, automation ? "backgroundModel" : "chatModel", bill),
+      : automation === HEARTBEAT
+        ? // background rounds file and check, whatever the business's quality setting: always the cheap model
+          model(settings, MODEL_SETS[settings.modelSet === "free" ? "free" : "save"].backgroundModel, bill)
+        : modelForJob(settings, automation ? "backgroundModel" : "chatModel", bill),
     // Anthropic automatic caching: the whole prompt so far (system + history + this reply's tool steps) is
     // cached and the breakpoint moves forward each step, so long chats and tool loops aren't re-billed in full
     providerOptions,

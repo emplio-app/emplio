@@ -37,13 +37,15 @@ export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgr
 export const system = (b: Business, round: boolean) => [
   emplioPrompt({
     rules: agentRules(ctx, round ? HEARTBEAT : undefined),
-    computer: sandboxPrompt(round ? { ...session, automation: true, thinker: true, watched: false } : session),
+    computer: sandboxPrompt(round ? { ...session, automation: true, thinker: true, background: true, watched: false } : session),
     team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
     connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
     business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
     userName: ctx.userName,
     personal: "Runs the shop. Prefers short answers. Hindi or English.",
     skills: b.skills?.length ? b.skills : ["(none yet)"],
+    // a background round hands nothing off (chat.ts)
+    agent: round,
   }),
   "This chat's id is ab12cd34.",
   ...(round ? [] : [mainChatNote(ctx)]),
@@ -64,7 +66,7 @@ const note = (b: Business) =>
 
 // messages: the reply as the chat keeps it (its commands and their results), for chats that go on (workday)
 // usage: what the reply took, all its steps (cost: what OpenRouter charged, in dollars)
-export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number } };
+export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number }; steps?: number };
 
 // One command Emplio already ran in this reply, for chats that start mid-work.
 let calls = 0;
@@ -242,7 +244,7 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   };
   // EVAL_USAGE=<file>: every reply's cost, tokens and steps, one JSON line each, to add up a run (both modes)
   if (process.env.EVAL_USAGE) appendFileSync(process.env.EVAL_USAGE, `${JSON.stringify({ ...usage, steps: steps.length, commands: commands.length, ms: Date.now() - began })}\n`);
-  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage };
+  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage, steps: steps.length };
 }
 
 // ---- code mode: the real Python session on a stand-in computer (code/fake.py) ----
