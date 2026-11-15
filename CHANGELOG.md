@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.49 (2026-11-15)
+
+### What's new
+
+- Emplio for iPhone is on the Downloads page: join early access through TestFlight, with three simple steps and a code to scan from your computer.
+
+### For developers
+
+- Downloads page iPhone card with the TestFlight invite and QR code; the Downloads menu links to it (cloud #28).
+
 ## 1.2.48 (2026-11-15)
 
 ### What's new
