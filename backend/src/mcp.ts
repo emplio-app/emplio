@@ -566,7 +566,8 @@ export async function mcpRoutes(app: FastifyInstance) {
     try {
       await auth(provider(row, st.u, { base: st.base }), { serverUrl: row.url, authorizationCode: req.query.code });
     } catch (error) {
-      return page(`Sign-in to ${row.name} failed: ${error instanceof Error ? error.message : "something went wrong"}.`);
+      // some servers send no reason (Hostinger: just "invalid_grant"), which read as "failed: ."
+      return page(`Sign-in to ${row.name} failed: ${(error instanceof Error && error.message) || "the server turned it down"}. Start it again from the chat.`);
     }
     tools.delete(row.id);
     record({ workspaceId: st.w, userId: st.u, kind: "connection", summary: `Signed in to MCP server ${row.name}` });
