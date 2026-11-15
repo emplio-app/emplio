@@ -2,6 +2,22 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.48 (2026-11-15)
+
+### What's new
+
+- Messages you send while Emplio or an agent is working no longer disappear from the chat, and ones waiting their turn stay put if you open another chat or reload.
+- Agents cut off by a server update now pick their work back up by themselves, so you don't have to ask them to start again.
+- When Emplio gives an agent more work, its card no longer shows the agent's previous answer as if it were finished.
+- Signing in to an app from the Mac app works again, instead of failing with an empty message.
+- The search box is ready to type in as soon as Integrations opens.
+
+### For developers
+
+- Chat view skips the "reply already ended" reload when it lacks the newest sent message; the waiting-in-line queue is kept in local draft storage; `addMessage` moves `headId` only on insert (#173).
+- Depth-1 jobs still working at startup get one automatic carry-on run (20 s after start); a job's latest run reads `working` until the job finishes after its prompt (#173).
+- In the desktop app the Connect button no longer falls back to navigating, which started a second OAuth flow and overwrote the first's PKCE verifier (#177). Integrations search autofocus (#176).
+
 ## 1.2.47 (2026-11-15)
 
 ### What's new
