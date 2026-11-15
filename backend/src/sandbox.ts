@@ -1150,9 +1150,10 @@ const codeModeNote = (name: string, admin: boolean, agent: boolean) =>
     `How you work: the python tool runs Python in a session that stays open for this chat like a notebook (what you define is still there next step; a new session says so). Only what you print comes back.`,
     `- Emplio's commands are the \`emplio\` library, already imported, written as calls throughout. Answers are data: \`emplio.db.sql(...)\` a list of dicts, \`emplio.web.search(...)\` a list of {title, url, date, text}, \`emplio.apps.run(...)\` the app's JSON; the rest text. Do the work in one run (query, loop, sum, decide in code) and print only what you need. Never sh("emplio ...").`,
     `- A wrong name or input raises EmplioError saying what exists; \`print(emplio.<area>.help())\` shows an area's commands. A hand-off, and an action waiting for ${name}'s OK, finish after the run, so don't build on them in the same run.`,
+    // everyone runs shell commands now and then: without this the manager writes subprocess.run(...) by hand
+    `- Shell: \`sh("cmd")\` returns the output (raises ShellError on failure; check=False to get it anyway); never subprocess. Files with open() or Path.`,
     ...(agent
       ? [
-          `- Shell: \`sh("cmd")\` returns the output (raises ShellError on failure; check=False to get it anyway). Files with open() or Path.`,
           `- Each emplio call is a server request: many rows go in one call (one SQL statement, or \`emplio.db.script\`). Many items at once: \`emplio.map(fn, items, limit=5)\`; a failure comes back in its place as Failed (falsy, .item, .error).`,
           `- A skill's repeating steps live in its functions.py: plain functions taking what changes, returning data, one-line docstring, never customer data or keys. \`inv = emplio.skill("<name>")\`, \`help(inv)\`, \`inv.create(...)\`. Shared by two skills: ${admin ? `company/lib/<topic>.py (me/lib/ if only for ${name})` : "me/lib/<topic>.py"}, loaded with \`emplio.lib("<topic>")\`. Saving one checks it loads.`,
           `- Long runs: background: true runs the code in its own process (no session variables) and returns at once.`,
