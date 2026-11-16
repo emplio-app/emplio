@@ -948,10 +948,17 @@ export async function jobRoutes(app: FastifyInstance) {
   });
 
   // out of the sidebar; its line in the chat still opens it
+  // Close: out of the sidebar. A job waiting on an answer stops waiting too (status stopped), so its line over the chat
+  // box goes and Emplio no longer expects its report; a job still working carries on.
   app.post<{ Params: { id: string } }>("/jobs/:id/close", { schema: { params } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    await db.update(jobs).set({ openedAt: null }).where(owned(req.params.id, ctx));
+    const [w] = await db.update(jobs).set({ openedAt: null }).where(owned(req.params.id, ctx)).returning({ status: jobs.status });
+    if (w?.status === "asking") {
+      await db.update(jobs).set({ status: "stopped" }).where(and(owned(req.params.id, ctx), eq(jobs.status, "asking")));
+      owed.delete(req.params.id);
+      untold.delete(req.params.id);
+    }
     return { ok: true };
   });
 }
