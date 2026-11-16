@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { GONE_NOTE, attach, cdpToken, cdpUrlOf, cdpTokenOk, deviceFor, localBox, rpc, type Socket } from "./devices";
+import { GONE_NOTE, PART, attach, cdpToken, cdpUrlOf, cdpTokenOk, deviceFor, localBox, rpc, type Socket } from "./devices";
 
 process.env.ENCRYPTION_KEY ??= "test-key-test-key-test-key-test-key";
 
@@ -112,8 +112,44 @@ describe("devices", () => {
     a.say({ id: 1, ok: true, r: {} });
     await w;
     const r = box.readText("/work/a.txt");
-    a.say({ id: 2, ok: true, r: { b64: Buffer.from("back").toString("base64") } });
+    await Bun.sleep(0);
+    expect(a.sent[1]).toMatchObject({ m: "run", p: { command: "wc -c < '/work/a.txt'" } });
+    a.say({ id: 2, ok: true, r: { exitCode: 0, result: "4\n" } });
+    await Bun.sleep(0);
+    a.say({ id: 3, ok: true, r: { b64: Buffer.from("back").toString("base64") } });
     expect(await r).toBe("back");
+    a.drop();
+  });
+
+  test("a big file crosses in parts, so pings still get through between them", async () => {
+    const a = fake();
+    // the computer's end: keeps written files, runs the few commands parts use
+    const files = new Map<string, Buffer>();
+    a.socket.send = (d) => {
+      const { id, m, p } = JSON.parse(d);
+      a.sent.push({ m, p });
+      let r: unknown;
+      if (m === "write") files.set(p.path, Buffer.from(p.b64, "base64")), (r = {});
+      else {
+        const c = p.command as string;
+        const name = (s: string) => s.replace(/^'|'$/g, "");
+        let x: RegExpMatchArray | null;
+        if ((x = c.match(/^wc -c < (\S+)$/))) r = { exitCode: 0, result: `${files.get(name(x[1]!))!.length}\n` };
+        else if ((x = c.match(/^tail -c \+(\d+) (\S+) \| head -c (\d+) \| base64$/)))
+          r = { exitCode: 0, result: files.get(name(x[2]!))!.subarray(+x[1]! - 1, +x[1]! - 1 + +x[3]!).toString("base64") };
+        else if ((x = c.match(/^cat (.+) > (\S+)$/))) files.set(name(x[2]!), Buffer.concat(x[1]!.split(" ").map((f) => files.get(name(f))!))), (r = { exitCode: 0, result: "" });
+        else if (c.startsWith("rm -f ")) c.slice(6).split(" ").forEach((f) => files.delete(name(f))), (r = { exitCode: 0, result: "" });
+      }
+      queueMicrotask(() => a.say({ id, ok: true, r }));
+    };
+    const box = localBox(attach(dev("66666666-1111-1111-1111-111111111111", "u8"), a.socket), "w1");
+    const big = new Uint8Array(PART * 2 + 5).map((_, i) => i % 251);
+    await box.write("/work/out/take.wav", big);
+    expect(Math.max(...a.sent.map((m) => JSON.stringify(m).length))).toBeLessThan(PART * 1.5);
+    expect([...files.keys()]).toEqual(["/work/out/take.wav"]);
+    a.sent.length = 0;
+    expect(await box.read("/work/out/take.wav")).toEqual(big);
+    expect(Math.max(...a.sent.map((m) => JSON.stringify(m).length))).toBeLessThan(PART);
     a.drop();
   });
 
