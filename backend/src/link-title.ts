@@ -26,8 +26,14 @@ export function isPrivate(ip: string): boolean {
       (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19));
   }
   const v6 = ip.toLowerCase();
+  // an IPv4 address dressed as IPv6, dotted (::ffff:127.0.0.1) or as URL parsing writes it (::ffff:7f00:1)
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6);
   if (mapped) return isPrivate(mapped[1]!);
+  const hex = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v6);
+  if (hex) {
+    const [hi, lo] = [parseInt(hex[1]!, 16), parseInt(hex[2]!, 16)];
+    return isPrivate(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
   return v6 === "::" || v6 === "::1" || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6) || v6.startsWith("ff");
 }
 
