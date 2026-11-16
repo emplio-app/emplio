@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.55 (2026-11-16)
+
+### What's new
+
+- When a helper finishes a job, it now saves how it did it as a skill with reusable steps, so the same kind of job is quicker next time.
+
+### For developers
+
+- jobs.ts: a finished job that didn't save or use a skill's functions.py is asked once to save one before its report (#192).
+
 ## 1.2.54 (2026-11-16)
 
 ### What's new
