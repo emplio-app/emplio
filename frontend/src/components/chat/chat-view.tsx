@@ -1170,8 +1170,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
             {job ? (
-              // an agent's chat: the agent's name in full, and under it the chat that started it, one tap back.
-              // The job's long title would crowd the name out; it's the first message below, and on hover here.
+              // an agent's chat: the agent's name in full, then the job's title in grey taking whatever room is left (it
+              // used to squeeze the name to "Reddit …"), and under them the chat that started it, one tap back
               <>
                 {job.from && (
                   <Link
@@ -1183,7 +1183,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Link>
                 )}
                 <div className="flex min-w-0 flex-col justify-center px-1 leading-tight" title={job.name}>
-                  <h1 className="truncate font-sans text-sm font-medium tracking-normal">{job.agent ?? job.name}</h1>
+                  <h1 className="flex min-w-0 items-baseline gap-1.5 font-sans text-sm font-medium tracking-normal">
+                    <span className="max-w-[70%] shrink-0 truncate">{job.agent ?? job.name}</span>
+                    {job.agent && <span className="min-w-0 truncate font-normal text-muted-foreground">· {job.name}</span>}
+                  </h1>
                   {job.from && (
                     <Link href={`/chat/${job.from.id}`} className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline">
                       Started from {job.from.title}
