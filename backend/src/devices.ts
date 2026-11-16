@@ -93,11 +93,13 @@ export const whenReplied = (fn: typeof onReply) => void (onReply = fn);
 export function attach(device: { id: string; userId: string; name: string; platform?: string }, socket: Socket, now = Date.now()): Conn {
   const old = online.get(device.id);
   const conn: Conn = { ...device, socket, next: 0, pending: new Map(), cdp: new Map(), mcp: new Map(), alive: true, since: now };
-  online.set(device.id, conn);
+  // let go of the old one before the new one takes its place: drop() ignores a connection that's no longer the device's,
+  // which left the old one "alive", its commands and browser links waiting on a socket nobody reads
   if (old) {
     drop(old);
     old.socket.close(4000, "replaced");
   }
+  online.set(device.id, conn);
   let heard = Date.now();
   const timer = setInterval(() => {
     if (Date.now() - heard > SILENT_MS) return socket.terminate();

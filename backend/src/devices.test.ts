@@ -90,6 +90,19 @@ describe("devices", () => {
     await expect(box.keepAwake(1)).rejects.toThrow();
   });
 
+  test("a computer that reconnects lets go of its old connection: commands sent on it end at once", async () => {
+    const a = fake();
+    const old = attach(dev("55555555-1111-1111-1111-111111111111", "u7"), a.socket);
+    const ran = localBox(old, "w1").run("sleep 100", { cwd: "/work", timeoutMs: 60_000 });
+    const b = fake();
+    attach(dev("55555555-1111-1111-1111-111111111111", "u7"), b.socket);
+    expect(await ran).toEqual({ exitCode: 125, result: GONE_NOTE });
+    // the old one's box refuses to be kept awake, so sandbox.ts takes the new connection's
+    await expect(localBox(old, "w1").keepAwake(1)).rejects.toThrow();
+    expect(deviceFor("u7")?.socket).toBe(b.socket);
+    b.drop();
+  });
+
   test("files cross as base64", async () => {
     const a = fake();
     const conn = attach(dev("44444444-1111-1111-1111-111111111111", "u6"), a.socket);

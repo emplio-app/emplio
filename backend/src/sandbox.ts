@@ -2262,7 +2262,11 @@ type BoxResult = Record<string, unknown> & { jobCalls?: string[][]; key?: string
 // The command holds the person's computer while it runs. What it asked of Emplio (app actions, which can wait
 // on their OK for minutes) runs after, with the computer free, so their other chats and saves don't wait on it.
 async function runInBox(s: Session, command: string, background: boolean, signal?: AbortSignal, job = false): Promise<BoxResult> {
+  // where a command's time goes before it runs, logged when it's slow (a command stuck before reaching the computer)
+  const asked = Date.now();
+  let inLine = 0;
   const ran = await withRoom(boxKey(s), MAX_COMMANDS, async () => {
+    inLine = Date.now();
     if (signal?.aborted) return null;
     const box = await sandboxFor(s);
     const switched = computerChanged(s, box);
@@ -2355,6 +2359,9 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     commandStarted(boxKey(s));
     return { box, switched, browserId, env, git };
   });
+  const ready = Date.now();
+  if (ready - asked > 5_000)
+    console.warn(`slow command start in chat ${s.conversationId}: ${Math.round((inLine - asked) / 1000)}s waiting its turn (${commandsOn(boxKey(s))} running), ${Math.round((ready - inLine) / 1000)}s getting the computer ready (${ran?.box.id ?? "none"})`);
   if (!ran) return { stopped: true };
   const { box, browserId } = ran;
   let result = ran.result;
@@ -2362,6 +2369,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   if (!result) {
     const answering = liveFor(s, box, key, job, false);
     const done = await exec(box, `${command}${requestsTrailer(key)}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
+    if (done.exitCode === 124 || done.exitCode === 125) console.warn(`command in chat ${s.conversationId} ended ${done.exitCode} on ${box.id} after ${Math.round((Date.now() - ready) / 1000)}s`);
     const bag = liveDone(answering?.token);
     // Too much at once (two npm installs on 1 GB, say) can freeze a computer: then nothing answers, not even `true`.
     // Swapped now, not on the next reply, so this reply's next command gets a fresh one instead of failing too.
