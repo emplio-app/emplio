@@ -685,8 +685,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     const keep = () => void (el.clientHeight === height && (below = el.scrollHeight - el.scrollTop - height));
     const observer = new ResizeObserver(() => {
       const pin = Date.now() - pinnedAt.current < 1500 && el.querySelector<HTMLElement>("[data-pin]");
+      // a message being edited stays in view while the keyboard opens and the box grows: not the end of the chat
+      const editBox = el.querySelector<HTMLElement>("[data-editing]");
       // ponytail: a phone's composer and keyboard settle right after sending
-      if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
+      if (editBox) editBox.scrollIntoView({ block: "nearest" });
+      else if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
       else if (stuck.current) el.scrollTop = el.scrollHeight;
       // only when it did change: setting the position, even to the same value, ends a flick on an iPhone
       else if (el.clientHeight !== height) el.scrollTop = el.scrollHeight - el.clientHeight - below;
@@ -894,7 +897,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         {fromEmplio && <span className="self-end text-xs text-muted-foreground">Emplio</span>}
         {message.role === "user" && <MessageAttachments parts={filesOf(message)} />}
         {editing === message.id ? (
-          <div className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
+          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
             <textarea
               autoFocus
               // cursor after the text, ready to go on typing
@@ -955,6 +958,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 ? () => {
                     setEditText(userFacingText(text));
                     setEditing(message.id);
+                    // stay on the message being edited, not the end of the chat
+                    stuck.current = false;
+                    requestAnimationFrame(() => document.querySelector("[data-editing]")?.scrollIntoView({ block: "nearest" }));
                   }
                 : undefined
             }
