@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.51 (2026-11-16)
+
+### What's new
+
+- Commands on your Mac no longer get stuck for minutes after the Emplio app reconnects (after waking, a network change, an app update or an Emplio update). They run straight away on the new connection.
+
+### For developers
+
+- devices.ts: a reconnecting computer's old connection is dropped before the new one takes its place, so its pending commands and browser links end at once instead of waiting out their timeout (#183).
+- sandbox.ts: logs a command that takes over 5 s to reach its computer (time waiting its turn vs. getting the computer ready), and one that ends by timeout or a lost computer (#183).
+
 ## 1.2.50 (2026-11-16)
 
 ### What's new
