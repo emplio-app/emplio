@@ -538,6 +538,12 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     scroll-behavior: smooth;
   }
 }
+/* the empty chat's category chips (first-run.tsx JobCards): a bar that fills, then the next category shows */
+@keyframes chip-fill {
+  from {
+    transform: scaleX(0);
+  }
+}
 @keyframes marquee {
   to {
     transform: translateX(calc(-50% - 1.25rem));
