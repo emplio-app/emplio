@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -659,7 +659,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const [viewportHeight, setViewportHeight] = useState(0);
   // when a just-sent prompt was scrolled to the top: for a moment after, size changes keep it there
   const pinnedAt = useRef(0);
-  const lastUserIdx = messages.findLastIndex((m) => m.role === "user");
+  const lastUserIdx = messages.findLastIndex((m) => m.role === "user" && !isHidden(m));
   const contentRef = useRef<HTMLDivElement>(null);
   // reading at the very end of an opened chat (not a just-sent prompt): the end stays in view as what's
   // there finishes drawing (code highlighting, images, diagrams), not just the instant it was opened
@@ -731,7 +731,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // one block per prompt + its reply; stable keys so earlier turns never remount (and jump) on send
   const turns: { key: string; start: number; items: UIMessage[] }[] = [];
   messages.forEach((m, i) => {
-    if (m.role === "user" || turns.length === 0) turns.push({ key: m.id, start: i, items: [] });
+    // a hidden nudge (shared isHidden) carries on the turn before it
+    if ((m.role === "user" && !isHidden(m)) || turns.length === 0) turns.push({ key: m.id, start: i, items: [] });
     turns[turns.length - 1].items.push(m);
   });
   // opened from a search result: all of it, so the message is there to show
@@ -823,6 +824,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   };
 
   const renderMessage = (message: UIMessage, i: number) => {
+    if (isHidden(message)) return null;
     const isLast = i === messages.length - 1;
     const text = textOf(message);
     // when it was said, where the chat picks up after a while or the AI wrote on its own (a check-in, a task's
@@ -922,7 +924,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               thinking(message)
             ) : (
               <>
-                <ReplyContext value={messages[i + 1]?.role === "user" ? userFacingText(textOf(messages[i + 1]!)) : undefined}>
+                <ReplyContext value={messages[i + 1]?.role === "user" && !isHidden(messages[i + 1]!) ? userFacingText(textOf(messages[i + 1]!)) : undefined}>
                   <AssistantParts
                     message={message}
                     streaming={isLast && status === "streaming"}

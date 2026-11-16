@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -289,7 +289,7 @@ async function began(w: Row, stop: () => void) {
       live.delete(w.id);
       track(w.id).done.then(e.end);
       const told = owed.has(w.id);
-      void send(w, SAVE_SKILL);
+      void send(w, SAVE_SKILL, undefined, true);
       if (!told) owed.delete(w.id);
       return;
     }
@@ -333,11 +333,11 @@ export function cardsIn(chunk: { type: string; output?: unknown }, shown: Set<st
 // A message to the job from whoever started it, as the next message in its chat: after the reply running there,
 // if one is (steered: it wraps up after its current command).
 // `run`: the prompt's message id, which marks the run in the job's chat (runOf)
-async function send(w: Row, text: string, run = generateId()) {
+async function send(w: Row, text: string, run = generateId(), hidden = false) {
   const e = track(w.id);
   if (w.depth === 1) owed.add(w.id);
   const person = await personFor(w.workspaceId, w.userId);
-  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }] };
+  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }, ...(hidden ? [{ type: HIDDEN_PART, data: true } as const] : [])] as UIMessage["parts"] };
   const log = { error: (obj: unknown, msg: string) => console.error(`job ${w.id}: ${msg}`, obj) };
   let error: string | null = null;
   try {
