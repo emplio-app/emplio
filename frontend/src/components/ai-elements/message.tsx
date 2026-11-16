@@ -345,8 +345,6 @@ const components = {
   a: ({ children, ...props }: ComponentProps<NonNullable<typeof defaultComponents.a>>) => {
     const A = defaultComponents.a!;
     const href = props.href ?? "";
-    // an email or phone number the markdown turned into a link stays plain text, not a link chip
-    if (/^(mailto|tel):/i.test(href)) return <>{children}</>;
     const label = <ShortLink href={href}>{bare(children, href) ? undefined : children}</ShortLink>;
     const inside = ownPath(href);
     if (inside) return <Link href={inside} className="no-underline hover:underline">{label}</Link>;
