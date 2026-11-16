@@ -57,8 +57,15 @@ type BashPart = {
   preliminary?: boolean;
 };
 
+// a stretch of the model's thinking, and how long it took
+type ThoughtPart = { thought: string; thinking: boolean; ms?: number };
+const isThought = (x: BashPart | ThoughtPart): x is ThoughtPart => "thought" in x;
+const lastTool = (steps: (BashPart | ThoughtPart)[]) => steps.findLast((t): t is BashPart => !isThought(t));
+
 // Text and commands in the order the agent produced them: consecutive text merges into one reply block,
-// consecutive commands fold behind one line (until one asked for an OK).
+// consecutive commands fold behind one line (until one asked for an OK). Thinking between commands goes in that
+// fold with them, so a long job is one line, not Thought / Ran / Thought / Ran…; thinking with no command next to it
+// stays its own line.
 export function AssistantParts({
   message,
   streaming,
@@ -68,21 +75,44 @@ export function AssistantParts({
   streaming: boolean;
   renderText: (text: string, streaming: boolean) => ReactNode;
 }) {
-  const segments: ({ text: string } | { tools: BashPart[] } | { said: string[] })[] = [];
+  const built: ({ text: string } | { tools: BashPart[] } | { said: string[] } | ThoughtPart)[] = [];
   for (const p of message.parts) {
-    const last = segments.at(-1);
-    if (p.type === "text") {
+    const last = built.at(-1);
+    if (p.type === "reasoning") {
+      if (!p.text.trim()) continue;
+      // how long it took (backend chat.ts timeThinking): on a saved reply as ms, while it streams in the provider's data
+      const took = (p as { ms?: number }).ms ?? (p.providerMetadata?.emplio as { ms?: number } | undefined)?.ms;
+      if (last && "thought" in last) {
+        last.thought += "\n\n" + p.text;
+        last.thinking = p.state === "streaming";
+        if (took !== undefined) last.ms = (last.ms ?? 0) + took;
+      } else built.push({ thought: p.text, thinking: p.state === "streaming", ms: took });
+    } else if (p.type === "text") {
       if (!p.text.trim()) continue;
       if (last && "text" in last) last.text += "\n\n" + p.text;
-      else segments.push({ text: p.text });
+      else built.push({ text: p.text });
     } else if (isStep(p.type) && !(p as unknown as BashPart).output?.refused) {
       // an approval card ends the run, so what came after it shows below it, in order
       if (last && "tools" in last && !last.tools.at(-1)!.output?.approvals?.length) last.tools.push(p as unknown as BashPart);
-      else segments.push({ tools: [p as unknown as BashPart] });
+      else built.push({ tools: [p as unknown as BashPart] });
       // what the person sent meanwhile shows where the agent read it, as their own message
       const said = (p as unknown as BashPart).output?.messagesFromPerson;
-      if (said?.length) segments.push({ said: said.map((m) => m.text) });
+      if (said?.length) built.push({ said: said.map((m) => m.text) });
     }
+  }
+  // thinking right after a run of commands joins that run, and so do the commands after it; thinking just before a
+  // run leads it
+  const segments: ({ text: string } | { steps: (BashPart | ThoughtPart)[] } | { said: string[] } | ThoughtPart)[] = [];
+  for (const b of built) {
+    const prev = segments.at(-1);
+    // a run that ended asking for an OK takes nothing more: what follows shows below its card
+    const open = prev && "steps" in prev && !lastTool(prev.steps)?.output?.approvals?.length ? prev : null;
+    if ("tools" in b) {
+      if (open) open.steps.push(...b.tools);
+      else if (prev && "thought" in prev) segments[segments.length - 1] = { steps: [prev, ...b.tools] };
+      else segments.push({ steps: [...b.tools] });
+    } else if ("thought" in b && open) open.steps.push(b);
+    else segments.push(b);
   }
   // one checklist card per reply: where the agent first made it, showing its latest state
   const planned = message.parts.filter((p) => isStep(p.type) && (p as unknown as BashPart).output?.plan) as unknown as BashPart[];
@@ -90,7 +120,9 @@ export function AssistantParts({
   const planAt = planned[0]?.toolCallId;
   return segments.map((s, i) => {
     const isLast = i === segments.length - 1;
-    return "said" in s ? (
+    return "thought" in s ? (
+      <Thought key={i} text={s.thought} thinking={streaming && isLast && s.thinking} ms={s.ms} />
+    ) : "said" in s ? (
       s.said.map((text, j) => (
         <p key={`${i}-${j}`} className="ml-auto max-w-[85%] rounded-2xl bg-secondary px-4 py-2.5 text-[0.9rem] leading-relaxed font-medium whitespace-pre-wrap">
           {text}
@@ -99,12 +131,56 @@ export function AssistantParts({
     ) : "text" in s ? (
       <Fragment key={i}>{renderText(s.text, streaming && isLast)}</Fragment>
     ) : (
-      <Fragment key={s.tools[0].toolCallId}>
-        {plan && s.tools.some((t) => t.toolCallId === planAt) && <PlanCard steps={plan} live={streaming} />}
-        <Actions tools={s.tools} streaming={streaming} live={streaming && isLast && s.tools.some(isPending)} />
+      <Fragment key={s.steps.find((t): t is BashPart => !isThought(t))?.toolCallId ?? i}>
+        {plan && s.steps.some((t) => !isThought(t) && t.toolCallId === planAt) && <PlanCard steps={plan} live={streaming} />}
+        <Actions
+          steps={s.steps}
+          streaming={streaming}
+          live={streaming && isLast && s.steps.some((t) => (isThought(t) ? t.thinking : isPending(t)))}
+        />
       </Fragment>
     );
   });
+}
+
+// The model's thinking: open while it thinks, folded to one "Thought" line once it's done; a tap opens it again.
+// "Thought for 4s", "Thought for 1m 12s"; replies from before it was timed just say "Thought"
+const tookFor = (ms?: number) => {
+  if (ms === undefined) return "Thought";
+  const s = Math.max(1, Math.round(ms / 1000));
+  return `Thought for ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`}`;
+};
+
+// Light on old phones: the label pulses in opacity and the chevron turns (both drawn by the graphics chip, no repaint),
+// and folding is one short height-and-fade (grid rows 1fr → 0fr) instead of a JS animation. Reduced motion: instant.
+// The text stays mounted when folded so it can slide shut; while it streams it sticks to its newest line
+// (column-reverse keeps the scroll at the bottom with no script).
+function Thought({ text, thinking, ms }: { text: string; thinking: boolean; ms?: number }) {
+  const [open, setOpen] = useState<boolean | null>(null);
+  const shown = open ?? thinking;
+  return (
+    <div className="flex w-full min-w-0 flex-col">
+      <button
+        type="button"
+        onClick={() => setOpen(!shown)}
+        aria-expanded={shown}
+        className="flex w-full min-w-0 items-center gap-1.5 py-1 text-left text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${shown ? "rotate-90" : ""}`} />
+        <span className={thinking ? "animate-pulse motion-reduce:animate-none" : undefined}>{thinking ? "Thinking…" : tookFor(ms)}</span>
+      </button>
+      <div
+        inert={!shown}
+        className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${shown ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="mt-1.5 flex max-h-72 flex-col-reverse overflow-y-auto border-l pl-3 [contain:content]">
+            <p className="text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{text.trim()}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // still running: no output yet, or only an in-progress one (waiting on an approval card)
@@ -116,8 +192,9 @@ const label = (p: BashPart) =>
 
 // A run of commands behind one line: "Ran 3 actions". Open, it's each command.
 // Downloads stay outside the fold: they're what the user came for.
-function Actions({ tools, streaming, live }: { tools: BashPart[]; streaming: boolean; live: boolean }) {
+function Actions({ steps, streaming, live }: { steps: (BashPart | ThoughtPart)[]; streaming: boolean; live: boolean }) {
   const [open, setOpen] = useState(false);
+  const tools = steps.filter((t): t is BashPart => !isThought(t));
   const n = tools.length;
   const noun = n === 1 ? "action" : "actions";
   const saved = tools.flatMap((p) => p.output?.saved ?? []);
@@ -145,9 +222,13 @@ function Actions({ tools, streaming, live }: { tools: BashPart[]; streaming: boo
       </button>
       {open && (
         <div className="flex flex-col gap-1.5 border-l pl-3">
-          {tools.map((p) => (
-            <ToolCall key={p.toolCallId} part={p} streaming={streaming} />
-          ))}
+          {steps.map((p, i) =>
+            isThought(p) ? (
+              <Thought key={`t${i}`} text={p.thought} thinking={streaming && p.thinking} ms={p.ms} />
+            ) : (
+              <ToolCall key={p.toolCallId} part={p} streaming={streaming} />
+            ),
+          )}
         </div>
       )}
       {/* only the last run that used it: one way back to the panel, not one per run */}
@@ -286,6 +367,9 @@ function Job({ id, run }: { id: string; run?: string }) {
 // What a reply in progress is doing below its last line: the command running now (its label), or thinking.
 // Null while it's writing text.
 export const doing = (message?: UIMessage) => {
+  // the thinking line says it already
+  const end = message?.parts.at(-1);
+  if (end?.type === "reasoning" && end.state === "streaming") return null;
   const last = message?.parts.filter((p) => p.type === "text" || isStep(p.type)).at(-1) as
     | BashPart
     | { type: "text" }
@@ -299,6 +383,18 @@ export const doing = (message?: UIMessage) => {
 // A search or check that ended the command and found nothing (grep, test) exits 1: not a failure.
 const foundNothing = (p: BashPart) =>
   p.output?.exitCode === 1 && /(^|[;&|]\s*)(grep|egrep|rg|test|\[\[?)\s[^;&|]*$/.test(p.input?.command?.trim() ?? "") && p.type === "tool-bash";
+
+// Code in its colours, like an editor shows it (shiki, loaded the first time a step is opened). Plain text until then.
+// shiki escapes the code itself, so its HTML is safe to put in; globals.css .shiki-tokens picks the light or dark colour.
+function Coloured({ code, lang }: { code: string; lang: "python" | "bash" }) {
+  const { data: html } = useQuery({
+    queryKey: ["coloured", lang, code],
+    queryFn: async () =>
+      (await import("shiki")).codeToHtml(code, { lang, themes: { light: "github-light", dark: "github-dark" }, defaultColor: false, structure: "inline" }),
+    staleTime: Infinity,
+  });
+  return html ? <span className="shiki-tokens" dangerouslySetInnerHTML={{ __html: html }} /> : code;
+}
 
 // One command the agent ran in the sandbox: a line, click to see the output.
 function ToolCall({
@@ -354,8 +450,13 @@ function ToolCall({
           )}
           <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open/tool:rotate-90" />
         </summary>
-        <pre className="max-h-72 overflow-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground">
-          {p.input?.description && command && <span className="mb-2 block text-foreground">$ {command}</span>}
+        <pre className="max-h-72 overflow-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
+          {p.input?.description && command && (
+            <span className="mb-2 block text-foreground">
+              {p.type === "tool-bash" && "$ "}
+              <Coloured code={command} lang={p.type === "tool-python" ? "python" : "bash"} />
+            </span>
+          )}
           {running
             ? "Running…"
             : stopped

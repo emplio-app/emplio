@@ -22,6 +22,7 @@ import {
   Undo2Icon,
   UploadIcon,
   XIcon,
+  ArrowLeftIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -61,7 +62,7 @@ import { useMentionMenu } from "@/components/chat/mention-menu";
 import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
 import { AttachmentTray, MessageAttachments, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
 import { QuoteButton, QuoteChips, QuotedText, addQuote, withQuotes, type Quote } from "@/components/chat/quote";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -1169,10 +1170,27 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
             {job ? (
-              <h1 className="flex min-w-0 items-baseline gap-1.5 px-2 font-sans text-sm font-medium tracking-normal">
-                <span className="truncate">{job.agent ?? job.name}</span>
-                {job.agent && <span className="truncate font-normal text-muted-foreground">· {job.name}</span>}
-              </h1>
+              // an agent's chat: the agent's name in full, and under it the chat that started it, one tap back.
+              // The job's long title would crowd the name out; it's the first message below, and on hover here.
+              <>
+                {job.from && (
+                  <Link
+                    href={`/chat/${job.from.id}`}
+                    aria-label={`Back to ${job.from.title}`}
+                    className={buttonVariants({ variant: "ghost", size: "icon", className: "size-8 shrink-0 text-muted-foreground" })}
+                  >
+                    <ArrowLeftIcon />
+                  </Link>
+                )}
+                <div className="flex min-w-0 flex-col justify-center px-1 leading-tight" title={job.name}>
+                  <h1 className="truncate font-sans text-sm font-medium tracking-normal">{job.agent ?? job.name}</h1>
+                  {job.from && (
+                    <Link href={`/chat/${job.from.id}`} className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline">
+                      Started from {job.from.title}
+                    </Link>
+                  )}
+                </div>
+              </>
             ) : empty || !liveTitle ? (
               <h1 className="truncate px-2 font-sans text-sm font-medium tracking-normal">New chat</h1>
             ) : (
@@ -1193,7 +1211,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   }
                 >
                   <XIcon />
-                  Close
+                  {/* a phone needs the room for the agent's name */}
+                  <span className="max-sm:sr-only">Close</span>
                 </Button>
               )}
               {onTelegram && (
@@ -1259,7 +1278,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   onWheel={() => (pinnedAt.current = 0)}
                   onTouchStart={() => (pinnedAt.current = 0)}
                   role="log"
-                  className="relative flex-1 overflow-y-auto"
+                  // never sideways: a wide code block scrolls inside itself, the chat stays put (on a phone it felt like a web page)
+                  className="relative flex-1 overflow-x-hidden overflow-y-auto overscroll-x-none"
                 >
                   <QuoteButton
                     area={scrollRef}

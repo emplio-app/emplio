@@ -1,20 +1,32 @@
 "use client";
 
-import { LinkIcon } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { LinkIcon, MailIcon, PhoneIcon } from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from "react";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// A web address as a short highlighted link: the site and the start of the path, cut with … ("example.com/blog/how…").
+// A web address as a short highlighted link: the page's title once the server has read it ("Welcome to r/emplio"),
+// else the site and the start of the path, cut with … ("example.com/blog/how…"), as links to Emplio's own pages always are.
 // The cut-off start (https://www.) is still there for copying, only not shown; hovering shows the whole address.
+// The cap is in rem/vw, not %: a % cap is ignored when a sent-message bubble sizes itself, so it grew to the whole title.
 export const URL_PATTERN = /(https?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}])/;
 export function ShortLink({ href, children, className }: { href: string; children?: ReactNode; className?: string }) {
   const lead = /^https?:\/\/(www\.)?/.exec(href)?.[0] ?? "";
+  const { data: title } = useQuery({
+    queryKey: ["link-title", href],
+    queryFn: () => api<{ title: string | null }>(`/link-title?url=${encodeURIComponent(href)}`).then((r) => r.title),
+    enabled: children === undefined && !!lead && !ownPath(href),
+    staleTime: Infinity,
+    retry: false,
+  });
   return (
-    <span title={href} className={cn("inline-flex max-w-[min(100%,18rem)] items-baseline gap-1 rounded-sm bg-primary/10 px-1 align-bottom text-primary", className)}>
-      <LinkIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+    <span title={href} className={cn("inline-flex max-w-[min(18rem,70vw)] items-baseline gap-1 rounded-sm bg-primary/10 px-1 align-bottom text-primary", className)}>
+      {/* an email or phone number gets its own icon, so it doesn't read as a web link */}
+      {(/^mailto:/i.test(href) ? <MailIcon aria-hidden className="size-3.5 shrink-0 self-center" /> : /^tel:/i.test(href) ? <PhoneIcon aria-hidden className="size-3.5 shrink-0 self-center" /> : <LinkIcon aria-hidden className="size-3.5 shrink-0 self-center" />)}
       <span className="truncate">
-        {children ?? (
+        {children ?? title ?? (
           <>
             <span className="sr-only">{lead}</span>
             {href.slice(lead.length)}
@@ -25,13 +37,21 @@ export function ShortLink({ href, children, className }: { href: string; childre
   );
 }
 
-// Emplio's own pages (emplio.app, or a path like /chat/...): the path to open inside the app, else null.
-// Those open in the same tab with no outside-site question; other addresses are left as they are.
+// Emplio's own pages (emplio.app, the address this app is open on, or a path like /chat/...): the path to open inside
+// the app, else null. Those open in the same tab with no outside-site question; other addresses are left as they are.
+// On a computer at home or work, the app's own port on this machine or the local network counts too, so a
+// localhost link works when the app is open on 192.168.x.x and the other way round.
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[\w-]+\.local)$/;
 export function ownPath(href: string): string | null {
   if (href.startsWith("/") && !href.startsWith("//")) return href;
   try {
     const u = new URL(href);
-    if ((u.protocol === "https:" || u.protocol === "http:") && /^(www\.)?emplio\.app$/.test(u.hostname)) return u.pathname + u.search + u.hash;
+    const here = typeof window === "undefined" ? null : window.location;
+    const own =
+      /^(www\.)?emplio\.app$/.test(u.hostname) ||
+      u.host === here?.host ||
+      (!!here && u.port === here.port && LOCAL_HOST.test(u.hostname) && LOCAL_HOST.test(here.hostname));
+    if ((u.protocol === "https:" || u.protocol === "http:") && own) return u.pathname + u.search + u.hash;
   } catch {}
   return null;
 }

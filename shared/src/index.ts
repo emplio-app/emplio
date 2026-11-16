@@ -22,7 +22,8 @@ export type MeResponse = { user: User; workspaces: Workspace[] };
 // kind main: the person's main chat (the same one on their phone), listed first
 export type ConversationSummary = { id: string; title: string; updatedAt: string; running: boolean; unread: boolean; channel: "web" | "telegram"; kind: "chat" | "main"; archived: boolean };
 // A job's own chat, as GET /conversations/:id adds it: the job it is
-export type ChatJob = { id: string; name: string; agent: string | null; status: JobInfo["status"] };
+// from: the chat that started it, for the way back in its header (the main chat is called that, not by its title)
+export type ChatJob = { id: string; name: string; agent: string | null; status: JobInfo["status"]; from: { id: string; title: string } | null };
 export type UpdateConversationRequest = { title?: string; archived?: boolean };
 
 export type Role = Workspace["role"];

@@ -37,6 +37,7 @@ import { telegram } from "./channels/telegram";
 import { startTasks, taskRoutes } from "./tasks";
 import { importRoutes } from "./imports";
 import { madeRoutes } from "./made";
+import { linkTitleRoutes } from "./link-title";
 import { chargeSleptBoxes } from "./sandbox";
 import { releases, version } from "./changelog";
 
@@ -90,6 +91,7 @@ await app.register(agentRoutes);
 await app.register(channelRoutes);
 await app.register(taskRoutes);
 await app.register(madeRoutes);
+await app.register(linkTitleRoutes);
 await app.register(importRoutes);
 await app.register(cloud.browser.browserHostRoutes);
 await app.register(deviceRoutes);

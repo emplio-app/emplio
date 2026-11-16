@@ -845,7 +845,15 @@ export async function openJobChat(chatId: string, ctx: Pick<Ctx, "userId" | "wor
     .set({ openedAt: sql`coalesce(${jobs.openedAt}, now())` })
     .where(and(eq(jobs.chatId, chatId), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId)))
     .returning();
-  return w ? { id: w.id, name: w.name, agent: agentName(w.agent), status: w.status } : null;
+  if (!w) return null;
+  const from = await db.query.conversations.findFirst({ where: eq(conversations.id, w.conversationId), columns: { id: true, title: true, kind: true } });
+  return {
+    id: w.id,
+    name: w.name,
+    agent: agentName(w.agent),
+    status: w.status,
+    from: from ? { id: from.id, title: from.kind === "main" ? "Main chat" : from.title || "Chat" } : null,
+  };
 }
 
 export async function jobRoutes(app: FastifyInstance) {
