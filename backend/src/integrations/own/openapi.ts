@@ -163,7 +163,12 @@ export async function specActions(file: URL, api: Api): Promise<Record<string, O
       {
         description: a.description,
         readOnly: a.readOnly,
-        input: z.fromJSONSchema(a.input as z.core.JSONSchema.JSONSchema) as z.ZodObject,
+        // built on first use: thousands of zod schemas up front cost hundreds of MB (Wix, Cloudflare)
+        get input() {
+          const input = z.fromJSONSchema(a.input as z.core.JSONSchema.JSONSchema) as z.ZodObject;
+          Object.defineProperty(this, "input", { value: input });
+          return input;
+        },
         run: (i: Record<string, unknown>, key: string) => call(api, key, a.send, i),
       },
     ]),
