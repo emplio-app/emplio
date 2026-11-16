@@ -13,6 +13,7 @@
     "eval": "find evals -name '._*' -delete; bt eval --runner bun"
   },
   "dependencies": {
+    "@1password/sdk": "0.5.0",
     "@ai-sdk/anthropic": "^4.0.87",
     "@ai-sdk/google": "^4.0.104",
     "@ai-sdk/openai": "^4.0.101",

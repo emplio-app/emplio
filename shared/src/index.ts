@@ -68,7 +68,11 @@ export type ImportSource = keyof typeof IMPORT_SOURCES;
 export type ImportResult = { notes: number; chats: number; messages: number; made: number; sorting: boolean };
 export type LoginKind = "login" | "key";
 // fields: the labels a login was saved with ("Email", "Password"); username: the first one that isn't secret
-export type Login = { id: string; name: string; kind: LoginKind; site: string; username: string | null; fields: string[]; usedAt: string | null; createdAt: string };
+// from: where it's kept, when not in Emplio itself (read from there each time it's used, never copied)
+export type Login = { id: string; name: string; kind: LoginKind; site: string; username: string | null; fields: string[]; usedAt: string | null; createdAt: string; from?: "1password" };
+// Passwords & keys' 1Password bar: connected, how many of its items Emplio can use, how many it left out (no website)
+// connection: its id, to replace the token; keyField: the connect form
+export type OnePasswordStatus = { connection: string | null; label: string | null; items: number; skipped: number; error: string | null; keyField: KeyField };
 // a login: fields, label → what to type (whatever that site's sign-in page asks for); a key: value
 export type LoginInput = { name: string; kind: LoginKind; site: string; fields?: Record<string, string>; value?: string };
 // "Save a login" button the chat shows under a reply (emplio logins ask)
