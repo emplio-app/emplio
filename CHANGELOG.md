@@ -2,6 +2,24 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.56 (2026-11-17)
+
+### What's new
+
+- Links in the chat show the page's title instead of a long web address, with a mail or phone icon for email addresses and numbers. Links to Emplio's own pages open in place.
+- You can watch Emplio think: a "Thinking" line you can open, which folds itself away when it's done and says how long it took. Thinking between steps sits inside the steps list.
+- Code in a step's details is shown in colour.
+- The chat no longer slides sideways on phones or computers.
+- A helper's chat shows the helper's name, the job, and a link back to the chat that started it.
+- A job waiting for your answer can be stopped with ✕, or with Close inside the job.
+- Tapping Edit on a phone keeps the message you're editing in view.
+- Smaller fixes: a new chat's draft is kept, Copy copies the whole reply, a message isn't erased when a file upload fails, and long words wrap.
+- A job's chat no longer shows the reminder to save a skill.
+
+### For developers
+
+- link-title.ts: GET /link-title fetches a page's `<title>` for public addresses only (private, mapped and NAT64 IPv6 refused), with a byte cap and a day cache; chat.ts keeps reasoning parts and times them (`timeThinking`); jobs.ts `/jobs/:id/close` stops an asking job and `openJobChat` returns `from`; chat view and tool-calls changes (#193).
+
 ## 1.2.55 (2026-11-16)
 
 ### What's new
