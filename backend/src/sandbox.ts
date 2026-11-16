@@ -2265,17 +2265,25 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   // where a command's time goes before it runs, logged when it's slow (a command stuck before reaching the computer)
   const asked = Date.now();
   let inLine = 0;
+  const steps: string[] = [];
+  let last = 0;
+  const step = (name: string) => {
+    const now = Date.now();
+    if (now - last >= 500) steps.push(`${name} ${((now - last) / 1000).toFixed(1)}s`);
+    last = now;
+  };
   const ran = await withRoom(boxKey(s), MAX_COMMANDS, async () => {
-    inLine = Date.now();
+    inLine = last = Date.now();
     if (signal?.aborted) return null;
     const box = await sandboxFor(s);
+    step("computer");
     const switched = computerChanged(s, box);
     // first command of a reply: pick up what teammates (or the server, like an import) saved since. Per reply, not
     // per box: a reply starting while another chat's is mid-way in the same box must still catch up (with a command
     // running there, at its next command instead)
     if (!caughtUp.has(s)) {
       const quiet = !commandsOn(boxKey(s));
-      if (quiet) for (const r of reposFor(s)) await catchUp(box, s, r);
+      if (quiet) for (const r of reposFor(s)) await catchUp(box, s, r), step(`catch-up ${r.dir}`);
       // every reply, so boxes made before an emplio change get the current one
       await upload(box, `${WORK}/tmp/emplio`, EZ);
       await upload(box, POINTER_PATH, POINTER);
@@ -2283,6 +2291,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         await upload(box, KERNEL_PATH, KERNEL);
         await upload(box, `${WORK}/tmp/.emplio/py/emplio/__init__.py`, LIBRARY);
       }
+      step("emplio files");
       await mustExec(
         box,
         box.local
@@ -2299,10 +2308,12 @@ async function runInBox(s: Session, command: string, background: boolean, signal
                 : ""
             }`,
       );
+      step("install");
       if (quiet) caughtUp.add(s);
     }
     await copyAttachments(box, s);
     for (const f of takeShown(s.conversationId)) await upload(box, `${WORK}/tmp/${f.name}`, f.text);
+    step("attachments");
 
     // background rounds never drive a browser: slow and costly, and nobody is there for a sign-in or code
     if (s.background && usesBrowser(command))
@@ -2356,12 +2367,13 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       };
       return { box, switched, browserId, result };
     }
+    step("browser and git");
     commandStarted(boxKey(s));
     return { box, switched, browserId, env, git };
   });
   const ready = Date.now();
   if (ready - asked > 5_000)
-    console.warn(`slow command start in chat ${s.conversationId}: ${Math.round((inLine - asked) / 1000)}s waiting its turn (${commandsOn(boxKey(s))} running), ${Math.round((ready - inLine) / 1000)}s getting the computer ready (${ran?.box.id ?? "none"})`);
+    console.warn(`slow command start in chat ${s.conversationId}: ${Math.round((inLine - asked) / 1000)}s waiting its turn (${commandsOn(boxKey(s))} running), ${Math.round((ready - inLine) / 1000)}s getting the computer ready (${ran?.box.id ?? "none"}${steps.length ? `: ${steps.join(", ")}` : ""})`);
   if (!ran) return { stopped: true };
   const { box, browserId } = ran;
   let result = ran.result;
