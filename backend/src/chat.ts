@@ -158,16 +158,36 @@ export const pageStart = (path: { role: string }[], end: number, limit: number) 
   return from;
 };
 
+// How long each stretch of thinking took ("Thought for 4s"), on the part itself: stamped on its end as
+// providerMetadata.emplio.ms, so the live reply and the saved one both carry it. The provider's own metadata stays,
+// from the start or the end (the end's would replace the start's otherwise), for replaying to the model.
+type Meta = Record<string, Record<string, unknown>> | undefined;
+export const timeThinking = <C extends { type: string; id?: string; providerMetadata?: Meta }>() => {
+  const started = new Map<string, { at: number; meta: Meta }>();
+  return new TransformStream<C, C>({
+    transform(chunk, out) {
+      if (chunk.type === "reasoning-start" && chunk.id) started.set(chunk.id, { at: Date.now(), meta: chunk.providerMetadata });
+      if (chunk.type === "reasoning-end" && chunk.id && started.has(chunk.id)) {
+        const { at, meta } = started.get(chunk.id)!;
+        started.delete(chunk.id);
+        chunk = { ...chunk, providerMetadata: { ...meta, ...chunk.providerMetadata, emplio: { ms: Date.now() - at } } };
+      }
+      out.enqueue(chunk);
+    },
+  });
+};
+
 type ScreenPart = { type: string; input?: { command?: unknown; [key: string]: unknown }; output?: { output?: unknown; [key: string]: unknown }; [key: string]: unknown };
 const tooLong = (text: unknown): text is string => typeof text === "string" && text.length > LOG_KEPT;
 
-// A message's parts as the screen needs them. Off the wire: the model's reasoning, which is never shown, the provider's
-// data for replaying to the model (most of a long chat's size), and long logs; `cut` says where to ask for those.
+// A message's parts as the screen needs them. Off the wire: the provider's data for replaying to the model (most of a
+// long chat's size), empty thinking (some models only send it sealed), and long logs; `cut` says where to ask for those.
 export const forScreen = (id: string, parts: ScreenPart[]) =>
   parts
-    .filter((p) => p.type !== "reasoning")
-    .map(({ callProviderMetadata: _call, resultProviderMetadata: _result, providerMetadata: _provider, ...p }) => {
-      const part = p as ScreenPart;
+    .filter((p) => p.type !== "reasoning" || (typeof p.text === "string" && p.text.trim()))
+    .map(({ callProviderMetadata: _call, resultProviderMetadata: _result, providerMetadata, ...p }) => {
+      const ms = (providerMetadata as Meta)?.emplio?.ms;
+      const part = (typeof ms === "number" ? { ...p, ms } : p) as ScreenPart;
       // code mode's parts carry code where bash's carry a command
       const field = part.input && "code" in part.input ? "code" : "command";
       const command = part.input?.[field];
@@ -1093,7 +1113,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     }).catch((error) => log.error(error, "saving reply failed")));
 
   const stream = toUIMessageStream({
-    stream: result.stream,
+    stream: result.stream.pipeThrough(timeThinking()),
     originalMessages: history,
     // server-side ids so the saved message matches what the client sees
     generateMessageId: generateId,

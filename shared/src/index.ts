@@ -22,7 +22,8 @@ export type MeResponse = { user: User; workspaces: Workspace[] };
 // kind main: the person's main chat (the same one on their phone), listed first
 export type ConversationSummary = { id: string; title: string; updatedAt: string; running: boolean; unread: boolean; channel: "web" | "telegram"; kind: "chat" | "main"; archived: boolean };
 // A job's own chat, as GET /conversations/:id adds it: the job it is
-export type ChatJob = { id: string; name: string; agent: string | null; status: JobInfo["status"] };
+// from: the chat that started it, for the way back in its header (the main chat is called that, not by its title)
+export type ChatJob = { id: string; name: string; agent: string | null; status: JobInfo["status"]; from: { id: string; title: string } | null };
 export type UpdateConversationRequest = { title?: string; archived?: boolean };
 
 export type Role = Workspace["role"];
@@ -206,6 +207,9 @@ export const JOB_NOTE_PREFIX = "[From a job] ";
 // In a job's own chat: a message from Emplio (its brief, or a follow-up); the rest are the person's, written to it
 // directly. Shown with an "Emplio" label.
 export const FROM_EMPLIO = "[From Emplio] ";
+// A part on a message that only the AI reads (a nudge to the AI from the server): the chat doesn't show it.
+export const HIDDEN_PART = "data-hidden";
+export const isHidden = (m: { parts: { type: string }[] }) => m.parts.some((p) => p.type === HIDDEN_PART);
 // the same, in chats from before jobs were called workers
 export const WORKERS_DONE_PREFIX = "[Workers done] ";
 // A reply a server restart cut off, carried on once it's back (resume.ts); shown as "Picked up after a restart".

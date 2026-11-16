@@ -631,3 +631,7 @@ html[data-desktop]:not([data-desktop="darwin"]) [data-slot="sidebar-inset"] head
     block-size: auto;
   }
 }
+
+/* coloured code in a step's details (tool-calls.tsx Coloured): shiki writes both themes' colours, this picks one */
+.shiki-tokens span { color: var(--shiki-light); }
+.dark .shiki-tokens span { color: var(--shiki-dark); }

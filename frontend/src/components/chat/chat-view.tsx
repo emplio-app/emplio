@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -22,6 +22,7 @@ import {
   Undo2Icon,
   UploadIcon,
   XIcon,
+  ArrowLeftIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -61,7 +62,7 @@ import { useMentionMenu } from "@/components/chat/mention-menu";
 import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
 import { AttachmentTray, MessageAttachments, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
 import { QuoteButton, QuoteChips, QuotedText, addQuote, withQuotes, type Quote } from "@/components/chat/quote";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -149,7 +150,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // what's typed and not sent yet, kept per chat in this browser (one slot for the new-chat screen); the
   // app shell renders nothing on the server, so reading it here is safe
   // ponytail: @mention links and files still uploading when the chat closes aren't kept
-  const draftKey = `chat_draft:${isNew ? "new" : id}`;
+  // after the first send the new chat is a real one, still on screen: its slot moves to its own id then (dispatch)
+  const [draftKey, setDraftKey] = useState(`chat_draft:${isNew ? "new" : id}`);
   const [input, setInput] = useState(() => {
     try {
       return localStorage.getItem(draftKey) ?? "";
@@ -417,6 +419,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       // swap the URL without remounting so the stream keeps going
       window.history.replaceState(null, "", `/chat/${id}`);
       urlUpdated.current = true;
+      // what's typed or waiting from here on belongs to this chat, not to the next new one
+      setDraftKey(`chat_draft:${id}`);
+      try {
+        for (const k of ["", ":quotes", ":files", ":queue"]) localStorage.removeItem(`chat_draft:new${k}`);
+      } catch {}
     }
     sends.current++;
     clearError();
@@ -659,7 +666,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const [viewportHeight, setViewportHeight] = useState(0);
   // when a just-sent prompt was scrolled to the top: for a moment after, size changes keep it there
   const pinnedAt = useRef(0);
-  const lastUserIdx = messages.findLastIndex((m) => m.role === "user");
+  const lastUserIdx = messages.findLastIndex((m) => m.role === "user" && !isHidden(m));
   const contentRef = useRef<HTMLDivElement>(null);
   // reading at the very end of an opened chat (not a just-sent prompt): the end stays in view as what's
   // there finishes drawing (code highlighting, images, diagrams), not just the instant it was opened
@@ -678,8 +685,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     const keep = () => void (el.clientHeight === height && (below = el.scrollHeight - el.scrollTop - height));
     const observer = new ResizeObserver(() => {
       const pin = Date.now() - pinnedAt.current < 1500 && el.querySelector<HTMLElement>("[data-pin]");
+      // a message being edited stays in view while the keyboard opens and the box grows: not the end of the chat
+      const editBox = el.querySelector<HTMLElement>("[data-editing]");
       // ponytail: a phone's composer and keyboard settle right after sending
-      if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
+      if (editBox) editBox.scrollIntoView({ block: "nearest" });
+      else if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
       else if (stuck.current) el.scrollTop = el.scrollHeight;
       // only when it did change: setting the position, even to the same value, ends a flick on an iPhone
       else if (el.clientHeight !== height) el.scrollTop = el.scrollHeight - el.clientHeight - below;
@@ -731,7 +741,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // one block per prompt + its reply; stable keys so earlier turns never remount (and jump) on send
   const turns: { key: string; start: number; items: UIMessage[] }[] = [];
   messages.forEach((m, i) => {
-    if (m.role === "user" || turns.length === 0) turns.push({ key: m.id, start: i, items: [] });
+    // a hidden nudge (shared isHidden) carries on the turn before it
+    if ((m.role === "user" && !isHidden(m)) || turns.length === 0) turns.push({ key: m.id, start: i, items: [] });
     turns[turns.length - 1].items.push(m);
   });
   // opened from a search result: all of it, so the message is there to show
@@ -823,6 +834,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   };
 
   const renderMessage = (message: UIMessage, i: number) => {
+    if (isHidden(message)) return null;
     const isLast = i === messages.length - 1;
     const text = textOf(message);
     // when it was said, where the chat picks up after a while or the AI wrote on its own (a check-in, a task's
@@ -885,7 +897,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         {fromEmplio && <span className="self-end text-xs text-muted-foreground">Emplio</span>}
         {message.role === "user" && <MessageAttachments parts={filesOf(message)} />}
         {editing === message.id ? (
-          <div className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
+          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
             <textarea
               autoFocus
               // cursor after the text, ready to go on typing
@@ -922,7 +934,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               thinking(message)
             ) : (
               <>
-                <ReplyContext value={messages[i + 1]?.role === "user" ? userFacingText(textOf(messages[i + 1]!)) : undefined}>
+                <ReplyContext value={messages[i + 1]?.role === "user" && !isHidden(messages[i + 1]!) ? userFacingText(textOf(messages[i + 1]!)) : undefined}>
                   <AssistantParts
                     message={message}
                     streaming={isLast && status === "streaming"}
@@ -946,6 +958,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 ? () => {
                     setEditText(userFacingText(text));
                     setEditing(message.id);
+                    // stay on the message being edited, not the end of the chat
+                    stuck.current = false;
+                    requestAnimationFrame(() => document.querySelector("[data-editing]")?.scrollIntoView({ block: "nearest" }));
                   }
                 : undefined
             }
@@ -1051,18 +1066,34 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         <div className="mb-2 flex flex-col gap-1">
           {busyJobs.map((w) => (
             <Fragment key={w.id}>
-              <Link
-                href={`/chat/${w.chatId}`}
-                className="flex min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
-                <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
-                {w.status === "working" ? (
-                  <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate">· has a question about {w.name}</span>
+              <div className="flex min-w-0 items-center rounded-lg border bg-card text-xs text-muted-foreground">
+                <Link href={`/chat/${w.chatId}`} title={w.name} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 hover:text-foreground">
+                  {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
+                  <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
+                  {w.status === "working" ? (
+                    <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate">· waiting for your answer</span>
+                  )}
+                </Link>
+                {/* a question they won't answer: stop it waiting, and the line goes */}
+                {w.status === "asking" && (
+                  <button
+                    type="button"
+                    aria-label={`Stop ${w.agent} waiting`}
+                    title="Stop waiting"
+                    onClick={() =>
+                      void api(`/jobs/${w.id}/close`, {}).then(() => {
+                        void queryClient.invalidateQueries({ queryKey: ["working", id] });
+                        void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+                      })
+                    }
+                    className="mr-1 grid size-6 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-foreground"
+                  >
+                    <XIcon className="size-3.5" />
+                  </button>
                 )}
-              </Link>
+              </div>
               {/* its question, to answer right here: the answer goes to the agent, not to Emplio */}
               {w.status === "asking" && !!w.asks?.length && (
                 <JobAskCard job={w.id} cards={w.asks} onAnswered={() => void queryClient.invalidateQueries({ queryKey: ["working", id] })} />
@@ -1127,7 +1158,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             <PaperclipIcon className="size-4" />
           </PromptInputButton>
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
-          <span className="hidden pl-1 text-xs text-muted-foreground sm:inline">
+          {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
+          <span className="hidden pl-1 text-xs text-muted-foreground sm:pointer-fine:inline">
             <kbd className="font-sans">Enter</kbd> to send ·{" "}
             <kbd className="font-sans">Shift + Enter</kbd> for a new line
           </span>
@@ -1167,10 +1199,30 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
             {job ? (
-              <h1 className="flex min-w-0 items-baseline gap-1.5 px-2 font-sans text-sm font-medium tracking-normal">
-                <span className="truncate">{job.agent ?? job.name}</span>
-                {job.agent && <span className="truncate font-normal text-muted-foreground">· {job.name}</span>}
-              </h1>
+              // an agent's chat: the agent's name in full, then the job's title in grey taking whatever room is left (it
+              // used to squeeze the name to "Reddit …"), and under them the chat that started it, one tap back
+              <>
+                {job.from && (
+                  <Link
+                    href={`/chat/${job.from.id}`}
+                    aria-label={`Back to ${job.from.title}`}
+                    className={buttonVariants({ variant: "ghost", size: "icon", className: "size-8 shrink-0 text-muted-foreground" })}
+                  >
+                    <ArrowLeftIcon />
+                  </Link>
+                )}
+                <div className="flex min-w-0 flex-col justify-center px-1 leading-tight" title={job.name}>
+                  <h1 className="flex min-w-0 items-baseline gap-1.5 font-sans text-sm font-medium tracking-normal">
+                    <span className="max-w-[70%] shrink-0 truncate">{job.agent ?? job.name}</span>
+                    {job.agent && <span className="min-w-0 truncate font-normal text-muted-foreground">· {job.name}</span>}
+                  </h1>
+                  {job.from && (
+                    <Link href={`/chat/${job.from.id}`} className="truncate text-xs text-muted-foreground hover:text-foreground hover:underline">
+                      Started from {job.from.title}
+                    </Link>
+                  )}
+                </div>
+              </>
             ) : empty || !liveTitle ? (
               <h1 className="truncate px-2 font-sans text-sm font-medium tracking-normal">New chat</h1>
             ) : (
@@ -1186,12 +1238,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   onClick={() =>
                     void api(`/jobs/${job.id}/close`, {}).then(() => {
                       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+                      void queryClient.invalidateQueries({ queryKey: ["working"] });
                       router.push("/home");
                     })
                   }
                 >
                   <XIcon />
-                  Close
+                  {/* a phone needs the room for the agent's name */}
+                  <span className="max-sm:sr-only">Close</span>
                 </Button>
               )}
               {onTelegram && (
@@ -1257,7 +1311,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   onWheel={() => (pinnedAt.current = 0)}
                   onTouchStart={() => (pinnedAt.current = 0)}
                   role="log"
-                  className="relative flex-1 overflow-y-auto"
+                  // never sideways: a wide code block scrolls inside itself, the chat stays put (on a phone it felt like a web page)
+                  className="relative flex-1 overflow-x-hidden overflow-y-auto overscroll-x-none"
                 >
                   <QuoteButton
                     area={scrollRef}
@@ -1450,7 +1505,7 @@ function LongText({ children }: { children: React.ReactNode }) {
   }, [children, open]);
   return (
     <>
-      <p ref={ref} className={cn("whitespace-pre-wrap", !open && "line-clamp-8")}>
+      <p ref={ref} className={cn("whitespace-pre-wrap [overflow-wrap:anywhere]", !open && "line-clamp-8")}>
         {children}
       </p>
       {long && (
@@ -1469,8 +1524,9 @@ function CopyButton({ text }: { text: string }) {
       tooltip={copied ? "Copied" : "Copy"}
       onClick={async (e) => {
         // copy what the user sees (generated UI has no readable source text)
-        const reply = e.currentTarget.closest(".group")?.querySelector<HTMLElement>("[data-reply]");
-        await copyText(reply?.innerText.trim() || text).then(() => {
+        // every text block of the reply: one with commands in between has several
+        const blocks = [...(e.currentTarget.closest(".group")?.querySelectorAll<HTMLElement>("[data-reply]") ?? [])];
+        await copyText(blocks.map((b) => b.innerText.trim()).filter(Boolean).join("\n\n") || text).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }, () => {});

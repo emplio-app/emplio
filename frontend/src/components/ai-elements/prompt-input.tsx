@@ -696,11 +696,8 @@ export const PromptInput = ({
             return (formData.get("message") as string) || "";
           })();
 
-      // Reset form immediately after capturing text to avoid race condition
-      // where user input during async blob conversion would be lost
-      if (!usingProvider) {
-        form.reset();
-      }
+      // no form.reset(): Emplio's message box is controlled and its send() empties it itself. Resetting here blanked
+      // the box even when send() refused (a file still uploading), so the message looked erased.
 
       try {
         // Convert blob URLs to data URLs asynchronously

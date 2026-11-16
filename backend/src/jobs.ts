@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -289,7 +289,7 @@ async function began(w: Row, stop: () => void) {
       live.delete(w.id);
       track(w.id).done.then(e.end);
       const told = owed.has(w.id);
-      void send(w, SAVE_SKILL);
+      void send(w, SAVE_SKILL, undefined, true);
       if (!told) owed.delete(w.id);
       return;
     }
@@ -333,11 +333,11 @@ export function cardsIn(chunk: { type: string; output?: unknown }, shown: Set<st
 // A message to the job from whoever started it, as the next message in its chat: after the reply running there,
 // if one is (steered: it wraps up after its current command).
 // `run`: the prompt's message id, which marks the run in the job's chat (runOf)
-async function send(w: Row, text: string, run = generateId()) {
+async function send(w: Row, text: string, run = generateId(), hidden = false) {
   const e = track(w.id);
   if (w.depth === 1) owed.add(w.id);
   const person = await personFor(w.workspaceId, w.userId);
-  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }] };
+  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }, ...(hidden ? [{ type: HIDDEN_PART, data: true } as const] : [])] as UIMessage["parts"] };
   const log = { error: (obj: unknown, msg: string) => console.error(`job ${w.id}: ${msg}`, obj) };
   let error: string | null = null;
   try {
@@ -845,7 +845,15 @@ export async function openJobChat(chatId: string, ctx: Pick<Ctx, "userId" | "wor
     .set({ openedAt: sql`coalesce(${jobs.openedAt}, now())` })
     .where(and(eq(jobs.chatId, chatId), eq(jobs.userId, ctx.userId), eq(jobs.workspaceId, ctx.workspaceId)))
     .returning();
-  return w ? { id: w.id, name: w.name, agent: agentName(w.agent), status: w.status } : null;
+  if (!w) return null;
+  const from = await db.query.conversations.findFirst({ where: eq(conversations.id, w.conversationId), columns: { id: true, title: true, kind: true } });
+  return {
+    id: w.id,
+    name: w.name,
+    agent: agentName(w.agent),
+    status: w.status,
+    from: from ? { id: from.id, title: from.kind === "main" ? "Main chat" : from.title || "Chat" } : null,
+  };
 }
 
 export async function jobRoutes(app: FastifyInstance) {
@@ -940,10 +948,17 @@ export async function jobRoutes(app: FastifyInstance) {
   });
 
   // out of the sidebar; its line in the chat still opens it
+  // Close: out of the sidebar. A job waiting on an answer stops waiting too (status stopped), so its line over the chat
+  // box goes and Emplio no longer expects its report; a job still working carries on.
   app.post<{ Params: { id: string } }>("/jobs/:id/close", { schema: { params } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    await db.update(jobs).set({ openedAt: null }).where(owned(req.params.id, ctx));
+    const [w] = await db.update(jobs).set({ openedAt: null }).where(owned(req.params.id, ctx)).returning({ status: jobs.status });
+    if (w?.status === "asking") {
+      await db.update(jobs).set({ status: "stopped" }).where(and(owned(req.params.id, ctx), eq(jobs.status, "asking")));
+      owed.delete(req.params.id);
+      untold.delete(req.params.id);
+    }
     return { ok: true };
   });
 }
