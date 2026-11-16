@@ -179,10 +179,44 @@ export function notify(conn: Conn, m: string, p: object = {}) {
 export const GONE_NOTE =
   "Your computer went offline while this command was running (closed, asleep or disconnected), so it stopped part-way. Nothing else of it ran. Check what it changed before running it again; your next command runs on the cloud computer, with the company files as of the last save.";
 
+// Files bigger than this cross in parts. Pings wait behind a message, so one big file (a 37 MB recording) on a slow
+// upload kept the server from hearing the computer for longer than SILENT_MS, and it dropped the computer mid-copy.
+// The parts go through commands the app already runs, so this needs no new app.
+export const PART = 1024 * 1024;
+const q = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+
 export function localBox(conn: Conn, workspaceId: string, name = ""): Box {
   const ask = <T>(m: string, p: object, o?: { timeoutMs?: number; signal?: AbortSignal }) => rpc<T>(conn, m, { box: workspaceId, name, ...p }, o);
   const b64 = (bytes: Uint8Array | string) => Buffer.from(typeof bytes === "string" ? bytes : bytes).toString("base64");
-  return {
+  const sh = async (command: string) => {
+    const r = await box.run(command, { cwd: "/work", timeoutMs: 60_000 });
+    if (r.exitCode !== 0) throw new Error(r.result || `exit ${r.exitCode}`);
+    return r.result;
+  };
+  const whole = async (path: string) => new Uint8Array(Buffer.from((await ask<{ b64: string }>("read", { path }, { timeoutMs: 120_000 })).b64, "base64"));
+  const read = async (path: string) => {
+    const size = Number((await sh(`wc -c < ${q(path)}`)).trim());
+    if (!(size > PART)) return whole(path);
+    const out = new Uint8Array(size);
+    for (let at = 0; at < size; at += PART) out.set(Buffer.from(await sh(`tail -c +${at + 1} ${q(path)} | head -c ${PART} | base64`), "base64"), at);
+    return out;
+  };
+  const write = async (path: string, data: Uint8Array | string) => {
+    const bytes = typeof data === "string" ? Buffer.from(data) : data;
+    if (bytes.length <= PART) return ask("write", { path, b64: b64(bytes) }, { timeoutMs: 120_000 });
+    const parts: string[] = [];
+    try {
+      for (let at = 0; at < bytes.length; at += PART) {
+        const part = `${path}.part-${parts.length}`;
+        parts.push(part);
+        await ask("write", { path: part, b64: b64(bytes.subarray(at, at + PART)) }, { timeoutMs: 120_000 });
+      }
+      await sh(`cat ${parts.map(q).join(" ")} > ${q(path)}`);
+    } finally {
+      await sh(`rm -f ${parts.map(q).join(" ")}`).catch(() => {});
+    }
+  };
+  const box: Box = {
     id: `local:${conn.id}:${workspaceId}`,
     local: true,
     platform: conn.platform,
@@ -194,9 +228,9 @@ export function localBox(conn: Conn, workspaceId: string, name = ""): Box {
         throw error;
       }
     },
-    write: (path, bytes) => ask("write", { path, b64: b64(bytes) }, { timeoutMs: 120_000 }),
-    read: async (path) => new Uint8Array(Buffer.from((await ask<{ b64: string }>("read", { path }, { timeoutMs: 120_000 })).b64, "base64")),
-    readText: async (path) => Buffer.from((await ask<{ b64: string }>("read", { path }, { timeoutMs: 120_000 })).b64, "base64").toString(),
+    write,
+    read,
+    readText: async (path) => Buffer.from(await read(path)).toString(),
     remove: async (path) => void (await ask("remove", { path }, { timeoutMs: 60_000 })),
     // a computer that is on needs no keeping awake; one that has gone refuses, which sends sandbox.ts to look again (and to the cloud)
     keepAwake: async () => {
@@ -204,6 +238,7 @@ export function localBox(conn: Conn, workspaceId: string, name = ""): Box {
     },
     kill: async () => {},
   };
+  return box;
 }
 
 // --- browser messages through this server -----------------------------------------------------------------
