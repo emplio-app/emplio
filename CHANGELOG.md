@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.50 (2026-11-16)
+
+### What's new
+
+- Connect 1Password and Emplio can use the logins and keys in it, just like ones saved in Emplio. They show in Passwords & keys, marked "from 1Password".
+- On an empty chat, the ideas under the box now cycle through the categories by themselves (hover to pause), and fold away smoothly when you start typing.
+- Email addresses in Emplio's replies show as plain text instead of link chips.
+
+### For developers
+
+- 1Password service-account integration: items read at the moment of use, never stored; names cached for a minute (#170).
+- JobCards: CSS-only fill bar and grid-rows fold, paused on hover/focus and while typing (#180).
+- Emails in replies no longer turned into link chips (#181).
+
 ## 1.2.49 (2026-11-15)
 
 ### What's new
