@@ -280,13 +280,14 @@ function Results({
 // the prompt it was handed), so an earlier one stays finished when the job is given more work.
 function Job({ id, run }: { id: string; run?: string }) {
   const [open, setOpen] = useState(false);
-  const { data: w } = useQuery({
+  const { data: w, isError } = useQuery({
     queryKey: ["job", id, run],
     queryFn: () => api<JobInfo>(`/jobs/${id}${run ? `?run=${encodeURIComponent(run)}` : ""}`),
-    refetchInterval: (q) => (!q.state.data || q.state.data.status === "working" ? 1500 : false),
+    // a card that can't load (the job was deleted) stops asking instead of spinning for good
+    refetchInterval: (q) => (q.state.status === "error" ? false : !q.state.data || q.state.data.status === "working" ? 1500 : false),
   });
   const actions = w?.actions ?? [];
-  const status = w?.status ?? "working";
+  const status = w?.status ?? (isError ? "failed" : "working");
   const working = status === "working";
   const now = working ? actions.findLast((a) => !a.done)?.description ?? (actions.length ? "Thinking…" : "Starting…") : null;
   const n = actions.length;
@@ -314,7 +315,13 @@ function Job({ id, run }: { id: string; run?: string }) {
             <Shimmer as="span" className="min-w-0 flex-1 truncate text-xs">{`· ${now}`}</Shimmer>
           ) : (
             <span className="min-w-0 flex-1 truncate text-xs">
-              {status === "done" ? `· ${n} ${n === 1 ? "action" : "actions"}` : status === "asking" ? "· has a question" : `· ${status}`}
+              {isError && !w
+                ? "· couldn't load this work"
+                : status === "done"
+                  ? `· ${n} ${n === 1 ? "action" : "actions"}`
+                  : status === "asking"
+                    ? "· has a question"
+                    : `· ${status}`}
             </span>
           )}
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -450,6 +457,8 @@ function ToolCall({
           )}
           <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open/tool:rotate-90" />
         </summary>
+        {/* only once opened: a closed step doesn't load the colouring or colour its code */}
+        {opened && (
         <pre className="max-h-72 overflow-auto border-t px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
           {p.input?.description && command && (
             <span className="mb-2 block text-foreground">
@@ -463,6 +472,7 @@ function ToolCall({
               ? "Stopped before it finished."
               : result || "(no output)"}
         </pre>
+        )}
       </details>
     </div>
   );

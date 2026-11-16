@@ -150,7 +150,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // what's typed and not sent yet, kept per chat in this browser (one slot for the new-chat screen); the
   // app shell renders nothing on the server, so reading it here is safe
   // ponytail: @mention links and files still uploading when the chat closes aren't kept
-  const draftKey = `chat_draft:${isNew ? "new" : id}`;
+  // after the first send the new chat is a real one, still on screen: its slot moves to its own id then (dispatch)
+  const [draftKey, setDraftKey] = useState(`chat_draft:${isNew ? "new" : id}`);
   const [input, setInput] = useState(() => {
     try {
       return localStorage.getItem(draftKey) ?? "";
@@ -418,6 +419,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       // swap the URL without remounting so the stream keeps going
       window.history.replaceState(null, "", `/chat/${id}`);
       urlUpdated.current = true;
+      // what's typed or waiting from here on belongs to this chat, not to the next new one
+      setDraftKey(`chat_draft:${id}`);
+      try {
+        for (const k of ["", ":quotes", ":files", ":queue"]) localStorage.removeItem(`chat_draft:new${k}`);
+      } catch {}
     }
     sends.current++;
     clearError();
@@ -1146,7 +1152,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             <PaperclipIcon className="size-4" />
           </PromptInputButton>
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
-          <span className="hidden pl-1 text-xs text-muted-foreground sm:inline">
+          {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
+          <span className="hidden pl-1 text-xs text-muted-foreground sm:pointer-fine:inline">
             <kbd className="font-sans">Enter</kbd> to send ·{" "}
             <kbd className="font-sans">Shift + Enter</kbd> for a new line
           </span>
@@ -1492,7 +1499,7 @@ function LongText({ children }: { children: React.ReactNode }) {
   }, [children, open]);
   return (
     <>
-      <p ref={ref} className={cn("whitespace-pre-wrap", !open && "line-clamp-8")}>
+      <p ref={ref} className={cn("whitespace-pre-wrap [overflow-wrap:anywhere]", !open && "line-clamp-8")}>
         {children}
       </p>
       {long && (
@@ -1511,8 +1518,9 @@ function CopyButton({ text }: { text: string }) {
       tooltip={copied ? "Copied" : "Copy"}
       onClick={async (e) => {
         // copy what the user sees (generated UI has no readable source text)
-        const reply = e.currentTarget.closest(".group")?.querySelector<HTMLElement>("[data-reply]");
-        await copyText(reply?.innerText.trim() || text).then(() => {
+        // every text block of the reply: one with commands in between has several
+        const blocks = [...(e.currentTarget.closest(".group")?.querySelectorAll<HTMLElement>("[data-reply]") ?? [])];
+        await copyText(blocks.map((b) => b.innerText.trim()).filter(Boolean).join("\n\n") || text).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }, () => {});
