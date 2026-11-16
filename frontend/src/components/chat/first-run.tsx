@@ -82,8 +82,12 @@ const BY_HOUR = [
 const dayOfYear = () => Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 864e5);
 
 // ponytail: no per-business learning yet; hour of day, day of year and the shuffle button vary it
-export function JobCards({ onPick }: { onPick: (job: string) => void }) {
+// each category shows this long before the next; a CSS animation (paused by hover, reduced motion: none) times it
+const ROTATE_MS = 8000;
+
+export function JobCards({ onPick, paused }: { onPick: (job: string) => void; paused?: boolean }) {
   const [shuffle, setShuffle] = useState(0);
+  const [hover, setHover] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const cards = useMemo(() => {
     const hour = new Date().getHours();
@@ -98,8 +102,10 @@ export function JobCards({ onPick }: { onPick: (job: string) => void }) {
     return [0, 1, 2].map((i) => all[(start + i) % all.length]!);
   }, [card, shuffle]);
 
+  const next = () => (setPicked(cards[(cards.indexOf(card) + 1) % cards.length]!.title), setShuffle(0));
+
   return (
-    <div className="mt-5">
+    <div className="mt-5" onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)} onPointerLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)}>
       <div className="-mx-4 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
         {cards.map((c) => {
           const on = c === card;
@@ -109,15 +115,25 @@ export function JobCards({ onPick }: { onPick: (job: string) => void }) {
               type="button"
               aria-pressed={on}
               onClick={() => (setPicked(c.title), setShuffle(0))}
-              className={`flex shrink-0 snap-start items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-colors active:scale-[0.97] ${on ? "border-primary/50 bg-primary/10 text-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+              className={`relative flex shrink-0 snap-start items-center gap-2 overflow-hidden rounded-full border px-3.5 py-2 text-sm transition-colors active:scale-[0.97] ${on ? "border-primary/50 bg-card text-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
             >
-              <c.icon className="size-4 text-primary" />
-              {c.title}
+              {on && (
+                <span
+                  aria-hidden
+                  // keyed so a new category (or a shuffle) starts it again; scaleX, not width, so nothing re-lays out
+                  key={`${c.title}${shuffle}`}
+                  onAnimationEnd={next}
+                  className="absolute inset-0 origin-left bg-primary/10 motion-safe:animate-[chip-fill_linear_forwards]"
+                  style={{ animationDuration: `${ROTATE_MS}ms`, animationPlayState: hover || paused ? "paused" : "running" }}
+                />
+              )}
+              <c.icon className="relative size-4 text-primary" />
+              <span className="relative">{c.title}</span>
             </button>
           );
         })}
       </div>
-      <div className="mt-3 overflow-hidden rounded-2xl border bg-card">
+      <div key={`${card.title}${shuffle}`} className="mt-3 animate-[fade-in_250ms_ease-out] overflow-hidden rounded-2xl border bg-card motion-reduce:animate-none">
         {jobs.map((job) => (
           <button
             key={job}

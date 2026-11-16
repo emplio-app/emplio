@@ -1231,8 +1231,17 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </h2>
                 <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
                 {composer}
-                {/* gone once typing starts: the box and the message are what matter then */}
-                {!job && !input.trim() && <JobCards onPick={send} />}
+                {/* folds away once typing starts (kept mounted so the picked category survives); grid rows 1fr→0fr
+                    animates the height without measuring it, and the heading and box above glide with it */}
+                <div
+                  inert={!!job || !!input.trim()}
+                  className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${job || input.trim() ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"}`}
+                >
+                  {/* -mx-4 px-4: the phone's sideways chip row still runs to the screen edge inside the clip */}
+                  <div className="-mx-4 min-h-0 overflow-hidden px-4 sm:mx-0 sm:px-0">
+                    <JobCards onPick={send} paused={!!job || !!input.trim()} />
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
