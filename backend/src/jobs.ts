@@ -61,6 +61,21 @@ const carryUntil = new Map<string, number>();
 const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
 const RESTARTED =
   "The server restarted and cut your last run off mid-work. Carry on from where you stopped, without redoing what's done: what you found is in your files and this chat. Threads you started were cut off too: check them with `emplio threads` before starting any again.";
+// A finished run that saved no skill and used none gets this once (began, below): every kind of task done once is
+// done faster the next time. ponytail: "touched functions.py or called a skill" read from its code, not checked in git
+export const SAVE_SKILL =
+  "Before your report: save how you did this as a skill (or improve the one you used), SKILL.md plus a functions.py of modular, reusable, generic functions (one step each, what changes as arguments, nothing fixed to this case). Then give your report again in full.";
+// true too for a run the person started by writing in the job's chat: chatting there isn't a task
+export const savedSkill = (msgs: { role: string; parts: unknown }[]) => {
+  const lastAsk = [...msgs].reverse().find((m) => m.role === "user");
+  if (!lastAsk || !textOf(lastAsk).startsWith(FROM_EMPLIO)) return true;
+  const back = [...msgs].reverse().findIndex((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
+  return msgs
+    .slice(back < 0 ? 0 : msgs.length - back)
+    .flatMap((m) => (m.parts as { type?: string; input?: { code?: string; command?: string } }[]) ?? [])
+    .some((p) => /functions\.py|emplio\.skill\(|emplio skills? use/.test(p.input?.code ?? p.input?.command ?? ""));
+};
+const skillAsked = new Set<string>();
 export const CARRY_ON =
   "That run used up its steps, so this is a fresh one: carry on from where you stopped. What you found is in your files; keep building the result as you go.";
 // What happens to a report when a job's reply ends: wake Emplio, keep it for its next reply, or nothing.
@@ -93,7 +108,10 @@ notes as it grows, and a run stops after a set number of steps (a fresh one carr
 chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
 small file in your folder (every item with its page, say), and work from that file; never print a whole document \
 to read it. When the task makes something (a sheet, a document, a list), start the file early and add to it as you \
-go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. Then end with a report for whoever started you, which is checked against what you were asked:
+go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. \
+When the task succeeds, save how you did it as a skill before you report (or improve the skill you used): SKILL.md plus a \
+functions.py of modular, reusable, generic functions, each one step, taking what changes (a name, a date, an id) as \
+arguments, nothing fixed to this one case, so the next run of this kind of task just calls them. Then end with a report for whoever started you, which is checked against what you were asked:
 - Whether it's all done, and if not, what's left. Never say done for work you've only started.
 - What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
 - Files you made, by name: leave them in /work/out (they stay there and are stored in Files; Emplio shows them to the person).
@@ -265,6 +283,17 @@ async function began(w: Row, stop: () => void) {
       if (!told) owed.delete(w.id);
       return;
     }
+    if (outcome === "completed" && !capped && !interrupted && !carded.length && timeLeft && !asks(answer) && !skillAsked.has(w.id) && w.chatId && !savedSkill(await loadMessages(w.chatId))) {
+      skillAsked.add(w.id);
+      carryUntil.set(w.id, until);
+      live.delete(w.id);
+      track(w.id).done.then(e.end);
+      const told = owed.has(w.id);
+      void send(w, SAVE_SKILL);
+      if (!told) owed.delete(w.id);
+      return;
+    }
+    skillAsked.delete(w.id);
     const unfinished =
       outcome === "failed" && !timeLeft ? "Ran out of time, not finished. " : capped && !interrupted ? "Stopped at the step limit, not finished. " : "";
     const asked = outcome === "completed" && !unfinished && carded.length > 0;

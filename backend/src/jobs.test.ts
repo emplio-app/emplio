@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, threadsNote, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, savedSkill, threadsNote, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -213,4 +213,19 @@ test("Emplio's agents ask the person with a card; deeper threads ask in their re
   expect(RULES(1, "0123456789")).toContain("emplio ask");
   expect(RULES(1, "0123456789")).toContain("--chat 01234567");
   expect(RULES(2, "0123456789")).not.toContain("emplio ask");
+});
+
+test("a run counts as having saved a skill only for what it ran since its last brief", () => {
+  const brief = (t: string) => ({ role: "user", parts: [{ type: "text", text: FROM_EMPLIO + t }] });
+  const ran = (code: string) => ({ role: "assistant", parts: [{ type: "tool-python", input: { code } }] });
+  expect(savedSkill([brief("check usage"), ran("emplio.db.sql('select 1')")])).toBe(false);
+  expect(savedSkill([brief("check usage"), ran("open('/work/me/skills/usage/functions.py','w').write(src)")])).toBe(true);
+  expect(savedSkill([brief("check usage"), ran("u = emplio.skill('usage'); u.today('Maithili')")])).toBe(true);
+  expect(savedSkill([brief("a"), ran("x = 'functions.py'"), brief("b"), ran("print(1)")])).toBe(false);
+});
+
+test("a run the person started by chatting in the job isn't asked for a skill", () => {
+  const said = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
+  expect(savedSkill([said(FROM_EMPLIO + "check usage"), said("hello, how are you")])).toBe(true);
+  expect(savedSkill([])).toBe(true);
 });
