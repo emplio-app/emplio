@@ -1147,7 +1147,7 @@ export function inPython(text: string) {
 // (inPython, applied to the whole prompt in chat.ts). Emplio, the manager, runs a command or two; an agent does the work.
 const codeModeNote = (name: string, admin: boolean, agent: boolean) =>
   [
-    `How you work: the python tool runs Python in a session that stays open for this chat like a notebook (what you define is still there next step; a new session says so). Anything you'll likely do again (a check, a retry loop, a parse), define once as a small general function taking what changes, and call it after. Only what you print comes back.`,
+    `How you work: the python tool runs Python in a session that stays open for this chat like a notebook (what you define is still there next step; a new session says so). Anything you'll likely do again (a check, a retry loop, a parse, and so on), define once as a small general function taking what changes, and call it after. Only what you print comes back.`,
     `- Emplio's commands are the \`emplio\` library, already imported, written as calls throughout. Answers are data: \`emplio.db.sql(...)\` a list of dicts, \`emplio.web.search(...)\` a list of {title, url, date, text}, \`emplio.apps.run(...)\` the app's JSON; the rest text. Do the work in one run (query, loop, sum, decide in code) and print only what you need. Never sh("emplio ...").`,
     `- A wrong name or input raises EmplioError saying what exists; \`print(emplio.<area>.help())\` shows an area's commands. A hand-off, and an action waiting for ${name}'s OK, finish after the run, so don't build on them in the same run.`,
     // everyone runs shell commands now and then: without this the manager writes subprocess.run(...) by hand
