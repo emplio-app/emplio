@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.53 (2026-11-16)
+
+### What's new
+
+- Big files made on your computer, like a recording, no longer knock your computer offline while they're saved to the chat.
+
+### For developers
+
+- devices.ts: files over 1 MB cross to and from a computer in 1 MB parts, so pings get through and the server doesn't drop it mid-copy (#187).
+
 ## 1.2.52 (2026-11-16)
 
 ### What's new
