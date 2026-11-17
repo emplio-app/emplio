@@ -11,12 +11,13 @@ area's commands, help(emplio) all of them.
     emplio.hand("Researcher", input="Find three suppliers of ...")
     inv = emplio.skill("zoho-invoices"); inv.create("Acme", 12000)
     gst = emplio.lib("gst")
+    from tools.gmail import send          # a tool kept earlier; emplio.tools.save(fn, area="gmail") keeps one
     results = emplio.map(inv.create, rows, limit=5)
 """
 import importlib.util, json, os, re, shutil, subprocess, sys, threading
 from concurrent.futures import ThreadPoolExecutor
 
-__all__ = ["EmplioError", "ShellError", "Failed", "sh", "skill", "lib", "map", "help"]
+__all__ = ["EmplioError", "ShellError", "Failed", "sh", "skill", "lib", "map", "help", "tools"]
 
 W = os.environ.get("EMPLIO_WORK") or "/work"
 
@@ -220,6 +221,11 @@ def _load(kind, name, paths):
             if W != "/work":
                 src = _WORK_WORD.sub(lambda _: W, src)
             exec(compile(src, path, "exec"), mod.__dict__)
+            # its functions count as written in this session, so emplio.tools.save can keep them as tools
+            try:
+                _toolset.record(src)
+            except SyntaxError:
+                pass
             _loaded[path] = (mtime, mod)
             return mod
     where = " or ".join(p.replace(W, "/work", 1) for p in paths)
@@ -298,6 +304,13 @@ def map(fn, items, limit=5):
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+
+# ---- tools: functions kept one file per area in toolset/ folders (_toolset.py) ----
+
+from . import _toolset  # noqa: E402 -- needs EmplioError above
+
+_toolset.install()
+tools = _toolset.Tools()
 
 _root = _Area([])
 

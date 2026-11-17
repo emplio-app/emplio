@@ -845,7 +845,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     setup,
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
-    agents: await agentsList(session.workspaceId).then(
+    agents: await agentsList(session.workspaceId, { userId: ctx.userId, admin: ctx.role !== "member" }).then(
       (list) => [AGENTS_HEADING, ...(list.length ? list : ["(none yet)"])].join("\n"),
       (error) => (log.error(error, "listing agents failed"), "Your agents: unavailable right now; emplio agents list"),
     ),

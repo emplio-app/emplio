@@ -363,7 +363,10 @@ function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; sea
                 <BotIcon className="size-4 text-muted-foreground" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{a.name}</span>
+                <span className="block truncate text-sm font-medium">
+                  {a.name}
+                  {a.bucket !== "company" && <span className="ml-2 text-xs font-normal text-muted-foreground">{a.bucket === "me" ? "Only you" : "Admins only"}</span>}
+                </span>
                 <span className={cn("block text-xs text-muted-foreground", !open && "truncate")}>{a.description}</span>
               </span>
               {!!a.lessons.length && (
@@ -382,6 +385,18 @@ function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; sea
                       {a.skills.map((k) => (
                         <Badge key={k} variant="secondary">
                           {k.replace(/-/g, " ")}
+                        </Badge>
+                      ))}
+                    </span>
+                  </div>
+                )}
+                {!!a.tools?.length && (
+                  <div className="grid gap-1.5">
+                    <span className="font-medium text-foreground">Tools it has made or uses</span>
+                    <span className="flex flex-wrap gap-1.5">
+                      {a.tools.map((k) => (
+                        <Badge key={k} variant="secondary">
+                          {k.replace(".", ": ").replace(/_/g, " ")}
                         </Badge>
                       ))}
                     </span>

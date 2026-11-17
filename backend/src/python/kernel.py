@@ -6,7 +6,7 @@
 # Standard library only: it runs on the cloud computer, a Mac and Windows alike.
 import ast, builtins, json, linecache, os, re, signal, socket, subprocess, sys, threading, time, traceback, _thread
 
-VERSION = "1"
+VERSION = "2"  # 2: sessions remember what they define, for emplio.tools.save
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("EMPLIO_WORK") or "/work"
 SESSIONS = os.path.join(W, "tmp", ".emplio", "sessions")
@@ -54,7 +54,7 @@ def fresh_namespace():
         # emplio's areas and saved functions answer with Emplio's own words; anything else as Python would
         if obj is emplio:
             return emplio.help()
-        if isinstance(obj, emplio._Area):
+        if isinstance(obj, (emplio._Area, emplio._toolset.Tools)):
             return print(obj._help())
         if getattr(obj, "__emplio__", None):
             return print(emplio.describe(obj))
@@ -63,11 +63,11 @@ def fresh_namespace():
     return {"__name__": "__main__", "__builtins__": builtins, "emplio": emplio, "sh": sh, "help": help, "json": json, "os": os, "re": re, "sys": sys, "Path": Path}
 
 
-# saved functions: skills' functions.py and the shared lib/ files, checked when a run changes them
+# saved functions: skills' functions.py, the shared lib/ files and the toolset/ files, checked when a run changes them
 def saved_files():
     found = {}
-    for top in ("company", "me"):
-        for pattern_dir, name in ((os.path.join(W, top, "skills"), "functions.py"), (os.path.join(W, top, "lib"), None)):
+    for top in ("company", "me", "restricted"):
+        for pattern_dir, name in ((os.path.join(W, top, "skills"), "functions.py"), (os.path.join(W, top, "lib"), None), (os.path.join(W, top, "toolset"), None)):
             if not os.path.isdir(pattern_dir):
                 continue
             for entry in os.listdir(pattern_dir):
@@ -115,7 +115,7 @@ def trimmed(exc):
     if isinstance(exc, SyntaxError) and exc.filename == "<code>":
         line = (exc.text or "").rstrip("\n")
         return f"SyntaxError on line {exc.lineno}: {exc.msg}\n    {line}"
-    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "<code>" or "/skills/" in f.filename.replace("\\", "/") or "/lib/" in f.filename.replace("\\", "/")]
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "<code>" or any(d in f.filename.replace("\\", "/") for d in ("/skills/", "/lib/", "/toolset/"))]
     where = []
     for f in frames[-3:]:
         place = "your code" if f.filename == "<code>" else ("/work" + f.filename[len(W):] if f.filename.startswith(W) else f.filename)
@@ -127,6 +127,8 @@ def trimmed(exc):
 def run_code(ns, code, interrupted=None):
     before = saved_files()
     status = 0
+    # every def, class, import and value it sets is remembered, so emplio.tools.save can keep a function later
+    sys.modules["emplio"]._toolset.record(code)
     linecache.cache["<code>"] = (len(code), None, code.splitlines(True), "<code>")
     try:
         exec(compile(code, "<code>", "exec"), ns)
@@ -149,7 +151,10 @@ def run_code(ns, code, interrupted=None):
     if "fake" in sys.modules:
         sys.modules["fake"].after_run()
     after = saved_files()
-    notes = [n for n in (check_saved(p) for p, m in after.items() if before.get(p) != m) if n]
+    changed = [p for p, m in after.items() if before.get(p) != m]
+    if any("toolset" in p for p in changed) or len(after) < len(before):
+        sys.modules["emplio"]._toolset.forget()  # an edited tool file is read again on its next import
+    notes = [n for n in (check_saved(p) for p in changed) if n]
     if notes:
         print("\n[Saved functions: " + " ".join(notes) + "]")
     return status
@@ -171,6 +176,7 @@ def serve(key):
         json.dump({"port": srv.getsockname()[1], "token": token, "pid": os.getpid(), "version": VERSION}, f)
     os.replace(info + ".tmp", info)
     ns = fresh_namespace()
+    ns["emplio"]._toolset.start(key)
     # everything the code prints, Python's or a program's it starts, goes through one pipe to the waiting client
     read_end, write_end = os.pipe()
     os.dup2(write_end, 1)

@@ -485,7 +485,7 @@ export const isReport = (command?: string) => /^\s*emplio report\b/.test(command
 export type PlanStep = { text: string; status: "todo" | "doing" | "done" };
 
 // GET /agents: Emplio's agents, read-only for the Team window (made and changed by Emplio in chat)
-export type AgentInfo = { slug: string; name: string; description: string; skills: string[]; lessons: string[] };
+export type AgentInfo = { slug: string; name: string; description: string; skills: string[]; tools: string[]; bucket: "company" | "restricted" | "me"; lessons: string[] };
 
 // GET /jobs/:id: a piece of work Emplio handed off (emplio hand), shown live in the chat.
 // GET /jobs: the person's latest jobs (Emplio's own, not theirs), nested under Chat in the sidebar
