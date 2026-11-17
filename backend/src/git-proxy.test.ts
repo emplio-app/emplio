@@ -39,6 +39,10 @@ beforeAll(async () => {
 });
 afterAll(() => {
   globalThis.fetch = realFetch;
+  // the fakes would otherwise stay for every test file that runs after this one
+  mock.module("./integrations", () => real);
+  mock.module("./approvals", () => realApprovals);
+  mock.module("./activity", () => realActivity);
 });
 
 const get = (token: string, repo: string, service = "git-upload-pack") => app.inject({ url: `/git/${token}/github.com/${repo}.git/info/refs?service=${service}` });
