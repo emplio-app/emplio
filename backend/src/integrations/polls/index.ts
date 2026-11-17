@@ -28,6 +28,11 @@ import { zoho } from "./zoho";
 import { zoho_books } from "./zoho_books";
 import { zoho_invoice } from "./zoho_invoice";
 import { zoho_mail } from "./zoho_mail";
+import { cloudflare } from "./cloudflare";
+import { godaddy } from "./godaddy";
+import { namecheap } from "./namecheap";
+import { wix } from "./wix";
+import { wordpress } from "./wordpress";
 
 export type Run = (action: string, input: unknown) => Promise<unknown>;
 export type PollTrigger = {
@@ -44,7 +49,7 @@ export type PollTrigger = {
 };
 
 // Every app's polled triggers, one file per app (polls/<app>.ts), each exporting its triggers by short name.
-const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho };
+const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, cloudflare, godaddy, namecheap, wix, wordpress };
 const POLLS: Record<string, PollTrigger> = Object.fromEntries(
   Object.entries(APPS).flatMap(([app, triggers]) => Object.entries(triggers).map(([name, t]) => [`${app}.${name}`, t])),
 );

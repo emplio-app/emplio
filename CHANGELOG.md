@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.59 (2026-11-17)
+
+### What's new
+
+- Five new apps to connect: GoDaddy, Namecheap, Cloudflare, WordPress and Wix. Emplio can manage your domains, DNS and SSL, update your website's pages, posts, store and bookings, and tell you when something changes, like a domain about to expire or a new order.
+
+### For developers
+
+- Own integrations for GoDaddy (204 actions, 8 polled triggers), Namecheap (64, 7), Cloudflare (2,572, 69 alert webhooks + 9 polled), WordPress (209, 8) and Wix (2,534, 22); each has a COVERAGE.md (#191).
+- Spec actions build their input schema on first use, so loading every app takes about 520 MB instead of 860 MB.
+- New optional settings: `CLOUDFLARE_CLIENT_ID`/`SECRET`/`OAUTH_SCOPES`, `WORDPRESS_CLIENT_ID`/`SECRET`, `NAMECHEAP_CLIENT_IP`.
+
 ## 1.2.58 (2026-11-17)
 
 ### What's new
