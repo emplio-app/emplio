@@ -37,7 +37,7 @@ export const addQuote = (quotes: Quote[], text: string) => (quotes.some((q) => q
 
 const finger = () => matchMedia("(pointer: coarse)").matches;
 
-// The "Reply" button over text selected in one of the AI's replies, inside `area`.
+// The "Reply" button over text selected in a message in the chat (the AI's or the person's own, #200), inside `area`.
 export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | null>; onQuote: (text: string) => void }) {
   // shown: off, it fades where it was, so the next selection's button glides over from there; glide: false while
   // the chat scrolls, so it stays on the text rather than trailing it
@@ -50,7 +50,9 @@ export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | n
       const range = sel.getRangeAt(0).cloneRange();
       const elOf = (n: Node) => (n instanceof Element ? n : n.parentElement);
       // a triple-click, or a drag let go below the reply, ends the selection past it: keep the reply's part
-      const msg = elOf(range.startContainer)?.closest(".is-assistant") ?? elOf(range.endContainer)?.closest(".is-assistant");
+      const msg = elOf(range.startContainer)?.closest(".is-assistant, .is-user") ?? elOf(range.endContainer)?.closest(".is-assistant, .is-user");
+      // not while editing a message: its box has its own selection
+      if (msg?.querySelector("textarea")) return hide();
       if (!msg || !area.current?.contains(msg)) return hide();
       if (!msg.contains(range.startContainer)) range.setStart(msg, 0);
       if (!msg.contains(range.endContainer)) range.setEnd(msg, msg.childNodes.length);
