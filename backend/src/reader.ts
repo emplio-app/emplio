@@ -11,7 +11,7 @@ import { generateText, type UIMessage } from "ai";
 import { and, asc, desc, eq, gt, gte, ilike, isNotNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { personFor } from "./automations";
 import { db } from "./db";
-import { addTools, changeLessons, findAgent, lessonsNow, toolsUsed } from "./agents";
+import { changeLessons, findAgent, lessonsNow } from "./agents";
 import { chatNotes, conversations, jobs, messages, users, workspaceMembers } from "./db/schema";
 import { ensureRepo, readFile, writeFile } from "./gitea";
 import { modelForJob } from "./models";
@@ -102,9 +102,6 @@ async function learn(chat: typeof conversations.$inferSelect, slug: string, pers
   const agent = await findAgent(chat.workspaceId, slug, { userId: chat.userId, admin: person.role !== "member" });
   if (!agent) return;
   const author = { name: person.userName, email: person.userEmail };
-  // ponytail: a tool used once joins the list for good; the nightly tidy-up can prune ones it never uses again
-  const used = toolsUsed(fresh.flatMap((m) => m.parts as { input?: { code?: string }; output?: unknown }[]));
-  if (used.length) await addTools({ workspaceId: chat.workspaceId, author }, agent, used);
   const current = await lessonsNow(chat.workspaceId, agent);
   const settings = await settingsFor(chat.workspaceId);
   const result = await generateText({

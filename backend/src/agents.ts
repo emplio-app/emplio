@@ -5,7 +5,7 @@
 // one (`emplio hand`, jobs.ts) runs as it: its instructions, its tools (with what each takes and does) and its lessons
 // go in the thread's prompt, its skills are named up front, and its level picks the model. Its tools are a list of
 // names (gmail.send): each tool is kept once, in a toolset/ file (_toolset.py), and a tool its thread saved or used
-// joins the list by itself (reader.ts). Only Emplio (not its threads) makes and changes agents, in anyone's chat
+// joins the list as that run ends (jobs.ts keepTools). Only Emplio (not its threads) makes and changes agents, in anyone's chat
 // with it (staff too: every job has an agent); any thread may add a lesson. Lessons are shown as notes from past work, never as
 // instructions. See docs/agents.md.
 import type { AgentInfo } from "@emplio/shared";
