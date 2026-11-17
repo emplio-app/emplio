@@ -14,9 +14,20 @@ import { listPaths, readFile, writeFile, writeFiles } from "../src/gitea";
 const APPLY = process.argv.includes("--apply");
 const AUTHOR = { name: "Emplio", email: "noreply@emplio.app" };
 const KEYWORDS = new Set(["and", "as", "class", "def", "del", "for", "from", "global", "if", "import", "in", "is", "not", "or", "pass", "return", "try", "while", "with", "tools", "emplio"]);
-// a function that can change something outside: writes, sends, clicks, posts
-const WRITES =
-  /\.write_text\(|\.write_bytes\(|open\([^)]*["'][wax]b?["']|\bbrowser\.(click|fill|type|press|select|check|upload|drag)\(|\.send\(\s*["'](POST|PUT|PATCH|DELETE)|requests\.(post|put|patch|delete)\(|\bsmtplib\b|apps\.run\(\s*["'][a-z_]+\.(send|create|update|delete|add|post|remove|move|upload|reply|forward|insert|set|cancel|refund|charge|pay|archive)/i;
+// a function that changes something outside the computer: sends, clicks on a site, posts, writes a database or an
+// app. Files it writes on the computer don't count: asking each time for those would be noise.
+const WRITES = new RegExp(
+  [
+    /\.(click|fill|type|press|select|check|upload|drag|dblclick)\(/, // a page, also .click() inside page code
+    /\bemplio\.(?!tools\b|apps\b|browser\b)\w+\.(send|add|create|update|remove|delete|post|reply|grant|cancel|set|done|hand)\b/,
+    /\bapps\.run\(\s*["'][a-z0-9_]+\.[a-z_]*(send|create|update|delete|add|post|remove|move|upload|reply|forward|insert|set|cancel|refund|charge|pay|archive|trash|label|modify|patch|put|write|append|share|invite|publish|merge|close|comment)/,
+    /requests\.(post|put|patch|delete)\(|method\s*=\s*["'](POST|PUT|PATCH|DELETE)|\bsmtplib\b|\bgit\s+push\b/,
+    /\b(insert\s+into|update\s+\w+\s+set|delete\s+from)\b/,
+  ]
+    .map((r) => r.source)
+    .join("|"),
+  "i",
+);
 
 export const areaOf = (name: string) => {
   let a = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "tools";
@@ -24,25 +35,35 @@ export const areaOf = (name: string) => {
   return KEYWORDS.has(a) ? `${a}_tools` : a;
 };
 
-// Label each public top-level function with a risk (unless it has one), right above its decorators or def.
+// Label each public top-level function with a risk (unless it has one), right above its decorators or def: "changes"
+// when it, or a function of the file it calls, changes something outside (WRITES).
 export function labelled(py: string) {
   const lines = py.split("\n");
+  // a body runs to the next top-level def or class: a multi-line string inside it can start at the line's beginning
+  const starts = lines.flatMap((l, i) => (/^(?:async\s+def|def|class|@)\b|^@/.test(l) ? [i] : []));
+  const defs = lines.flatMap((l, i) => {
+    const m = /^(?:async\s+)?def\s+(\w+)\s*\(/.exec(l);
+    const end = starts.find((s) => s > i) ?? lines.length;
+    return m ? [{ name: m[1]!, at: i, body: lines.slice(i, end).join("\n") }] : [];
+  });
+  const changes = new Set(defs.filter((d) => WRITES.test(d.body)).map((d) => d.name));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of defs)
+      if (!changes.has(d.name) && [...changes].some((n) => n !== d.name && new RegExp(`\\b${n}\\(`).test(d.body.slice(d.body.indexOf("\n")))))
+        changes.add(d.name), (grew = true);
+  }
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = /^(?:async\s+)?def\s+([A-Za-z]\w*)\s*\(/.exec(lines[i]!);
-    if (m) {
+    const d = defs.find((d) => d.at === i);
+    if (d && !d.name.startsWith("_")) {
       // the decorators just above are already in out: the label goes above them
       let at = out.length;
       while (at > 0 && out[at - 1]!.startsWith("@")) at--;
       let c = at;
       let has = false;
       while (c > 0 && out[c - 1]!.startsWith("#")) if (/^#\s*risk:/i.test(out[--c]!)) has = true;
-      if (!has) {
-        let end = i + 1;
-        while (end < lines.length && (!lines[end]!.trim() || /^[\s#]/.test(lines[end]!) || /^[)\]}]/.test(lines[end]!))) end++;
-        const body = lines.slice(i, end).join("\n");
-        out.splice(at, 0, `# risk: ${WRITES.test(body) ? "changes" : "reads"}`);
-      }
+      if (!has) out.splice(at, 0, `# risk: ${changes.has(d.name) ? "changes" : "reads"}`);
     }
     out.push(lines[i]!);
   }
@@ -137,10 +158,10 @@ async function migrate(w: typeof workspaces.$inferSelect) {
     for (const p of trees.get(r)!.filter((p) => /^agents\/[^/]+\/AGENT\.md$/.test(p.path))) {
       const md = files.find((f) => f.path === p.path)?.content ?? (await readFile(w.id, r, p.path)) ?? "";
       const a = parseAgent(p.path.split("/")[1]!, md);
-      const add = moves
+      const add = [...new Set(moves
         .filter((m) => a.skills.includes(m.name) && (m.repo === r || m.repo === "company" || (m.repo === "restricted" && r !== "company")))
         .flatMap((m) => toolsIn(m.area, files.find((f) => f.path === `toolset/${m.area}.py`)?.content ?? "").map((t) => t.name))
-        .filter((n) => !a.tools.includes(n));
+        .filter((n) => !a.tools.includes(n)))];
       if (!add.length) continue;
       const next = agentMd({ ...a, tools: [...a.tools, ...add] });
       const i = files.findIndex((f) => f.path === p.path);

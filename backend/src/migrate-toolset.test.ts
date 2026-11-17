@@ -12,6 +12,12 @@ test("old function files become tool areas with risk labels", () => {
   expect(out).toContain("# risk: spends\ndef pay(x):");
   expect(out).not.toContain("# risk: reads\ndef _q");
   expect(out.match(/# risk:/g)!.length).toBe(3);
+  // calls a function that changes something; sends through Emplio; a database write; a local file is fine
+  const more = labelled(`def tell(x):\n    return emplio.channels.send(x, "hi")\n\n\ndef both(x):\n    tell(x)\n\n\ndef top_up(w):\n    return sh(f"psql -c 'insert into credit (w) values ({w})'")\n\n\ndef save(p):\n    open(p, "w").write("x")\n`);
+  expect(more).toContain("# risk: changes\ndef tell(");
+  expect(more).toContain("# risk: changes\ndef both(");
+  expect(more).toContain("# risk: changes\ndef top_up(");
+  expect(more).toContain("# risk: reads\ndef save(");
 });
 
 test("the old way's names point at the tools", () => {
