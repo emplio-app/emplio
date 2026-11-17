@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, test } from "bun:test";
-import { parseAutomation, signatureOk } from "./automations";
+import { automationsCommand, parseAutomation, signatureOk } from "./automations";
 
 test("parses an automation file", () => {
   const a = parseAutomation(`---\nwhen: trigger\ntrigger: gmail.new_gmail_message\nconfig:\n  query: "from:@acme.com"\n---\nAdd the lead.\n`);
@@ -26,4 +26,9 @@ test("an automation can name its agent", () => {
   expect(a).toMatchObject({ when: "schedule", agent: "Supplier Finder" });
   expect(parseAutomation(`---\nwhen: manual\n---\nX\n`)).toMatchObject({ agent: null });
   expect(parseAutomation(`---\nwhen: manual\nagent: [a]\n---\nX\n`)).toHaveProperty("error");
+});
+
+test("adding an automation with a name but no file says the file is missing, not the whole usage", async () => {
+  const said = await automationsCommand({ workspaceId: "w", userId: "u" } as never, ["add", "daily"], async () => {});
+  expect(said).toStartWith("error: daily needs its file");
 });
