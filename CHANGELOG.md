@@ -2,6 +2,25 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.58 (2026-11-17)
+
+### What's new
+
+- Emplio's first thinking on a reply now shows while it happens, instead of the reply seeming to start with an action.
+- On a phone, the Chat button takes you back to the chat you were in.
+- Ask Emplio who's on your team, which apps are connected or what checks are set up, and it tells you straight away.
+- You can reply to text you select in your own messages, not just Emplio's.
+
+### For developers
+
+- chat-view/tool-calls: first reasoning renders while streaming and stays its own segment (#203).
+- bottom-tabs: Chat tab goes to the last open chat (#204, fixes #198).
+- chat.ts: owner's own team, apps, automations, check-ins and tasks are not "internals" (#204, fixes #197).
+- automations: `add`/`update` with a name and no file returns a clear error (#204, #195).
+- iOS Info.plist: camera, photo library and microphone usage text (#205, #155, #156; needs an iPhone build).
+- desktop: powerSaveBlocker keeps the computer from idle sleep while the app runs (#205, #194; needs a desktop release).
+- quote: Reply on selected text in the person's own messages (#206, part of #200).
+
 ## 1.2.57 (2026-11-17)
 
 ### What's new
