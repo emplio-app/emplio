@@ -82,6 +82,16 @@ def saved_files():
 
 def check_saved(path):
     rel = "/work" + path[len(W):] if path.startswith(W) else path
+    # on a person's own computer /work is a folder in their home: a saved file says /work, never that folder, so it
+    # works on the cloud computer too (emplio._load swaps it back here)
+    if W != "/work":
+        try:
+            text = open(path, encoding="utf-8").read()
+            if W in text:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text.replace(W, "/work"))
+        except OSError:
+            pass
     try:
         tree = ast.parse(open(path, encoding="utf-8").read(), path)
     except SyntaxError as e:
