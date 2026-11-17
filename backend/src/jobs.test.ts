@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { FROM_EMPLIO, runRef, splitRef, type Approval, type AskCard } from "@emplio/shared";
 import { eq } from "drizzle-orm";
-import { notCounted, refusal, remindAt } from "./chat";
+import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
 import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, savedSkill, threadsNote, untoldNote, untoldReports } from "./jobs";
@@ -68,15 +68,26 @@ test("the hand-off reminder comes at 2 commands, then every 15", () => {
   expect(at).toEqual([2, 17, 32]);
 });
 
-test("Emplio has no browser, but a brief may mention it; nothing else is refused", () => {
+test("Emplio has no browser, but a brief may mention it; past three of its own commands the rest is an agent's", () => {
   expect(refusal("emplio browser open https://x.example", 1)).toBeTruthy();
   expect(refusal("emplio logins list; emplio browser snapshot -i", 1)).toBeTruthy();
   expect(refusal("emplio hand \"Price Checker\" <<'EOF'\nOpen it with emplio browser\nEOF", 1)).toBeNull();
-  expect(refusal("python go.py", 40)).toBeNull();
+  expect(refusal("python go.py", 3)).toBeNull();
+  expect(refusal("python go.py", 4)).toBe(HAND_IT_OFF);
+  // handing off, asking and setting up are never counted, so they're never refused (nth 0)
+  expect(refusal("emplio hand \"Price Checker\" <<'EOF'\nbrief\nEOF", 0)).toBeNull();
+});
+
+test("a failed command of Emplio's own: Python errors and real shell errors, not grep finding nothing", () => {
+  expect(failed({ exitCode: 1 }, true)).toBe(true);
+  expect(failed({ exitCode: 1 }, false)).toBe(false);
+  expect(failed({ exitCode: 2 }, false)).toBe(true);
+  expect(failed({ exitCode: 0 }, true)).toBe(false);
+  expect(failed({}, true)).toBe(false);
 });
 
 test("hand-offs and the checklist aren't counted as work done by hand", () => {
-  for (const open of ["emplio hand myself <<'EOF'\nbrief\nEOF", "emplio threads wait", "emplio plan done", "emplio report \"broken\""]) expect(notCounted(open)).toBe(true);
+  for (const open of ["emplio hand myself <<'EOF'\nbrief\nEOF", "emplio threads wait", "emplio plan done", "emplio report \"broken\"", "emplio ask \"Send it?\" Yes No", "emplio tasks add \"x\"", "emplio automations off daily"]) expect(notCounted(open)).toBe(true);
   for (const work of ["emplio web read https://x.com", "python go.py", "emplio browser open https://x.com", "cat handoff.md"]) expect(notCounted(work)).toBe(false);
 });
 

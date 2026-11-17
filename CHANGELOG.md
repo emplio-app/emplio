@@ -2,6 +2,21 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.57 (2026-11-17)
+
+### What's new
+
+- Emplio now hands work to its agents instead of doing long jobs itself in your chat: reading mail and apps, following a saved skill, and fixing anything that went wrong all go to an agent, so your chat stays free.
+- Ask Emplio which agents you have and what each one did, and it tells you.
+- Creating or changing an automation from a chat works again.
+- Skills saved on the Mac app now work on the online computer too, and the other way round.
+- The morning brief no longer repeats the previous evening's report when it had nothing new to say.
+
+### For developers
+
+- chat.ts: past 3 of Emplio's own commands in a reply to a person the rest aren't run (`HAND_IT_OFF`); its first failed command gets a note to hand off; jobs.ts MANAGER_PROMPT and the skills heading send app reads, matching skills and failures to agents; agents list shows each agent's skills; Python library `input=` adds the `-` for automations add/update, apps run and mcp call; skills and lib files keep `/work` paths on a person's own computer (#199).
+- heartbeat.ts: a check-in sends only its own round's reply (#201).
+
 ## 1.2.56 (2026-11-17)
 
 ### What's new

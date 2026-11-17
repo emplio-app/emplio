@@ -13,7 +13,8 @@ const app = () => import("../emplio");
 // run ends when Emplio hands off or answers.
 async function decide({ business, chat, world, carriesOn }: Input): Promise<Output> {
   const { reply, pretend, counted } = await app();
-  const { longRunNote, notCounted, refusal, remindAt, skillNote } = await import("../../src/chat");
+  const { FAILED_NOTE, longRunNote, notCounted, refusal, remindAt, skillNote } = await import("../../src/chat");
+  let toldFailed = false;
   let byHand = 0;
   const count = counted();
   const said = await reply(
@@ -25,7 +26,10 @@ async function decide({ business, chat, world, carriesOn }: Input): Promise<Outp
       byHand = Math.max(byHand, nth);
       const refused = refusal(command, nth);
       if (refused) return refused;
-      const result = [pretend(command, world), skillNote(nth, command)].filter(Boolean).join("\n\n");
+      const answer = pretend(command, world);
+      // the server's note on the first of its own commands to fail (src/chat.ts failedOnce)
+      const failedNote = nth && !toldFailed && /^(Error|Traceback)\b/m.test(answer) ? ((toldFailed = true), FAILED_NOTE) : null;
+      const result = [answer, skillNote(nth, command), failedNote].filter(Boolean).join("\n\n");
       return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
     },
     12,

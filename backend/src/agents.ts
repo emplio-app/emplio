@@ -109,7 +109,8 @@ export async function agentPrompt(workspaceId: string, a: Agent) {
 // The agents, one line each, for Emplio's prompt next to the skills; names only past MAX_LISTED.
 export async function agentsList(workspaceId: string) {
   const active = (await listAgents(workspaceId)).filter((a) => !a.archived);
-  if (active.length <= MAX_LISTED) return active.map((a) => `- ${a.name} (agents/${a.slug}, ${a.level}): ${a.description}`);
+  if (active.length <= MAX_LISTED)
+    return active.map((a) => `- ${a.name} (agents/${a.slug}, ${a.level}): ${a.description}${a.skills.length ? ` Skills: ${a.skills.join(", ")}.` : ""}`);
   return [`- ${active.map((a) => a.name).join(", ")}`, "- [descriptions: emplio agents list]"];
 }
 

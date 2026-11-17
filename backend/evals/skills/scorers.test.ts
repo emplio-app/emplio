@@ -7,6 +7,7 @@ const write = "mkdir -p /work/company/skills/amazon-payouts && cat > /work/compa
 test("reading and saving a skill are read from the commands", () => {
   expect(readOf(["emplio plan set a b; emplio skills use gst-quote"])).toEqual(["gst-quote"]);
   expect(readOf(["cat /work/company/skills/gst-quote/SKILL.md"])).toEqual(["gst-quote"]);
+  expect(readOf(["emplio hand \"Quote Maker\" <<'EOF'\nUse the gst-quote skill\nEOF"])).toEqual(["gst-quote"]);
   expect(savedOf([write])).toEqual(["amazon-payouts"]);
   expect(savedOf(["mkdir -p /work/me/skills/slips && cd /work/me/skills/slips && cat > SKILL.md <<'EOF'\nx\nEOF"])).toEqual(["slips"]);
   expect(savedOf(["emplio skills use gst-quote", "python3 x.py"])).toEqual([]);
