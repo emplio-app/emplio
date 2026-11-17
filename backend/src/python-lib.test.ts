@@ -23,19 +23,19 @@ test("input= reaches commands that read it after a '-'", () => {
   expect(app.args).toEqual(["apps", "run", "gmail.send", "-"]);
 });
 
-test("a skill saved with /work paths works where /work is a folder in the person's home", () => {
+test("a tool saved with /work paths works where /work is a folder in the person's home", () => {
   const work = mkdtempSync(join(tmpdir(), "work-"));
-  mkdirSync(join(work, "company/skills/s"), { recursive: true });
-  writeFileSync(join(work, "company/skills/s/functions.py"), `KEY = "/work/tmp/key.pem"\nOTHER = "/workspace/x"\n`);
-  const { out, err } = py(`s = emplio.skill("s"); print(s.KEY); print(s.OTHER)`, { EMPLIO_WORK: work });
+  mkdirSync(join(work, "company/toolset"), { recursive: true });
+  writeFileSync(join(work, "company/toolset/s.py"), `KEY = "/work/tmp/key.pem"\nOTHER = "/workspace/x"\n`);
+  const { out, err } = py(`s = emplio.tools.s; print(s.KEY); print(s.OTHER)`, { EMPLIO_WORK: work });
   expect(err).toBe("");
   expect(out.trim().split("\n")).toEqual([`${work}/tmp/key.pem`, "/workspace/x"]);
 });
 
-test("a skill saved on a person's own computer keeps /work, not their folder", () => {
+test("a tool saved on a person's own computer keeps /work, not their folder", () => {
   const work = mkdtempSync(join(tmpdir(), "work-"));
-  mkdirSync(join(work, "company/skills/s"), { recursive: true });
-  const file = join(work, "company/skills/s/functions.py");
+  mkdirSync(join(work, "company/toolset"), { recursive: true });
+  const file = join(work, "company/toolset/s.py");
   writeFileSync(file, `KEY = "${work}/restricted/key.pem"\n`);
   const p = Bun.spawnSync(["python3", "-c", "import sys, kernel; print(kernel.check_saved(sys.argv[1]))", file], {
     env: { PATH: process.env.PATH!, PYTHONPATH: join(import.meta.dir, "python"), EMPLIO_WORK: work },

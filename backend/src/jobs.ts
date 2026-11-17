@@ -19,7 +19,7 @@ import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./chan
 import { generateReply, lastWords, loadMessages, quiet, replyFromNotification, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
-import { agentPrompt, agentsCommand, findAgent, flags, listAgents } from "./agents";
+import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, skillsUsed, toolsUsed } from "./agents";
 import { canReopen, liveView, REOPEN_MS } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
@@ -61,19 +61,25 @@ const carryUntil = new Map<string, number>();
 const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
 const RESTARTED =
   "The server restarted and cut your last run off mid-work. Carry on from where you stopped, without redoing what's done: what you found is in your files and this chat. Threads you started were cut off too: check them with `emplio threads` before starting any again.";
-// A finished run that saved no skill and used none gets this once (began, below): every kind of task done once is
-// done faster the next time. ponytail: "touched functions.py or called a skill" read from its code, not checked in git
-export const SAVE_SKILL =
-  "Before your report: save how you did this as a skill (or improve the one you used), SKILL.md plus a functions.py of modular, reusable, generic functions (one step each, what changes as arguments, nothing fixed to this case). Then give your report again in full.";
-// true too for a run the person started by writing in the job's chat: chatting there isn't a task
-export const savedSkill = (msgs: { role: string; parts: unknown }[]) => {
+// A finished run that kept no tool gets this once (began, below): every kind of task done once is one call the next
+// time. Opening a skill or calling a tool doesn't count: a job that did part of the work inline (a write by hand
+// next to a skill that only reads) would never keep that part. A run that only called tools says so in a line.
+export const SAVE_TOOL =
+  'Before your report: keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. If every step was already a call to a saved tool, or this was a true one-off, say so in one line. Then give your report again in full.';
+// "Saved tool <area>.<name> (" is what emplio.tools.save prints; a toolset file written by hand counts too. true also for a run the person started by writing in the job's chat: chatting there isn't a task
+export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
   const lastAsk = [...msgs].reverse().find((m) => m.role === "user");
   if (!lastAsk || !textOf(lastAsk).startsWith(FROM_EMPLIO)) return true;
   const back = [...msgs].reverse().findIndex((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
   return msgs
     .slice(back < 0 ? 0 : msgs.length - back)
-    .flatMap((m) => (m.parts as { type?: string; input?: { code?: string; command?: string } }[]) ?? [])
-    .some((p) => /functions\.py|emplio\.skill\(|emplio skills? use/.test(p.input?.code ?? p.input?.command ?? ""));
+    .flatMap((m) => (m.parts as { input?: { code?: string; command?: string }; output?: { output?: unknown } }[]) ?? [])
+    .some((p) => {
+      const code = p.input?.code ?? p.input?.command ?? "";
+      const out = typeof p.output?.output === "string" ? p.output.output : "";
+      const wrote = /\.write_text\(|\.write\(|open\([^)]*['"][wa]['"]/.test(code) && /toolset\/\w+\.py/.test(code);
+      return /^Saved tool [a-z][a-z0-9_]*\.\w+ \(/m.test(out) || wrote;
+    });
 };
 const skillAsked = new Set<string>();
 export const CARRY_ON =
@@ -109,9 +115,17 @@ chat is lost and gets read again. Read a big document once, with a script that p
 small file in your folder (every item with its page, say), and work from that file; never print a whole document \
 to read it. When the task makes something (a sheet, a document, a list), start the file early and add to it as you \
 go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. \
-When the task succeeds, save how you did it as a skill before you report (or improve the skill you used): SKILL.md plus a \
-functions.py of modular, reusable, generic functions, each one step, taking what changes (a name, a date, an id) as \
-arguments, nothing fixed to this one case, so the next run of this kind of task just calls them. Then end with a report for whoever started you, which is checked against what you were asked:
+Before writing code for a step, look for a tool that does it \
+(your tools are listed below; others: \`emplio.tools.search("<words>")\`). None does it: write the step as a small \
+function from your first try, what changes (a name, a date, an id) as its inputs, and call it; when it breaks, fix the \
+function and run it again, not loose lines, so what works is already a tool to keep. When the task succeeds, keep what the next \
+job of this kind would call as tools before you report: \`emplio.tools.save(<function>, area="<what it's about>", \
+risk="reads" or "changes" or "spends")\` for each, modular, reusable and generic: one step each, taking what changes \
+(a name, a date, an id) as inputs, nothing fixed to this one case, so the next job just calls them; what you worked \
+out about one site or app (its address, the field with the answer) goes in a small tool of that site's area that calls \
+the general one with those built in. A tool that failed: fix that same tool and save it again under its name, never a \
+second one next to it. Judgment the code can't hold (when to ask first, how to word things) goes in a \
+skill's SKILL.md. Then end with a report for whoever started you, which is checked against what you were asked:
 - Whether it's all done, and if not, what's left. Never say done for work you've only started.
 - What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
 - Files you made, by name: leave them in /work/out (they stay there and are stored in Files; Emplio shows them to the person).
@@ -232,10 +246,11 @@ export async function jobReply(chatId: string) {
   const w = await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) });
   if (!w) return null;
   // read each reply, so a follow-up gets the agent's latest instructions and lessons
-  const agent = w.agent ? await findAgent(w.workspaceId, w.agent) : null;
+  const admin = w.agent ? (await personFor(w.workspaceId, w.userId))?.role !== "member" : false;
+  const agent = w.agent ? await findAgent(w.workspaceId, w.agent, { userId: w.userId, admin }) : null;
   return {
     caller: { depth: w.depth, jobId: w.id } satisfies Caller,
-    prompt: [RULES(w.depth, w.conversationId), ...(agent ? [await agentPrompt(w.workspaceId, agent)] : [])].join("\n\n"),
+    prompt: [RULES(w.depth, w.conversationId), ...(agent ? [await agentPrompt(w.workspaceId, agent, { userId: w.userId, admin })] : [])].join("\n\n"),
     strong: (w.level ?? agent?.level) === "strong",
     agent: agent?.name,
     startedIn: w.conversationId,
@@ -260,6 +275,16 @@ export async function startedIn(chatId: string): Promise<string> {
   return parent ? startedIn(parent.conversationId) : chatId;
 }
 
+async function keepTools(w: Row, chatId: string) {
+  const parts = (await loadMessages(chatId)).flatMap((m) => (m.parts as { input?: { code?: string; command?: string }; output?: unknown }[]) ?? []);
+  const used = toolsUsed(parts);
+  const skills = skillsUsed(parts);
+  if (!used.length && !skills.length) return;
+  const person = await personFor(w.workspaceId, w.userId);
+  const agent = await findAgent(w.workspaceId, w.agent!, { userId: w.userId, admin: person?.role !== "member" });
+  if (agent && person) await addTools({ workspaceId: w.workspaceId, author: { name: person.userName, email: person.userEmail }, admin: person.role !== "member" }, agent, used, skills);
+}
+
 async function began(w: Row, stop: () => void) {
   const until = deadline(w.id);
   carryUntil.delete(w.id);
@@ -273,6 +298,8 @@ async function began(w: Row, stop: () => void) {
   // carded: it asked the person with a card (emplio ask), which shows over their chat box and sends their answer here
   return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false, carded: AskCard[] = []) => {
     const timeLeft = Date.now() < until - 60_000;
+    // the tools and skills this run saved or used join its agent's list now, so its next job has them up front
+    if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
     if (capped && outcome === "completed" && !interrupted && timeLeft) {
       // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
       carryUntil.set(w.id, until);
@@ -283,13 +310,13 @@ async function began(w: Row, stop: () => void) {
       if (!told) owed.delete(w.id);
       return;
     }
-    if (outcome === "completed" && !capped && !interrupted && !carded.length && timeLeft && !asks(answer) && !skillAsked.has(w.id) && w.chatId && !savedSkill(await loadMessages(w.chatId))) {
+    if (outcome === "completed" && !capped && !interrupted && !carded.length && timeLeft && !asks(answer) && !skillAsked.has(w.id) && w.chatId && !savedTool(await loadMessages(w.chatId))) {
       skillAsked.add(w.id);
       carryUntil.set(w.id, until);
       live.delete(w.id);
       track(w.id).done.then(e.end);
       const told = owed.has(w.id);
-      void send(w, SAVE_SKILL, undefined, true);
+      void send(w, SAVE_TOOL, undefined, true);
       if (!told) owed.delete(w.id);
       return;
     }
@@ -561,7 +588,9 @@ async function carryOn(who: Who, conversationId: string, w: Row, brief: string):
     : { text: `${short(w.id)} "${w.name}"${w.agent ? ` (${agentName(w.agent)})` : ""} is working on it`, started: [runRef(w.id, run)] };
 }
 
-const activeAgents = async (workspaceId: string) => (await listAgents(workspaceId)).filter((a) => !a.archived);
+// the agents a person's work can go to: theirs, admins' (for an owner or admin) and the company's
+const viewerOf = async (who: Who) => ({ userId: who.userId, admin: (await personFor(who.workspaceId, who.userId))?.role !== "member" });
+const activeAgents = async (who: Who) => (await listAgents(who.workspaceId, await viewerOf(who))).filter((a) => !a.archived);
 
 // An agent that a new one's name would nearly copy ("Fabric Supplier Finder" next to "Supplier Finder"), or null.
 // ponytail: the words of the names; a meaning match if near-copies with other words get through
@@ -594,7 +623,7 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       const brief = text.join("\n\n");
       if (!pick || !brief) break;
       const yours = async () => {
-        const names = (await activeAgents(who.workspaceId)).map((a) => a.name);
+        const names = (await activeAgents(who)).map((a) => a.name);
         return names.length ? `Your agents: ${names.join(", ")}.` : "You have no agents yet.";
       };
       const make = 'Or make one: emplio hand "<Agent Name>" --description "<the kind of work it does>".';
@@ -610,16 +639,16 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       // a plain copy: only for a thread splitting off part of its own work, which can't make agents
       const copy = pick.toLowerCase() === "myself";
       if (copy && !caller.depth) return { text: `error: work goes to an agent, not to a copy of you. Nothing was started. ${await yours()} ${make}` };
-      let agent = copy ? null : await findAgent(who.workspaceId, pick);
+      let agent = copy ? null : await findAgent(who.workspaceId, pick, await viewerOf(who));
       const made = !copy && !agent;
       if (made) {
         if (!maker || caller.depth) return { text: `error: there's no agent "${pick}", and a thread can't make one. Nothing was started: pick one, or myself. ${await yours()}` };
         if (!set.description) return { text: `error: there's no agent "${pick}". Nothing was started. ${await yours()} If none of them fits, run it again with --description "<the kind of work it does>" and "${pick}" is made.` };
-        const close = closeTo(pick, (await activeAgents(who.workspaceId)).map((a) => a.name));
+        const close = closeTo(pick, (await activeAgents(who)).map((a) => a.name));
         if (close) return { text: `error: "${pick}" is close to your agent ${close}. Nothing was started: hand it to ${close} (emplio agents update widens what it does), or name the new one for clearly different work.` };
         const added = await agentsCommand({ ...who, admin: true, job: false, author: maker.author }, ["add", pick, "--description", set.description]);
         if (!added.changed) return { text: added.text };
-        agent = await findAgent(who.workspaceId, pick);
+        agent = await findAgent(who.workspaceId, pick, await viewerOf(who));
       }
       if (agent?.archived) return { text: `error: ${agent.name} is archived; emplio agents restore ${agent.slug} first, or pick another` };
       // the agent's job here: new work goes to it, unless --new

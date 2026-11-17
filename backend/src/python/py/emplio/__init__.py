@@ -9,14 +9,13 @@ area's commands, help(emplio) all of them.
     rows = emplio.apps.run("googlesheets.get_values", {"spreadsheet_id": sid, "range": "A1:F200"})
     emplio.tasks.add("Send Acme the revised quote", to="raj@example.com", due="2026-10-25")
     emplio.hand("Researcher", input="Find three suppliers of ...")
-    inv = emplio.skill("zoho-invoices"); inv.create("Acme", 12000)
-    gst = emplio.lib("gst")
-    results = emplio.map(inv.create, rows, limit=5)
+    from tools.invoices import create     # a tool kept earlier; emplio.tools.save(fn, area="invoices") keeps one
+    results = emplio.map(create, rows, limit=5)
 """
 import importlib.util, json, os, re, shutil, subprocess, sys, threading
 from concurrent.futures import ThreadPoolExecutor
 
-__all__ = ["EmplioError", "ShellError", "Failed", "sh", "skill", "lib", "map", "help"]
+__all__ = ["EmplioError", "ShellError", "Failed", "sh", "map", "help", "tools"]
 
 W = os.environ.get("EMPLIO_WORK") or "/work"
 
@@ -195,63 +194,10 @@ def _usage():
     return done.stdout.strip()
 
 
-# ---- saved functions ----
-
-_loaded = {}
-# "/work" as a word of its own, not part of another path (a/work, ~/work, /workspace)
-_WORK_WORD = re.compile(r"(?<![\w.~/-])/work(?=$|[\s/\"';:)|&<>,}\]])", re.M)
-
-
-def _load(kind, name, paths):
-    for path in paths:
-        if os.path.isfile(path):
-            mtime = os.path.getmtime(path)
-            hit = _loaded.get(path)
-            if hit and hit[0] == mtime:
-                return hit[1]
-            safe = re.sub(r"\W", "_", name)
-            spec = importlib.util.spec_from_file_location(f"emplio_{kind}_{safe}", path)
-            mod = importlib.util.module_from_spec(spec)
-            mod.__emplio__ = f"{kind} {name}"
-            with open(path, encoding="utf-8") as f:
-                src = f.read()
-            # on a person's own computer /work is a folder in their home: the app swaps it in what Emplio types, and
-            # here in saved files, so a skill saved on one computer works on the other (same rule as desktop paths.js)
-            if W != "/work":
-                src = _WORK_WORD.sub(lambda _: W, src)
-            exec(compile(src, path, "exec"), mod.__dict__)
-            _loaded[path] = (mtime, mod)
-            return mod
-    where = " or ".join(p.replace(W, "/work", 1) for p in paths)
-    raise EmplioError(f"no {kind} {name}: nothing at {where}. Saved ones: {', '.join(_names(kind)) or '(none yet)'}")
-
-
-def _names(kind):
-    found = set()
-    for top in ("me", "company"):
-        if kind == "skill":
-            d = os.path.join(W, top, "skills")
-            if os.path.isdir(d):
-                found |= {e for e in os.listdir(d) if os.path.isfile(os.path.join(d, e, "functions.py"))}
-        else:
-            d = os.path.join(W, top, "lib")
-            if os.path.isdir(d):
-                found |= {e[:-3] for e in os.listdir(d) if e.endswith(".py")}
-    return sorted(found)
-
-
-def skill(name):
-    """A skill's saved functions (skills/<name>/functions.py; this person's own first, then the company's)."""
-    return _load("skill", name, [os.path.join(W, top, "skills", name, "functions.py") for top in ("me", "company")])
-
-
-def lib(name):
-    """Shared helper functions used by several skills (lib/<name>.py; this person's own first, then the company's)."""
-    return _load("lib", name, [os.path.join(W, top, "lib", name + ".py") for top in ("me", "company")])
-
+# ---- tools ----
 
 def describe(mod):
-    """Each public function of saved functions, with its inputs and one-line description."""
+    """Each public function of a tools area, with its inputs and one-line description."""
     import inspect
     lines = [f"{mod.__emplio__}:"]
     for n, f in vars(mod).items():
@@ -281,7 +227,11 @@ def map(fn, items, limit=5):
     place holds a Failed (falsy, with .item and .error). A dict or tuple item is passed as keyword/positional args."""
     items = list(items)
 
+    # inside a tool that was allowed, what the items call is part of that OK, in the worker threads too
+    allowed = getattr(_toolset._allowed, "on", False)
+
     def one(item):
+        _toolset._allowed.on = allowed
         try:
             if isinstance(item, dict):
                 return fn(**item)
@@ -290,6 +240,8 @@ def map(fn, items, limit=5):
             return fn(item)
         except Exception as e:  # noqa: BLE001 -- each failure is reported in its place
             return Failed(item, e)
+        finally:
+            _toolset._allowed.on = False
 
     # stopped (time ran out, or interrupted): what hasn't started is dropped, not left running after the run
     pool = ThreadPoolExecutor(max_workers=max(1, min(int(limit), 10)))
@@ -298,6 +250,13 @@ def map(fn, items, limit=5):
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+
+# ---- tools: functions kept one file per area in toolset/ folders (_toolset.py) ----
+
+from . import _toolset  # noqa: E402 -- needs EmplioError above
+
+_toolset.install()
+tools = _toolset.Tools()
 
 _root = _Area([])
 

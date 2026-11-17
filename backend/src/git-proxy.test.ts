@@ -1,5 +1,5 @@
 // The git route: which login it adds, what it refuses, and that a push waits for the person's OK. GitHub is faked.
-import { afterAll, beforeAll, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, expect, mock, spyOn, test } from "bun:test";
 import Fastify from "fastify";
 
 let logins = [{ label: "wrong", secret: "bad" }, { label: "right", secret: "good" }];
@@ -12,10 +12,11 @@ mock.module("./integrations", () => ({
   gitLogins: async () => logins,
   appsCommand: async () => ({ text: "A Connect button shows.", card: { app: "github", name: "GitHub", path: "/connect/github" } }),
 }));
-const realApprovals = await import("./approvals");
-mock.module("./approvals", () => ({ ...realApprovals, mustAsk: async () => ask, approve: async () => (asked++, null) }));
-const realActivity = await import("./activity");
-mock.module("./activity", () => ({ ...realActivity, record: () => {} }));
+// spies, not module mocks: put back after this file, so other files get the real approvals
+const approvals = await import("./approvals");
+spyOn(approvals, "mustAsk").mockImplementation(async () => ask);
+spyOn(approvals, "approve").mockImplementation(async () => (asked++, null));
+spyOn(await import("./activity"), "record").mockImplementation(() => {});
 process.env.WEBHOOK_URL = "https://api.test";
 const { gitAfter, gitForCommand, gitProxyRoutes, pushedRefs } = await import("./git-proxy");
 
@@ -39,6 +40,7 @@ beforeAll(async () => {
 });
 afterAll(() => {
   globalThis.fetch = realFetch;
+  mock.restore();
 });
 
 const get = (token: string, repo: string, service = "git-upload-pack") => app.inject({ url: `/git/${token}/github.com/${repo}.git/info/refs?service=${service}` });

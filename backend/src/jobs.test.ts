@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, savedSkill, threadsNote, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -226,17 +226,24 @@ test("Emplio's agents ask the person with a card; deeper threads ask in their re
   expect(RULES(2, "0123456789")).not.toContain("emplio ask");
 });
 
-test("a run counts as having saved a skill only for what it ran since its last brief", () => {
+test("a run counts as having kept a tool only for what it saved since its last brief", () => {
   const brief = (t: string) => ({ role: "user", parts: [{ type: "text", text: FROM_EMPLIO + t }] });
-  const ran = (code: string) => ({ role: "assistant", parts: [{ type: "tool-python", input: { code } }] });
-  expect(savedSkill([brief("check usage"), ran("emplio.db.sql('select 1')")])).toBe(false);
-  expect(savedSkill([brief("check usage"), ran("open('/work/me/skills/usage/functions.py','w').write(src)")])).toBe(true);
-  expect(savedSkill([brief("check usage"), ran("u = emplio.skill('usage'); u.today('Maithili')")])).toBe(true);
-  expect(savedSkill([brief("a"), ran("x = 'functions.py'"), brief("b"), ran("print(1)")])).toBe(false);
+  const ran = (code: string, output = "") => ({ role: "assistant", parts: [{ type: "tool-python", input: { code }, output: { output, exitCode: 0 } }] });
+  const saved = 'Saved tool billing.grant_pro (changes things) in company/toolset/billing.py. Use it: from tools.billing import grant_pro';
+  expect(savedTool([brief("check usage"), ran("emplio.db.sql('select 1')")])).toBe(false);
+  expect(savedTool([brief("grant pro"), ran("emplio.tools.save(grant_pro, area='billing', risk='changes')", saved)])).toBe(true);
+  // the Aakash grant: it opened a skill that only reads, and did the write inline
+  expect(savedTool([brief("grant pro"), ran("u = emplio.skill('emplio-server-users'); sh('psql ... insert ...')")])).toBe(false);
+  // a save that was refused prints no "Saved tool" line
+  expect(savedTool([brief("grant pro"), ran("emplio.tools.save(grant, area='billing')", "Error\ngrant uses email from earlier in this session")])).toBe(false);
+  expect(savedTool([brief("check usage"), ran("open('/work/me/toolset/usage.py','w').write(src)")])).toBe(true);
+  expect(savedTool([brief("check usage"), ran("Path('/work/company/toolset/usage.py').write_text(src)")])).toBe(true);
+  expect(savedTool([brief("a"), ran("x = 'toolset/usage.py'"), brief("b"), ran("print(1)")])).toBe(false);
+  expect(savedTool([brief("a"), ran("emplio.tools.save(f, area='a')", saved), brief("b"), ran("print(1)")])).toBe(false);
 });
 
 test("a run the person started by chatting in the job isn't asked for a skill", () => {
   const said = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
-  expect(savedSkill([said(FROM_EMPLIO + "check usage"), said("hello, how are you")])).toBe(true);
-  expect(savedSkill([])).toBe(true);
+  expect(savedTool([said(FROM_EMPLIO + "check usage"), said("hello, how are you")])).toBe(true);
+  expect(savedTool([])).toBe(true);
 });

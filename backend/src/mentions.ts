@@ -77,7 +77,7 @@ const people = async (who: Who): Promise<Mention[]> =>
 
 // Emplio's agents (Supplier Finder, ...), so work can be pointed at one; id is its slug
 const agents = async (who: Who): Promise<Mention[]> =>
-  (await listAgents(who.workspaceId)).filter((a) => !a.archived).map((a) => ({ kind: "agent", id: a.slug, label: a.name, detail: "Agent" }));
+  (await listAgents(who.workspaceId, { userId: who.userId, admin: who.role !== "member" })).filter((a) => !a.archived).map((a) => ({ kind: "agent", id: a.slug, label: a.name, detail: "Agent" }));
 
 // straight from the table (listConnections asks the provider about each one, too slow per keystroke)
 const apps = async (who: Who): Promise<Mention[]> => {

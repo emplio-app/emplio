@@ -6,7 +6,8 @@ import { foldIdleChats, generateReply, quiet } from "./chat";
 import { chatLink, heldBack, mainChat, post } from "./channels";
 import { db } from "./db";
 import { activity, automationRuns, chatNotes, connections, conversations, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { createFile, ensureRepo, readFile } from "./gitea";
+import { toolsIn } from "./agents";
+import { createFile, ensureRepo, listPaths, readFile } from "./gitea";
 import { overLimit, PROMPT_LIMIT } from "./sandbox";
 import { runAction } from "./integrations";
 import { isReplying, notify } from "./live";
@@ -63,7 +64,7 @@ const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}\n
 // The words of thinkerBrief, from pieces already read; the evals (backend/evals/background-round) use it too.
 // changes: what the server found new since the last round (changesSince); tooLong: memory files over the prompt's
 // limit, for the daily cleanup to rewrite.
-export const backgroundBrief = (p: { name: string; chat: string; today: string; goals: string; journal: string; notes: string; changes?: string; tooLong?: string }) =>
+export const backgroundBrief = (p: { name: string; chat: string; today: string; goals: string; journal: string; notes: string; changes?: string; tooLong?: string; tidy?: string }) =>
   `## You, in the background
 You are ${p.name}'s background agent: the same Emplio as in everyone's chats, working between them as the owner. Nobody is watching or will answer. Your job: keep the business's memory, tasks and goals true, so every chat goes better and nothing falls through. You see everything: anyone's chats (\`emplio history search <words>\`, \`emplio history show <chat>\`), activity, tasks, all files including restricted/, the database, and the apps (to read).
 
@@ -74,6 +75,7 @@ Yours to change:
 - Tasks: \`emplio tasks add "<what>" --to <email or ai> --due <when>\`, \`emplio tasks done <id>\`, \`emplio tasks update <id> --status cancelled\`; one per thing, never two joined with "and".
 - Goals: dated progress lines in company/goals.md under the goal they move; never the goals themselves.
 - Your journal (restricted/journal.md): open matters and what you tried, short; drop what's settled.
+- Tools (company/ and restricted/ toolset/<area>.py): only what "Toolset to tidy" lists, in the daily cleanup.
 Never yourself: email or message customers or suppliers, change data in apps, pay, delete, or use the browser. That becomes a task for the AI (\`emplio tasks add "<what>" --to ai --due <when> --notes "<how>"\`) or for the person it belongs to.
 Automations: only suggest one, to the person whose work it is, for work done by hand again and again; never create one, never the same suggestion twice (journal).
 Messaging: the team only, \`emplio channels send <email> "<message>"\`, only when something needs that person, all in one message, at most 3 a day each.
@@ -85,7 +87,7 @@ ${p.changes?.trim() || "(nothing new beyond the notes below)"}
 ## Readers' notes on people's chats since your last round
 ${p.notes}
 A note isn't enough? Read the chat: \`emplio history show <chat>\`.
-${p.tooLong ? `\n## Memory files over their limit (shown cut short in every chat)\n${p.tooLong}\n` : ""}
+${p.tooLong ? `\n## Memory files over their limit (shown cut short in every chat)\n${p.tooLong}\n` : ""}${p.tidy ? `\n## Toolset to tidy\n${p.tidy}\n` : ""}
 ## Goals (company/goals.md)
 ${clip(p.goals.trim(), 8000)}${p.goals.trim() === DEFAULT_GOALS.trim() ? "\n(Not set yet.)" : ""}
 
@@ -110,6 +112,7 @@ async function thinkerBrief(w: typeof workspaces.$inferSelect, chatId: string, l
     journal,
     changes,
     tooLong: daily ? await tooLong(w.id) : "",
+    tidy: daily ? await toolsetTidy(w.id).catch(() => "") : "",
     notes: notes.length ? `${more > 0 ? `(${more} earlier ones: \`emplio notes --since ${last ? day(last, tz) : today}\`)\n\n` : ""}${notes.map((n) => n.line).join("\n\n")}` : "(nothing)",
   });
 }
@@ -136,7 +139,8 @@ const JOURNAL = `Update your journal (restricted/journal.md) only if something i
 const DAILY = `Today's cleanup (do each part now):
 a. Tasks (all open ones are listed below): close each one that's already done (a chat, an email or the activity shows it, by \`emplio search <words>\` or \`emplio history search <words>\`: \`emplio tasks done <id>\`); tasks that are the same thing: keep one, cancel the rest (\`emplio tasks update <id> --status cancelled\`); cancel ones that no longer matter; chase or reassign late ones (the person's own reminder covers a task due today).
 b. Memory: rewrite each file under "Memory files over their limit" so it fits in half its limit: merge repeated lines into one, drop rules that are stale or that a later line contradicts, move lines about one client, person or job into that one's knowledge file or skill (their exact words), keep every rule that still holds for all their work, one short line each without dates or backstory. Rules where a slip would hurt stay in the file even when they name someone: who never to contact, money, what needs their OK before it goes out. People's files with the \`emplio person <email> rewrite\` command named beside each; company files in place.
-c. A job that went wrong or was corrected today: fix its skill. Work done by hand again and again: suggest an automation (journal first).`;
+c. A job that went wrong or was corrected today: fix its skill. Work done by hand again and again: suggest an automation (journal first).
+d. Tools, only what "Toolset to tidy" lists, in Python: tools that do the same thing: keep the better one (fix it to cover both, \`emplio.tools.save(fn, area=..., risk=..., replace=True)\`), delete the other from its file, and put the kept name in place of the other in each agent's list (\`emplio agents update <agent> --tools ...\`) and skill that names it. A file too long: move a group of its tools that belong together into a new area file the same way, then delete them from the old one. Check each changed area still loads (\`from tools.<area> import *\`).`;
 // Mondays, in the brief
 const WEEKLY = `This week's goals review (do it now, before the rest): for each goal in company/goals.md, look at the real numbers (apps to read, \`emplio db sql\`, tasks, activity), then write company/goals.md again with one new dated line under each goal ("- 2026-11-16: 31% of sales online, up from 28%"), every goal heading and earlier line left as it was. Add up to 3 tasks for this week that would move it most (to the AI or the person whose work it is), unless open ones already cover it. A goal with no progress in two weeks: one line in the brief. No goals set: ask the owner for them in the brief.`;
 
@@ -384,6 +388,31 @@ async function openTasks(workspaceId: string, userId: string, tz: string) {
   const open = (await listTasks({ workspaceId, userId, role: "owner" }, {})).filter((t) => ["todo", "doing", "waiting"].includes(t.status));
   if (!open.length) return "";
   return [`\n\nAll open tasks (${open.length}; id, status, due, who, what):`, ...open.slice(0, 80).map((t) => line(t, tz)), ...(open.length > 80 ? [`…and ${open.length - 80} more: \`emplio tasks list --all\``] : [])].join("\n");
+}
+
+// What in the toolsets needs the daily cleanup (part d): tools that look like the same one (the same name in two areas,
+// or the same description), and files past TOOLSET_LINES.
+// ponytail: retiring tools nobody uses needs their use counted; add when lists fill with dead ones
+const TOOLSET_LINES = 300;
+export async function toolsetTidy(workspaceId: string) {
+  const out: string[] = [];
+  const tools: { name: string; description: string; where: string }[] = [];
+  for (const repo of ["company", "restricted"]) {
+    const paths = await listPaths(workspaceId, repo).catch(() => []);
+    for (const p of paths.filter((p) => /^toolset\/[a-z][a-z0-9_]*\.py$/.test(p.path))) {
+      const text = (await readFile(workspaceId, repo, p.path)) ?? "";
+      const area = p.path.slice("toolset/".length, -3);
+      const lines = text.split("\n").length;
+      if (lines > TOOLSET_LINES) out.push(`- ${repo}/${p.path}: ${lines} lines (over ${TOOLSET_LINES}): split it`);
+      for (const t of toolsIn(area, text)) tools.push({ name: t.name, description: t.description, where: `${repo}/${p.path}` });
+    }
+  }
+  const same = (a: (typeof tools)[number], b: (typeof tools)[number]) =>
+    a.name.split(".")[1] === b.name.split(".")[1] || (a.description !== "(no description)" && a.description.toLowerCase() === b.description.toLowerCase());
+  for (let i = 0; i < tools.length; i++)
+    for (let j = i + 1; j < tools.length; j++)
+      if (same(tools[i]!, tools[j]!)) out.push(`- ${tools[i]!.name} (${tools[i]!.where}) and ${tools[j]!.name} (${tools[j]!.where}) look like the same tool: "${tools[i]!.description}" / "${tools[j]!.description}"`);
+  return out.slice(0, 15).join("\n");
 }
 
 // The memory files every chat's prompt carries that have grown past its limit (sandbox.ts capped), for the daily

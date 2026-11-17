@@ -4,8 +4,8 @@ import { describeMentions, searchMentions } from "./mentions";
 
 // two agents, one archived; nothing else in this business
 spyOn(agents, "listAgents").mockResolvedValue([
-  { slug: "supplier-finder", name: "Supplier Finder", description: "", skills: [], level: "light", archived: false, instructions: "" },
-  { slug: "old-helper", name: "Old Helper", description: "", skills: [], level: "light", archived: true, instructions: "" },
+  { slug: "supplier-finder", name: "Supplier Finder", description: "", skills: [], tools: [], level: "light", archived: false, instructions: "" },
+  { slug: "old-helper", name: "Old Helper", description: "", skills: [], tools: [], level: "light", archived: true, instructions: "" },
 ]);
 const who = { workspaceId: crypto.randomUUID(), userId: crypto.randomUUID(), role: "owner" as const };
 
