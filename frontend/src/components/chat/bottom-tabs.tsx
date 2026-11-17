@@ -8,6 +8,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { useConversations, useMe, useTasks } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// the chat last open on this page load, so Chat goes back to it, not to the main chat (#198)
+let lastChat: string | undefined;
+
 const TAB = "relative flex min-w-0 flex-col items-center justify-center gap-0.5 text-[0.68rem] font-medium outline-none transition-opacity select-none active:opacity-60 [-webkit-touch-callout:none] [&_svg]:size-5";
 
 // A phone's way around the app. The side menu (search, usage, the account) opens from the button top left on
@@ -19,7 +22,8 @@ export function BottomTabs() {
   const { data: conversations } = useConversations();
   const { data: me } = useMe();
   const { data: tasks } = useTasks();
-  const main = conversations?.find((c) => c.kind === "main");
+  if (pathname.startsWith("/chat/")) lastChat = pathname.split("/")[2];
+  const main = conversations?.find((c) => c.id === lastChat) ?? conversations?.find((c) => c.kind === "main");
   const endOfToday = new Date().setHours(24, 0, 0, 0);
   // what the side menu counts beside Work: waiting on me, and mine due today or late
   const needsMe = tasks?.filter(

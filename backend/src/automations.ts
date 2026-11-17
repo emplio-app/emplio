@@ -756,7 +756,10 @@ export async function automationsCommand(who: Ctx, args: string[], caughtUp: () 
         return await readAutomation(who.workspaceId, name);
       case "add":
       case "update": {
-        if (!name || !text) break;
+        if (!name) break;
+        // a name with no file: say what's missing, not the whole usage (#195)
+        if (!text?.trim())
+          return `error: ${name} needs its file (settings, then the prompt): emplio automations ${sub} ${name} - <<'MD' ... MD, or input="..." in Python. See emplio automations help.`;
         const a = await saveAutomation(who, name, text, sub);
         await caughtUp();
         const state = a.error ? `saved, but it can't run yet: ${a.error}` : a.enabled ? "saved and on" : "saved, turned off";
