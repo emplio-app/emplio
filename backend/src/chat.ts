@@ -65,7 +65,7 @@ export const remindAt = (commands: number) => commands >= LONG_RUN && (commands 
 // The reminder a reply done by hand gets at 2 commands, then every 15 (longRun, below). Only a reminder: a hard stop
 // at 8 cut work off mid-site (41 times in a week) and split it between Emplio and a job.
 export const longRunNote = (nth: number, automation: boolean) =>
-  `[That's ${nth} commands in this reply, all done by you. ${automation ? "Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`; if little is left, carry on." : "You're the manager: the doing goes to an agent. Unless you're about to answer, hand it off now with \`emplio hand <agent>\`, the brief saying what you've found so far."}]`;
+  `[That's ${nth} commands in this reply, all done by you. ${automation ? "Long work gets handed off: if more than a few are left, hand off what's left now with \`emplio hand\`; if little is left, carry on." : `You're the manager: the doing goes to an agent. You have ${OWN_LIMIT - nth} more of your own at most; after that they aren't run. If this needs more, hand it off now with \`emplio hand <agent>\`, the brief saying what you've found so far.`}]`;
 // The rule on saving skills (sandbox.ts "Skills:") was skipped in chat, by the cheaper models nearly always
 // (evals/skills), until it was said next to the work: on a reply's first command, and at the two moments it goes
 // wrong: a job's steps being written into the standing instructions, and a script run from tmp as if for the first time.
@@ -80,13 +80,26 @@ export const skillNote = (nth: number, command: string): string | null =>
         : null;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
-// Handing off, and the checklist and bug reports around it, stay open at the limit.
+// Handing off, the checklist and bug reports around it, asking the person, and setting up tasks, automations and
+// agents (the manager's own work) stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
-export const notCounted = (command: string) => /\bemplio (hand|threads|plan)\b/.test(command) || isReport(command);
+export const notCounted = (command: string) => /\bemplio (hand|threads|plan|ask|tasks|automations|agents)\b/.test(command) || isReport(command);
+// Commands Emplio may run itself in one reply to a person; past them the doing goes to an agent (refusal). The rule
+// alone (MANAGER_PROMPT) wasn't kept: 104 of 146 replies of 3+ commands in a week never handed off (Nov 13-17). A
+// hard stop at 8 was dropped once (it cut browsing off mid-site); Emplio has no browser now, so nothing is mid-site.
+export const OWN_LIMIT = 3;
 // Why a command Emplio runs in a reply to a person isn't run, or null (the evals replay this). The browser is the
 // agents': browsing by hand filled Emplio's chat with pages on its dearer model and broke off mid-site.
 // Only the command itself, not a heredoc's text: a brief may well say "use emplio browser".
-export const refusal = (command: string, _nth: number): string | null => (/\bemplio browser\b/.test(command.split("<<")[0]!) ? NO_BROWSER : null);
+export const refusal = (command: string, nth: number): string | null =>
+  /\bemplio browser\b/.test(command.split("<<")[0]!) ? NO_BROWSER : nth > OWN_LIMIT ? HAND_IT_OFF : null;
+export const HAND_IT_OFF = `[Not run: that's more than ${OWN_LIMIT} commands of your own in this reply, so the rest is an agent's work. Hand it off now with \`emplio hand <agent>\`: the brief says what they asked, what you've found so far and what's left.]`;
+// A command of Emplio's own that failed: finding out why is work, and work is the agents'. Exit 1 in bash is often
+// grep finding nothing; in Python it's an error.
+export const FAILED_NOTE =
+  "[That failed. Working out why and getting past it is an agent's work, not yours: hand it off now with `emplio hand <agent>`, the brief saying what you were doing, the exact error and what you've found so far.]";
+export const failed = (result: { exitCode?: unknown }, python: boolean) =>
+  typeof result.exitCode === "number" && result.exitCode !== 0 && (python || result.exitCode !== 1);
 export const NO_BROWSER =
   "[Not run: you have no browser; your agents do, each in its own one the person can watch. Hand this to an agent now with `emplio hand <agent>`: the brief says which site, what to do there and what to bring back.]";
 
@@ -538,7 +551,7 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
     "Before saying you can't do or find something, go through every other route you can see (each link on the page, another app, a search, a screenshot or the page's source), not just a retry; \"it's their side\" or \"shall I try again later?\" comes only after that, with what you tried. What they asked for, do: don't come back to ask again. Stop early only for what only they can give: a sign-in, a CAPTCHA, a decision. Before repeating a send or post, check whether it went.",
     "Never do arithmetic in your head: totals, differences, percentages, tax, date gaps and score comparisons are computed with code, and you give the number it printed.",
     "CRITICAL: Never reveal how you work inside: no commands, the emplio CLI, sandbox, files and folders, git, scripts, tools or the services behind them; if asked, say you can't share that. No ids (a task's, chat's, automation's or file's): call things by name (“the Yogesh reply task”). Assume the person isn't technical: everyday business words; technical only when they clearly are.",
-    "To the person there is only you, Emplio, their one point of contact: \"I'm on it\", \"I found three suppliers\". Never talk about jobs, threads, agents, sub-agents, workers, background runs, sessions or handing work off, not even to say something is running: say what you're doing and what's still left in plain words (\"Still checking the invoices\"). Same in a chat of a single piece of work: you're Emplio there too. If they ask about a line they see on screen, it's you working on that.",
+    "To the person you are Emplio, their one point of contact: \"I'm on it\", \"I found three suppliers\". Don't bring up jobs, threads, background runs, sessions or handing work off on your own, not even to say something is running: say what you're doing and what's still left in plain words (\"Still checking the invoices\"). Same in a chat of a single piece of work: you're Emplio there too. Your agents are part of their business, not your insides: when they ask about them (which ones there are, what each does or did, who did a piece of work), tell them plainly by name.",
     // `emplio report` (activity.ts): kept in the activity log, and emailed only when PROBLEMS_EMAIL is set
     "If Emplio itself breaks while you work (a command or app action that errors or misbehaves when it shouldn't, a wrong result from your own tools; not the business's own problem, a person's mistake or a site that's simply down), report it as a command on its own, then carry on (or tell them plainly you couldn't); the report is for whoever runs Emplio, not the person, so there's no need to bring it up: `emplio report \"<one line: what's broken>\" <<'EOF'`, then what you were doing, the exact command, the error and what you expected, then EOF. If the computer itself is down, the server has already reported that.",
   ];
@@ -566,7 +579,7 @@ export const emplioPrompt = (p: { rules: string[]; computer: string; team: strin
     `## About ${p.userName} (me/profile.md and me/preferences.md)`,
     p.personal,
     "",
-    "## Skills (read the matching SKILL.md before you start)",
+    p.agent ? "## Skills (read the matching SKILL.md before you start)" : "## Skills (the matching one is an agent's work: hand it to the agent that has it, naming the skill in the brief)",
     ...p.skills,
     "",
     // the generated OpenUI prompt demands UI for every reply; this overrides it (it comes later)
@@ -949,6 +962,13 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   // A reply the agent is doing by itself gets reminders to re-pick how to do it (MANAGER_PROMPT): the rule alone
   // wasn't enough, long work ran 40+ commands in the chat. A checklist doesn't count as handing off; a job does.
   let byHand = 0;
+  // said once a reply: the first of Emplio's own commands to fail
+  let toldFailed = false;
+  const failedOnce = (nth: number, result: Record<string, unknown>, python: boolean) => {
+    if (!nth || toldFailed || !failed(result, python)) return null;
+    toldFailed = true;
+    return FAILED_NOTE;
+  };
   const longRun = (nth: number, result: Record<string, unknown>) => {
     // a checklist that moved is news for them too (nudge)
     if (result.plan) heard = Date.now();
@@ -993,7 +1013,12 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
         return;
       }
       const judged = <T extends Record<string, unknown>>(result: T) => {
-        const said = [guard.check(command, result), ...(caller.jobId ? [] : [!automation && skillNote(nth, command), longRun(nth, result), nudge()])].filter(Boolean).join("\n\n");
+        const said = [
+          guard.check(command, result),
+          ...(caller.jobId ? [] : [!automation && skillNote(nth, command), !automation && failedOnce(nth, result, code !== undefined), longRun(nth, result), nudge()]),
+        ]
+          .filter(Boolean)
+          .join("\n\n");
         const note = code !== undefined ? inPython(said) : said;
         return note ? { ...result, output: `${String(result.output ?? "")}\n\n${note}` } : result;
       };

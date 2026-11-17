@@ -8,8 +8,16 @@ export type Input = { chat: ModelMessage[]; world: [string, string][] };
 type Args = { input: Input; output: Said; expected: Case["expect"] };
 type Score = { name: string; score: number | null; metadata?: Record<string, unknown> };
 
-// the skills it read (`emplio skills use <name>`, or the file itself), in order
-export const readOf = (commands: string[]) => commands.flatMap((c) => [...c.matchAll(/emplio skills use\s+["']?([\w-]+)|(?:cat|head|less)\s+\S*skills\/([\w-]+)\/SKILL\.md/g)].map((m) => (m[1] ?? m[2])!));
+// the skills listed for the made-up business (cases.ts SKILLS), by name
+const LISTED = ["gst-quote", "courier-booking", "weekly-sales-summary"];
+// the skills it read (`emplio skills use <name>`, or the file itself), in order. Emplio as manager hands a job that a
+// skill fits to an agent, naming the skill in the brief (src/jobs.ts MANAGER_PROMPT): that counts as using it.
+export const readOf = (commands: string[]) =>
+  commands.flatMap((c) =>
+    /\bemplio hand\b/.test(c)
+      ? LISTED.filter((n) => c.includes(n))
+      : [...c.matchAll(/emplio skills use\s+["']?([\w-]+)|(?:cat|head|less)\s+\S*skills\/([\w-]+)\/SKILL\.md/g)].map((m) => (m[1] ?? m[2])!),
+  );
 // a SKILL.md written or changed: by its full path, or from inside its folder (`cd .../skills/<name> && cat > SKILL.md`)
 export const savedOf = (commands: string[]) =>
   commands.flatMap((c) => (/(>|\btee)\s*\S*SKILL\.md|SKILL\.md'?\s*<</.test(c) ? [/skills\/([\w-]+)/.exec(c)?.[1] ?? "(unnamed)"] : []));

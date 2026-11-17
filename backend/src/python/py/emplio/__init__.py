@@ -149,6 +149,10 @@ def _run(words, input=None):
     return _parse(text)
 
 
+# commands that read stdin only after a "-", and how many words come before it
+_STDIN_AFTER = {("db", "sql"): 0, ("db", "script"): 0, ("automations", "add"): 1, ("automations", "update"): 1, ("apps", "run"): 1, ("mcp", "call"): 2}
+
+
 class _Area:
     """An area of emplio commands. Call it, or a command in it, with the command's words and values."""
 
@@ -161,9 +165,9 @@ class _Area:
         return _Area(self._path + [name.rstrip("_").replace("_", "-")])
 
     def __call__(self, *args, input=None, **flags):
-        # SQL given as input= needs no "-" (the command line's "read it from stdin")
-        if input is not None and not args and self._path in (["db", "sql"], ["db", "script"]):
-            args = ("-",)
+        # input= needs no "-" (the command line's "read it from stdin"): it goes after the command's own words
+        if input is not None and len(args) == _STDIN_AFTER.get(tuple(self._path), -1):
+            args = (*args, "-")
         # a checklist's steps as one list (emplio.plan.set([...])): each its own step, not one step of JSON
         if self._path[:1] == ["plan"] and len(args) == 1 and isinstance(args[0], (list, tuple)):
             args = tuple(args[0])
@@ -194,6 +198,8 @@ def _usage():
 # ---- saved functions ----
 
 _loaded = {}
+# "/work" as a word of its own, not part of another path (a/work, ~/work, /workspace)
+_WORK_WORD = re.compile(r"(?<![\w.~/-])/work(?=$|[\s/\"';:)|&<>,}\]])", re.M)
 
 
 def _load(kind, name, paths):
@@ -207,7 +213,13 @@ def _load(kind, name, paths):
             spec = importlib.util.spec_from_file_location(f"emplio_{kind}_{safe}", path)
             mod = importlib.util.module_from_spec(spec)
             mod.__emplio__ = f"{kind} {name}"
-            spec.loader.exec_module(mod)
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            # on a person's own computer /work is a folder in their home: the app swaps it in what Emplio types, and
+            # here in saved files, so a skill saved on one computer works on the other (same rule as desktop paths.js)
+            if W != "/work":
+                src = _WORK_WORD.sub(lambda _: W, src)
+            exec(compile(src, path, "exec"), mod.__dict__)
             _loaded[path] = (mtime, mod)
             return mod
     where = " or ".join(p.replace(W, "/work", 1) for p in paths)

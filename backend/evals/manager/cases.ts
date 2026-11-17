@@ -358,4 +358,34 @@ export const cases = (): Case[] => [
     chat: [person("ok thanks, that's all for today")],
     expect: { hand: false },
   },
+  // work that looked small and stayed with Emplio (Nov 2026: 104 of 146 replies of 3+ commands never handed off)
+  {
+    name: "a saved skill fits: it goes to the agent that has it (real)",
+    category: "agent",
+    source: "real",
+    business: {
+      agents: [...AGENTS, "- Issue Filer (agents/issue-filer, light): Files bug reports on the shop's website repo. Skills: website-issues."],
+      skills: ["- company/skills/website-issues: File a bug on the shop website's repo; check for duplicates first"],
+      threads: THREADS,
+    },
+    chat: [person("file an issue: the checkout page doesn't scroll on phones")],
+    expect: { hand: true, agent: ["Issue Filer"], say: ["scroll"] },
+  },
+  {
+    name: "one app read is still an agent's: mail (real)",
+    category: "agent",
+    source: "real",
+    business: team,
+    chat: [person("has raj replied about the october invoice?")],
+    expect: { hand: true, agent: ["Invoice Chaser"] },
+  },
+  {
+    name: "a quick check that fails goes to an agent, not a fix-it hunt (real)",
+    category: "agent",
+    source: "real",
+    business: team,
+    chat: [person("how many orders came in on the website yesterday? check the orders database")],
+    world: [["\\b(db|sql|orders|psql)\\b", "Error:\n  line 3: conn = connect(KEY)\nPermissionError: [Errno 1] Operation not permitted: '/work'"]],
+    expect: { hand: true },
+  },
 ];

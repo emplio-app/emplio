@@ -2,6 +2,7 @@
 // fits, saved one when the job called for it. `bun run eval evals/skills` in backend; see ../README.md.
 import { MODEL_SETS } from "@emplio/shared";
 import { Eval } from "braintrust";
+import { appendFileSync } from "node:fs";
 import type { Said } from "../emplio";
 import type { Case } from "./cases";
 import { readOf, savedOf, scorers, type Input } from "./scorers";
@@ -21,18 +22,23 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
     const noted = (command: string, step: number, result: string) => [result, skillNote(count(step, !notCounted(command)), command)].filter(Boolean).join("\n\n");
     // "use" cases end at the first piece of real work: by then it has read the skill or it hasn't. "save" cases
     // go on (on pretend results) until a skill is written or the reply ends.
-    return reply(
+    const said = await reply(
       { skills: SKILLS },
       chat,
       (command, step) => {
+        // a hand-off ends the reply: the agent reads the skill named in its brief
+        if (/\bemplio hand\b/.test(command) || savedOf([command]).length) return null;
         const read = readOf([command])[0];
-        if (savedOf([command]).length) return null;
         if (read) return noted(command, step, SKILL(read));
-        if (/^\s*emplio plan\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, step, pretend(command, world));
+        // a checklist, or looking up what it already has (the manager's own quick look-up before a hand-off), isn't the job yet
+        if (/^\s*emplio (plan|search)\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, step, pretend(command, world));
         return null;
       },
       14,
     );
+    // EVAL_DUMP=<file>: each try's case, expectation and commands, one JSON line each
+    if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: (metadata as { name: string }).name, commands: said.commands })}\n`);
+    return said;
   },
   scores: scorers,
   trialCount: 3,
