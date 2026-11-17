@@ -312,7 +312,7 @@ async function run(person: NonNullable<Awaited<ReturnType<typeof personFor>>>, c
   if (failed) return null;
   // the reply is saved when it lets go of the chat (holdChat)
   await quiet(chatId);
-  return outcome(chatId, person.userId);
+  return outcome(chatId, person.userId, message.id);
 }
 
 const LABEL: Record<Kind, string> = { brief: "Morning brief", report: "End of day", "check-in": "Check-in" };
@@ -477,11 +477,12 @@ export async function changesSince(workspaceId: string, userId: string, since: D
 
 // The check-in's final words, or null when it had nothing to say: then it isn't sent anywhere or marked unread,
 // and the chat hides it (hideSilent), but it stays in the chat's history for the agent's next round.
-async function outcome(chatId: string, userId: string) {
+// Only this round's own reply: a round that saved none (it stopped before answering) must not send the last round's again.
+async function outcome(chatId: string, userId: string, roundId: string) {
   const [reply] = await db
     .select({ id: messages.id, parts: messages.parts })
     .from(messages)
-    .where(and(eq(messages.conversationId, chatId), eq(messages.role, "assistant")))
+    .where(and(eq(messages.conversationId, chatId), eq(messages.role, "assistant"), eq(messages.parentId, roundId)))
     .orderBy(desc(messages.createdAt))
     .limit(1);
   const texts = ((reply?.parts ?? []) as UIMessage["parts"]).flatMap((p) => (p.type === "text" && p.text.trim() ? [p.text.trim()] : []));
