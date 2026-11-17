@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.60 (2026-11-18)
+
+### What's new
+
+- Emplio's agents now keep what they work out as tools: a job done once becomes one step the next time, and each agent's tools grow as it works. You can see them on the Team page.
+- A tool that changes something or spends money asks for your OK first, the same way app actions do.
+- Agents can be just for owners and admins, or just for you, as well as for the whole team.
+
+### For developers
+
+- `emplio.tools.save(fn, area=..., risk=...)` keeps a function from the Python session in `<bucket>/toolset/<area>.py` with every helper it uses; `from tools.<area> import <name>`, `emplio.tools.search/list`; `# risk: changes|spends` tools ask through `emplio tools allow` (#215).
+- Agents live in a bucket (`--bucket company|restricted|me`) and list their `tools:`; tools and skills a run used join the list as it ends. Lessons keep only failures.
+- `emplio.skill()`, `emplio.lib()`, `skills/<name>/functions.py` and `lib/` are gone: `backend/scripts/migrate-toolset.ts --apply` moves existing files into tools once.
+
 ## 1.2.59 (2026-11-17)
 
 ### What's new
