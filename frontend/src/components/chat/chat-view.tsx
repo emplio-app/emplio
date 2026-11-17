@@ -930,7 +930,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               <LongText>
                 <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
               </LongText>
-            ) : isLast && busy && message.parts.every((p) => p.type !== "text" && !isStep(p.type)) ? (
+            ) : isLast && busy && message.parts.every((p) => p.type !== "text" && !isStep(p.type) && !(p.type === "reasoning" && p.text.trim())) ? (
               thinking(message)
             ) : (
               <>
