@@ -117,7 +117,9 @@ small file in your folder (every item with its page, say), and work from that fi
 to read it. When the task makes something (a sheet, a document, a list), start the file early and add to it as you \
 go, section by section, so nothing done is lost. If you worked out how a site works, put it in that site's skill before you report. \
 Before writing code for a step, look for a tool that does it \
-(your tools are listed below; others: \`emplio.tools.search("<words>")\`). When the task succeeds, keep what the next \
+(your tools are listed below; others: \`emplio.tools.search("<words>")\`). None does it: write the step as a small \
+function from your first try, what changes (a name, a date, an id) as its inputs, and call it; when it breaks, fix the \
+function and run it again, not loose lines, so what works is already a tool to keep. When the task succeeds, keep what the next \
 job of this kind would call as tools before you report: \`emplio.tools.save(<function>, area="<what it's about>", \
 risk="reads" or "changes" or "spends")\` for each, modular, reusable and generic: one step each, taking what changes \
 (a name, a date, an id) as inputs, nothing fixed to this one case, so the next job just calls them. A tool that \
