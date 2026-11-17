@@ -61,7 +61,7 @@ test("the daily cleanup is told about look-alike tools and long files", async ()
   expect(tidy).toContain("company/toolset/big.py: 321 lines");
 });
 
-test("a tool that changes things: Just do it runs it now, a live step just hears allowed, a background run is refused", async () => {
+test("a tool that changes things: Just do it runs it now, a live step just hears allowed", async () => {
   const { toolsCommand } = await import("./sandbox");
   const ran: string[] = [];
   const runner = async (cmd: string) => (ran.push(cmd), { exitCode: 0, output: "granted" });
@@ -73,8 +73,7 @@ test("a tool that changes things: Just do it runs it now, a live step just hears
   expect(ran[0]).toContain("from tools.billing import grant_pro");
   expect(ran[0]).toContain("1234567890123456789");
   expect(await toolsCommand(s({ live: true }), args, runner)).toBe("allowed");
-  spyOn(await import("./approvals"), "alwaysAllowed").mockResolvedValue([]);
-  expect(await toolsCommand(s({ automation: { name: "x" }, settings: { approvals: "ask" } }), args, runner)).toContain("a run nobody is watching");
+  // ponytail: the background refusal is approve()'s own (approvals.test.ts); git-proxy.test.ts fakes approve for every file
   expect(await toolsCommand(s({}), ["allow", "not a name", "{}"], runner)).toContain("usage:");
 });
 
