@@ -100,8 +100,8 @@ export function AssistantParts({
       if (said?.length) built.push({ said: said.map((m) => m.text) });
     }
   }
-  // thinking right after a run of commands joins that run, and so do the commands after it; thinking just before a
-  // run leads it
+  // thinking right after a run of commands joins that run, and so do the commands after it; the first thinking,
+  // before any command, stays its own line, so it's seen
   const segments: ({ text: string } | { steps: (BashPart | ThoughtPart)[] } | { said: string[] } | ThoughtPart)[] = [];
   for (const b of built) {
     const prev = segments.at(-1);
@@ -109,7 +109,6 @@ export function AssistantParts({
     const open = prev && "steps" in prev && !lastTool(prev.steps)?.output?.approvals?.length ? prev : null;
     if ("tools" in b) {
       if (open) open.steps.push(...b.tools);
-      else if (prev && "thought" in prev) segments[segments.length - 1] = { steps: [prev, ...b.tools] };
       else segments.push({ steps: [...b.tools] });
     } else if ("thought" in b && open) open.steps.push(b);
     else segments.push(b);
