@@ -4,7 +4,7 @@
 import { rmSync, readdirSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { BrowserWindow, Menu, Notification, Tray, app, autoUpdater, dialog, ipcMain, nativeImage, powerMonitor, safeStorage, shell } from "electron";
+import { BrowserWindow, Menu, Notification, Tray, app, autoUpdater, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, shell } from "electron";
 import { Boxes } from "./box.js";
 import { Browsers, fetchChrome, findChrome } from "./chrome.js";
 import { Panes } from "./pane.js";
@@ -381,6 +381,9 @@ app.on("activate", showWindow);
 app.on("second-instance", showWindow);
 
 app.whenReady().then(() => {
+  // the computer doesn't fall asleep on its own while the app runs, so work going on finishes (#194); the screen
+  // can still go dark, and closing the lid still sleeps it. Quitting the app lets it sleep again.
+  powerSaveBlocker.start("prevent-app-suspension");
   const file = join(app.getPath("userData"), "config.json");
   config = loadConfig(file, vault);
   if (arg("url")) config.appUrl = arg("url");
