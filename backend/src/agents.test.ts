@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentMd, flags, parseAgent, slugOf, toolsIn, toolsUsed } from "./agents";
+import { agentMd, flags, parseAgent, skillsUsed, slugOf, toolsIn, toolsUsed } from "./agents";
 
 test("AGENT.md round-trips", () => {
   const a = { name: "Supplier Finder", description: "Finds suppliers. Use for: cheaper vendor", skills: ["web-research", "price-compare"], tools: ["gmail.send", "suppliers.find_near"], level: "strong" as const, archived: false, instructions: "Near first, then wider." };
@@ -68,4 +68,15 @@ test("the tools a piece of work saved or used", () => {
     { input: { code: "from tools import nothing\nprint('Saved tool not.this (')" }, output: { output: "Saved tool  x" } },
   ];
   expect(toolsUsed(parts).sort()).toEqual(["billing.grant_pro", "billing.plan", "gmail.search", "gmail.send", "reddit.post"]);
+});
+
+test("the skills a run read or wrote", () => {
+  const parts = [
+    { input: { code: 'print(emplio.skills.use("website-login")[:3000])' } },
+    { input: { code: 'f = emplio.skill("gst-quote")' } },
+    { input: { command: "emplio skills use courier-booking" } },
+    { input: { code: 'Path("/work/company/skills/returns/SKILL.md").write_text(text)' } },
+    { input: { code: 'print(open("/work/company/skills/other/SKILL.md").read())' } },
+  ];
+  expect(skillsUsed(parts).sort()).toEqual(["courier-booking", "gst-quote", "returns", "website-login"]);
 });

@@ -119,11 +119,33 @@ export function toolsUsed(parts: { input?: { code?: string }; output?: unknown }
   return [...names];
 }
 
-// Add tools to an agent's list (AGENT.md), keeping the order they were added in.
-export async function addTools(w: { workspaceId: string; author: Author }, a: Agent, names: string[]) {
+// The skills a piece of work read or wrote: `emplio.skills.use("x")`, `emplio skills use x`, `emplio.skill("x")`,
+// or a write to skills/<name>/.
+export function skillsUsed(parts: { input?: { code?: string; command?: string } }[]) {
+  const names = new Set<string>();
+  for (const p of parts) {
+    const code = p.input?.code ?? p.input?.command ?? "";
+    for (const m of code.matchAll(/emplio\.skills?\.use\(\s*["']([a-z0-9][\w-]*)["']|emplio\.skill\(\s*["']([a-z0-9][\w-]*)["']|\b(?:emplio|ez) skills use\s+["']?([a-z0-9][\w-]*)/g))
+      names.add((m[1] ?? m[2] ?? m[3])!);
+    if (/write_text\(|\.write\(|open\([^)]*['"][wa]['"]|cat\s*>|\btee\b/.test(code))
+      for (const m of code.matchAll(/skills\/([a-z0-9][\w-]*)\/SKILL\.md/g)) names.add(m[1]!);
+  }
+  return [...names];
+}
+
+// Add tools and skills to an agent's list (AGENT.md), keeping the order they were added in.
+export async function addTools(w: { workspaceId: string; author: Author }, a: Agent, names: string[], skills: string[] = []) {
   const more = names.filter((n) => TOOL_NAME.test(n) && !a.tools.includes(n));
-  if (!more.length) return;
-  await writeFile(w.workspaceId, repoOf(a), `agents/${a.slug}/AGENT.md`, agentMd({ ...a, tools: [...a.tools, ...more] }), `Tools for ${a.name}: ${more.join(", ")}`, w.author);
+  const moreSkills = skills.filter((n) => !a.skills.includes(n));
+  if (!more.length && !moreSkills.length) return;
+  await writeFile(
+    w.workspaceId,
+    repoOf(a),
+    `agents/${a.slug}/AGENT.md`,
+    agentMd({ ...a, tools: [...a.tools, ...more], skills: [...a.skills, ...moreSkills] }),
+    `Tools and skills for ${a.name}: ${[...more, ...moreSkills].join(", ")}`,
+    w.author,
+  );
 }
 
 // AGENT.md files by sha, so listing them each message reads only the changed ones

@@ -19,7 +19,7 @@ import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./chan
 import { generateReply, lastWords, loadMessages, quiet, replyFromNotification, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
 import { actionRuns, conversations, jobs } from "./db/schema";
-import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, toolsUsed } from "./agents";
+import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, skillsUsed, toolsUsed } from "./agents";
 import { canReopen, liveView, REOPEN_MS } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
@@ -275,11 +275,13 @@ export async function startedIn(chatId: string): Promise<string> {
 }
 
 async function keepTools(w: Row, chatId: string) {
-  const used = toolsUsed((await loadMessages(chatId)).flatMap((m) => (m.parts as { input?: { code?: string }; output?: unknown }[]) ?? []));
-  if (!used.length) return;
+  const parts = (await loadMessages(chatId)).flatMap((m) => (m.parts as { input?: { code?: string; command?: string }; output?: unknown }[]) ?? []);
+  const used = toolsUsed(parts);
+  const skills = skillsUsed(parts);
+  if (!used.length && !skills.length) return;
   const person = await personFor(w.workspaceId, w.userId);
   const agent = await findAgent(w.workspaceId, w.agent!, { userId: w.userId, admin: person?.role !== "member" });
-  if (agent && person) await addTools({ workspaceId: w.workspaceId, author: { name: person.userName, email: person.userEmail } }, agent, used);
+  if (agent && person) await addTools({ workspaceId: w.workspaceId, author: { name: person.userName, email: person.userEmail } }, agent, used, skills);
 }
 
 async function began(w: Row, stop: () => void) {
@@ -295,7 +297,7 @@ async function began(w: Row, stop: () => void) {
   // carded: it asked the person with a card (emplio ask), which shows over their chat box and sends their answer here
   return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false, carded: AskCard[] = []) => {
     const timeLeft = Date.now() < until - 60_000;
-    // the tools this run saved or used join its agent's list now, so its next job has them up front
+    // the tools and skills this run saved or used join its agent's list now, so its next job has them up front
     if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
     if (capped && outcome === "completed" && !interrupted && timeLeft) {
       // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
