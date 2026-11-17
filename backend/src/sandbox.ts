@@ -1842,8 +1842,10 @@ export function withRequests(output: string, key: string) {
 // `emplio tools allow <area.name> '<json>'`: a kept tool that changes things or spends money asks this before it runs
 // (python/py/emplio/_toolset.py), with the person's OK the usual way (approve): no card needed, and a running step
 // gets "allowed" and calls it; with a card, the step goes on without it, and once allowed the tool runs here by itself,
-// in a process of its own. The same in runs nobody watches: only what's "Always allow"ed.
-export async function toolsCommand(box: Box, s: Session, args: string[]) {
+// in a process of its own, as a command of this chat (its environment, its emplio calls answered). The same in runs
+// nobody watches: only what's "Always allow"ed. The inputs go to that run as the text Python sent, not decoded and
+// encoded again here, so a big id or a float comes back exactly as it was.
+export async function toolsCommand(s: Session, args: string[], runner = (command: string) => runBash(s, command, false, s.signal)) {
   const [sub, name, raw] = args;
   if (sub !== "allow" || !name || !TOOL_NAME.test(name)) return "usage: emplio tools allow <area.name> '<json>' (a tool asks this itself before it changes anything: just call the tool)";
   let input: { args?: unknown[]; kwargs?: Record<string, unknown>; risk?: string };
@@ -1853,11 +1855,10 @@ export async function toolsCommand(box: Box, s: Session, args: string[]) {
     return "error: the tool's inputs weren't JSON";
   }
   const [area, fn] = name.split(".") as [string, string];
-  const json = (v: unknown) => JSON.stringify(JSON.stringify(v));
   const run = async () => {
-    const code = `import json, os\nos.environ["EMPLIO_TOOL_OK"] = ${JSON.stringify(name)}\nfrom tools.${area} import ${fn}\nprint(${fn}(*json.loads(${json(input.args ?? [])}), **json.loads(${json(input.kwargs ?? {})})))`;
-    const done = await exec(box, pythonCommand(s, code, { background: true }), undefined, 600);
-    return `${done.exitCode ? "error: " : ""}${done.result?.trim() || "(it printed nothing)"}`;
+    const code = `import json, os\nos.environ["EMPLIO_TOOL_OK"] = ${JSON.stringify(name)}\n_in = json.loads(${JSON.stringify(raw ?? "{}")})\nfrom tools.${area} import ${fn}\nprint(${fn}(*_in.get("args", []), **_in.get("kwargs", {})))`;
+    const done = await runner(pythonCommand(s, code, { background: true }));
+    return `${done.exitCode ? "error: " : ""}${String(done.output ?? "").trim() || "(it printed nothing)"}`;
   };
   const shown = { ...(input.args?.length ? { inputs: input.args } : {}), ...input.kwargs };
   const title = `${input.risk === "spends" ? "Spend money: " : ""}${fn.replaceAll("_", " ")} (${area.replaceAll("_", " ")})`;
@@ -2077,7 +2078,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
     }
     else if (line.startsWith(`TOOLS:${key}\t`)) {
       const args = Buffer.from(line.slice(`TOOLS:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
-      lines.push(await toolsCommand(box, s, args));
+      lines.push(await toolsCommand(s, args));
     }
     else if (line.startsWith(`SETTINGS:${key}\t`)) {
       const args = Buffer.from(line.slice(`SETTINGS:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);

@@ -281,7 +281,7 @@ async function keepTools(w: Row, chatId: string) {
   if (!used.length && !skills.length) return;
   const person = await personFor(w.workspaceId, w.userId);
   const agent = await findAgent(w.workspaceId, w.agent!, { userId: w.userId, admin: person?.role !== "member" });
-  if (agent && person) await addTools({ workspaceId: w.workspaceId, author: { name: person.userName, email: person.userEmail } }, agent, used, skills);
+  if (agent && person) await addTools({ workspaceId: w.workspaceId, author: { name: person.userName, email: person.userEmail }, admin: person.role !== "member" }, agent, used, skills);
 }
 
 async function began(w: Row, stop: () => void) {

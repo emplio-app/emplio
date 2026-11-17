@@ -56,10 +56,19 @@ def blocks(code):
     (and its decorators) to the end of its last line."""
     lines = code.splitlines()
     out = []
+    end = 0  # the last line taken so far
+
+    def loose(upto):  # comments on their own between statements (a section heading, a TODO): kept as they are
+        gap = lines[end:upto]
+        if any(l.lstrip().startswith("#") for l in gap):
+            out.append(("other", [], "\n".join(gap).strip("\n"), upto))
+
     for node in ast.parse(code).body:
         start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
-        while start > 1 and lines[start - 2].lstrip().startswith("#") and not (out and out[-1][3] >= start - 1):
+        while start > end + 1 and lines[start - 2].lstrip().startswith("#"):
             start -= 1
+        loose(start - 1)
+        end = node.end_lineno
         text = "\n".join(lines[start - 1 : node.end_lineno])
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             out.append(("def", [node.name], text, node.end_lineno))
@@ -72,15 +81,17 @@ def blocks(code):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             names = [n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)]
             out.append(("value", names, text, node.end_lineno))
-        elif isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), ast.Constant) and isinstance(node.value.value, str) and not out:
+        elif isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), ast.Constant) and isinstance(node.value.value, str) and all(o[0] == "other" for o in out):
             out.append(("doc", [], text, node.end_lineno))
         else:
             out.append(("other", [], text, node.end_lineno))
+    loose(len(lines))
     return [(k, n, t) for k, n, t, _ in out]
 
 
-def record(code):
-    """Called by the session with every piece of code it runs, before running it."""
+def record(code, keep=False):
+    """Called by the session with every piece of code it runs, before running it. keep: a file loaded from disk (a
+    skill's functions.py), which doesn't replace what the session wrote itself under the same name."""
     try:
         found = blocks(code)
     except (SyntaxError, ValueError):
@@ -91,6 +102,8 @@ def record(code):
                 # importing a tool by the name of a function written here keeps the function: the whole step is
                 # recorded before it runs, so a save above the import in the same step still finds it
                 if kind == "import" and re.match(r"\s*from\s+tools\.", text) and _src.get(n, [""])[0] in ("def", "class"):
+                    continue
+                if keep and n in _src:
                     continue
                 _src[n] = [kind, text]
         if kind == "def":
@@ -203,7 +216,11 @@ def _guard(area, name, risk, fn):
         if os.environ.get("EMPLIO_TOOL_OK") != f"{area}.{name}":
             from . import Pending, _run
             said = {"args": list(args), "kwargs": kwargs, "risk": risk}
-            answer = _run(["tools", "allow", f"{area}.{name}", json.dumps(said, default=str, ensure_ascii=False)])
+            try:
+                sent = json.dumps(said, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError):
+                raise ToolError(f"tools.{area}.{name} needs the person's OK, which goes with its inputs as plain values (text, numbers, lists, dicts): pass dates and the like as text") from None
+            answer = _run(["tools", "allow", f"{area}.{name}", sent])
             if isinstance(answer, Pending):
                 return answer
         # what an allowed tool calls is part of what was allowed
@@ -243,6 +260,39 @@ def forget(area=None):
         del sys.modules[n]
 
 
+# ---- risk labels ----
+
+def _label(lines):
+    """The risk on a `# risk:` line among the comment lines just above a def (the end of `lines`), or None."""
+    for line in reversed(lines):
+        s = line.strip()
+        if not s.startswith("#"):
+            return None
+        m = RISK_LINE.match(s)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
+def _label_of(text):
+    """The risk label of a def's text (its comment lines above the decorators or def)."""
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and lines[i].lstrip().startswith("#"):
+        i += 1
+    return _label(lines[:i])
+
+
+def _with_label(text, risk):
+    """A def's text with its risk line right above the decorators or def, after any other comments."""
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and lines[i].lstrip().startswith("#"):
+        i += 1
+    head = [l for l in lines[:i] if not RISK_LINE.match(l.strip())]
+    return "\n".join(head + [f"# risk: {risk}"] + lines[i:])
+
+
 # ---- listing ----
 
 def _tools_in(path):
@@ -257,13 +307,12 @@ def _tools_in(path):
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
             first = min([node.lineno] + [d.lineno for d in node.decorator_list])
-            above = text[first - 2] if first > 1 else ""
-            risk = RISK_LINE.match(above.strip())
+            risk = _label(text[: first - 1])
             if not risk:
                 continue
             args = ast.unparse(node.args)
             doc = (ast.get_docstring(node) or "(no description)").strip().split("\n")[0]
-            out.append((node.name, f"{node.name}({args})", doc, risk.group(1).lower()))
+            out.append((node.name, f"{node.name}({args})", doc, risk))
     return out
 
 
@@ -313,7 +362,7 @@ def _bare(text):
     return "\n".join(l for l in text.strip().split("\n") if not RISK_LINE.match(l.strip())).strip()
 
 
-def save(fn, area, risk="reads", bucket=None, replace=False):
+def save(fn, area, risk=None, bucket=None, replace=False):
     """Keep a function (or class) from this session as a tool: tools.<area>.<name>. risk says what calling it
     does: "reads" (only looks things up), "changes" (writes, sends, deletes) or "spends" (money). It brings what
     it needs; a function that's already in another area is linked, not copied. replace=True lets it overwrite a
@@ -324,7 +373,7 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
     area = re.sub(r"[-\s]+", "_", (area or "").strip().lower())  # website-login → website_login, as Python can import it
     if not AREA.match(area) or keyword.iskeyword(area) or area in ("tools", "emplio"):
         raise ToolError(f"area {area!r}: one lower-case word or words_with_underscores, for what the tools are about (gmail, billing, reddit)")
-    if risk not in RISKS:
+    if risk is not None and risk not in RISKS:
         raise ToolError(f"risk {risk!r}: say \"reads\" (only looks things up), \"changes\" (writes, sends or deletes) or \"spends\" (money)")
     bucket = bucket or _default_bucket()
     if bucket not in BUCKETS:
@@ -334,6 +383,10 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
     if bucket == "company" and _default_bucket() == "me":
         # a member's company/ is read-only (only inbox/ goes back): a save there would be lost
         raise ToolError("company tools are the owner's and admins' to keep: save it in \"me\" (only you), and propose it for everyone in company/inbox/")
+    taken = [b for b in BUCKETS if b != bucket and os.path.isfile(_path(b, area))]
+    if taken:
+        # one area lives in one bucket: a file of it in two would hide one from the other
+        raise ToolError(f"{area} is already an area in {taken[0]}/toolset/: save it there (bucket=\"{taken[0]}\"), or pick another area name")
     kind = _src.get(name, [""])[0]
     if kind not in ("def", "class"):
         raise ToolError(f"{name} wasn't defined in this session: define it (def {name}(...)) and run it once, then save it")
@@ -349,6 +402,9 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
     except SyntaxError as e:
         raise ToolError(f"{bucket}/toolset/{area}.py has a mistake on line {e.lineno} ({e.msg}): fix it first")
     in_file = {n for k, names, _ in old if k in ("def", "class", "value") for n in names}
+    labels = {n: _label_of(t) for k, names, t in old if k == "def" for n in names}
+    # saved again without a risk: it keeps the one it had (a fix never quietly drops its OK)
+    risk = risk or labels.get(name) or "reads"
     other = {a: (b, p) for a, (b, p) in _areas(OPEN[bucket]).items() if a != area}
 
     order, seen, refused, unknown, linked = [], set(), [], [], {}
@@ -417,10 +473,7 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
         if k in ("def", "class", "value"):
             text = _src[n][1]
             if n == name:
-                body = text.split("\n")
-                while body and RISK_LINE.match(body[0].strip()):
-                    body.pop(0)
-                text = "\n".join([f"# risk: {risk}"] + body)
+                text = _with_label(text, risk)
             new_blocks.setdefault(text, n)
     by_name = {n: t for t, n in new_blocks.items()}
     # a helper that's already in the file as it is (risk label aside) stays as it is, label and all
@@ -431,6 +484,9 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
 
     clash = [n for k, names, t in old if k in ("def", "class", "value") for n in names
              if n in by_name and n != name and _bare(t) != _bare(by_name[n])]
+    for n in clash:  # a helper changed with replace=True keeps its own label
+        if labels.get(n) and not _label_of(by_name[n]):
+            by_name[n] = _with_label(by_name[n], labels[n])
     if clash and not replace:
         raise ToolError(f"{area}.py already has a different {', '.join(clash)}, which other tools there may use: rename yours, or save again with replace=True to change it for all of them")
 
@@ -456,13 +512,16 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".saving"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-    problem = _check(tmp, name, kind)
-    if problem:
-        os.remove(tmp)
-        raise ToolError(f"not saved: {bucket}/toolset/{area}.py wouldn't load with it ({problem}). Fix {name} or what it uses, then save again")
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        problem = _check(tmp, name, kind)
+        if problem:
+            raise ToolError(f"not saved: {bucket}/toolset/{area}.py wouldn't load with it ({problem}). Fix {name} or what it uses, then save again")
+        os.replace(tmp, path)
+    finally:  # stopped mid-check: no half-saved file left to be pushed
+        if os.path.exists(tmp):
+            os.remove(tmp)
     forget(area)
     took = [n for t, n in new_blocks.items() if n != name]
     note = []

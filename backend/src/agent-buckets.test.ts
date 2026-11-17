@@ -66,14 +66,36 @@ test("the daily cleanup is told about look-alike tools, long files and old funct
 test("a tool that changes things: Just do it runs it now, a live step just hears allowed, a background run is refused", async () => {
   const { toolsCommand } = await import("./sandbox");
   const ran: string[] = [];
-  const box = { run: async (cmd: string) => (ran.push(cmd), { exitCode: 0, result: "granted" }) } as never;
+  const runner = async (cmd: string) => (ran.push(cmd), { exitCode: 0, output: "granted" });
   const s = (more: object) => ({ workspaceId: "w", conversationId: "c", user: { id: "u", name: "Asha" }, settings: { approvals: "auto" }, ...more }) as never;
-  const args = ["allow", "billing.grant_pro", JSON.stringify({ args: ["a@b.c"], kwargs: { months: 2 }, risk: "changes" })];
-  expect(await toolsCommand(box, s({}), args)).toBe("Allowed, and tools.billing.grant_pro ran:\ngranted");
+  // a big id stays exact: the inputs reach the run as the text Python sent
+  const args = ["allow", "billing.grant_pro", '{"args": ["a@b.c"], "kwargs": {"months": 2, "ref": 1234567890123456789}, "risk": "changes"}'];
+  expect(await toolsCommand(s({}), args, runner)).toBe("Allowed, and tools.billing.grant_pro ran:\ngranted");
   expect(ran[0]).toContain('EMPLIO_TOOL_OK"] = "billing.grant_pro"');
   expect(ran[0]).toContain("from tools.billing import grant_pro");
-  expect(await toolsCommand(box, s({ live: true }), args)).toBe("allowed");
+  expect(ran[0]).toContain("1234567890123456789");
+  expect(await toolsCommand(s({ live: true }), args, runner)).toBe("allowed");
   spyOn(await import("./approvals"), "alwaysAllowed").mockResolvedValue([]);
-  expect(await toolsCommand(box, s({ automation: { name: "x" }, settings: { approvals: "ask" } }), args)).toContain("a run nobody is watching");
-  expect(await toolsCommand(box, s({}), ["allow", "not a name", "{}"])).toContain("usage:");
+  expect(await toolsCommand(s({ automation: { name: "x" }, settings: { approvals: "ask" } }), args, runner)).toContain("a run nobody is watching");
+  expect(await toolsCommand(s({}), ["allow", "not a name", "{}"], runner)).toContain("usage:");
+});
+
+test("a company agent's list takes only company tools and skills, never admins-only or someone's own", async () => {
+  const { addTools } = await import("./agents");
+  const tool = (name: string) => `# risk: reads\ndef ${name}(x):\n    """Does ${name}."""\n    return x\n`;
+  const files = fake({
+    company: { "agents/web/AGENT.md": md("Web"), "toolset/gmail.py": tool("send"), "skills/quote/SKILL.md": "x" },
+    restricted: { "toolset/payroll.py": tool("salaries"), "skills/pay/SKILL.md": "x" },
+    "me-u1": { "toolset/mine.py": tool("own") },
+  });
+  const web = (await findAgent("w", "web"))!;
+  await addTools({ workspaceId: "w", author, admin: true }, web, ["gmail.send", "payroll.salaries", "mine.own", "gmail.nope"], ["quote", "pay"]);
+  expect(files.company!["agents/web/AGENT.md"]).toContain("tools: [gmail.send]");
+  expect(files.company!["agents/web/AGENT.md"]).toContain("skills: [quote]");
+});
+
+test("a member adding an agent named like an admins-only one hears only that the name is taken", async () => {
+  fake({ restricted: { "agents/payroll/AGENT.md": md("Payroll") } });
+  const member = { workspaceId: "w", userId: "u1", admin: false, job: false, author };
+  expect((await agentsCommand(member, ["add", "Payroll", "--description", "x"])).text).toBe("error: the name Payroll is taken; pick another");
 });

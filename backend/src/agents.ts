@@ -69,7 +69,7 @@ export type ToolInfo = { name: string; signature: string; description: string; r
 // The labelled functions in one toolset file (`# risk: <kind>` on the line above a def), as _toolset.listing reads them.
 export function toolsIn(area: string, py: string): ToolInfo[] {
   const found: ToolInfo[] = [];
-  const re = /^#\s*risk:\s*(\w+)[^\n]*\n(?:@[^\n]*\n)*(?:async\s+)?def\s+([A-Za-z]\w*)\s*\(([\s\S]*?)\)\s*(?:->[^:\n]+)?:[ \t]*\n(?:[ \t]+(?:[rbuRBU]{0,2})("""|\'\'\'|"|')([\s\S]*?)(?:"""|\'\'\'|"|'|\n))?/gm;
+  const re = /^#\s*risk:\s*(\w+)[^\n]*\n(?:#[^\n]*\n)*(?:@[^\n]*\n)*(?:async\s+)?def\s+([A-Za-z]\w*)\s*\(([\s\S]*?)\)\s*(?:->[^:\n]+)?:[ \t]*\n(?:[ \t]+(?:[rbuRBU]{0,2})("""|\'\'\'|"|')([\s\S]*?)(?:"""|\'\'\'|"|'|\n))?/gm;
   for (const m of py.matchAll(re)) {
     const args = m[3]!.replace(/\s+/g, " ").replace(/,\s*$/, "").trim();
     const description = (m[5] ?? "").trim().split("\n")[0]!.trim() || "(no description)";
@@ -133,10 +133,32 @@ export function skillsUsed(parts: { input?: { code?: string; command?: string } 
   return [...names];
 }
 
-// Add tools and skills to an agent's list (AGENT.md), keeping the order they were added in.
-export async function addTools(w: { workspaceId: string; author: Author }, a: Agent, names: string[], skills: string[] = []) {
-  const more = names.filter((n) => TOOL_NAME.test(n) && !a.tools.includes(n));
-  const moreSkills = skills.filter((n) => !a.skills.includes(n));
+// Add tools and skills to an agent's list (AGENT.md), keeping the order they were added in. Only ones kept in the
+// agent's own bucket or a more open one: an admin's run of a company agent using admins-only tools, or someone's own,
+// mustn't put their names where everyone reads them. admin: whether the person whose run it was is one (a me agent's).
+export async function addTools(w: { workspaceId: string; author: Author; admin?: boolean }, a: Agent, names: string[], skills: string[] = []) {
+  const repos = bucketOf(a) === "company" ? ["company"] : bucketOf(a) === "restricted" ? ["restricted", "company"] : [repoOf(a), ...(w.admin ? ["restricted"] : []), "company"];
+  const files = new Map<string, Promise<string | null>>();
+  const read = (repo: string, path: string) => {
+    const k = `${repo}/${path}`;
+    if (!files.has(k)) files.set(k, readFile(w.workspaceId, repo, path).catch(() => null));
+    return files.get(k)!;
+  };
+  const kept = async (n: string) => {
+    for (const repo of repos) {
+      const py = await read(repo, `toolset/${n.split(".")[0]}.py`);
+      if (py) return toolsIn(n.split(".")[0]!, py).some((t) => t.name === n);
+    }
+    return false;
+  };
+  const skillKept = async (n: string) => {
+    for (const repo of repos) if (await read(repo, `skills/${n}/SKILL.md`)) return true;
+    return false;
+  };
+  const more: string[] = [];
+  for (const n of names) if (TOOL_NAME.test(n) && !a.tools.includes(n) && (await kept(n))) more.push(n);
+  const moreSkills: string[] = [];
+  for (const n of skills) if (!a.skills.includes(n) && (await skillKept(n))) moreSkills.push(n);
   if (!more.length && !moreSkills.length) return;
   await writeFile(
     w.workspaceId,
@@ -297,7 +319,9 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
         const bucket = set.bucket ?? "company";
         if (!(BUCKETS as readonly string[]).includes(bucket)) return { text: "error: --bucket is company, restricted or me" };
         if (bucket === "restricted" && !who.admin) return { text: "error: only an owner or admin can make an admins-only agent" };
-        if (await findAgent(who.workspaceId, slug, { ...viewer, admin: true })) return { text: `error: agents/${slug} already exists; emplio agents update ${slug}` };
+        if (await findAgent(who.workspaceId, slug, { ...viewer, admin: true }))
+          // one that isn't theirs to see is only "taken", so its name doesn't show
+          return { text: (await find(slug)) ? `error: agents/${slug} already exists; emplio agents update ${slug}` : `error: the name ${ref.trim()} is taken; pick another` };
         const repo = bucket === "me" ? `me-${who.userId}` : bucket;
         const a = { slug, repo, name: ref.trim(), description: set.description, skills: skills(set.skills) ?? [], tools: tools(set.tools) ?? [], level: level(set.level) ?? "light", archived: false, instructions: body };
         await save(a, "AGENT.md", agentMd(a), `Added agent ${a.name}`);

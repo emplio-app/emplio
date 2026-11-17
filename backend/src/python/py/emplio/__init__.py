@@ -223,7 +223,7 @@ def _load(kind, name, paths):
             exec(compile(src, path, "exec"), mod.__dict__)
             # its functions count as written in this session, so emplio.tools.save can keep them as tools
             try:
-                _toolset.record(src)
+                _toolset.record(src, keep=True)
             except SyntaxError:
                 pass
             _loaded[path] = (mtime, mod)
@@ -287,7 +287,11 @@ def map(fn, items, limit=5):
     place holds a Failed (falsy, with .item and .error). A dict or tuple item is passed as keyword/positional args."""
     items = list(items)
 
+    # inside a tool that was allowed, what the items call is part of that OK, in the worker threads too
+    allowed = getattr(_toolset._allowed, "on", False)
+
     def one(item):
+        _toolset._allowed.on = allowed
         try:
             if isinstance(item, dict):
                 return fn(**item)
@@ -296,6 +300,8 @@ def map(fn, items, limit=5):
             return fn(item)
         except Exception as e:  # noqa: BLE001 -- each failure is reported in its place
             return Failed(item, e)
+        finally:
+            _toolset._allowed.on = False
 
     # stopped (time ran out, or interrupted): what hasn't started is dropped, not left running after the run
     pool = ThreadPoolExecutor(max_workers=max(1, min(int(limit), 10)))

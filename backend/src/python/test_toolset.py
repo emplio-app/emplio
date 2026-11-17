@@ -403,6 +403,49 @@ run(ns, 'f = emplio.skill("invoices")')
 check("an old skill's function saves as a tool", T.save(ns["f"].total, area="invoices"), "Saved tool invoices.total (only reads) in company/toolset/invoices.py, with _fmt")
 check("…and works in a fresh Python", fresh("invoices", 'total([{"amount": 1200}, {"amount": 34}])'), "'Rs 1,234'")
 
+# review fixes: labels, areas in two buckets, comments, inputs
+reset()
+ns = session()
+run(ns, '''
+# Pays the supplier
+@staticmethod
+def _deco(f): return f
+''')
+run(ns, '''
+# Pays the supplier, in full
+def pay(amount):
+    """Pay a supplier."""
+    return amount
+''')
+T.save("pay", area="money", risk="spends")
+check("a comment above keeps the label on the def", repr([r for n, _, _, r in T._tools_in(os.path.join(WORK, "company", "toolset", "money.py"))]), "['spends']")
+assert "# Pays the supplier, in full\n# risk: spends\ndef pay" in file("company", "money"), file("company", "money")
+run(ns, '''
+# Pays the supplier, in full
+def pay(amount):
+    """Pay a supplier."""
+    return amount * 1
+''')
+check("saved again without a risk keeps spends", save("pay", area="money"), "Saved tool money.pay (spends money)")
+T.save("pay", area="money", bucket="company")
+os.makedirs(os.path.join(WORK, "me", "toolset"), exist_ok=True)
+check("an area can't be in two buckets", save("pay", area="money", bucket="me"), "REFUSED money is already an area in company/toolset/")
+open(os.path.join(WORK, "company", "toolset", "money.py"), "a").write("\n\n# --- reading ---\n\n\n# TODO: refunds\n")
+run(ns, '''
+def balance():
+    """The balance."""
+    return 0
+''')
+T.save("balance", area="money")
+check("loose comments survive a save", str("# --- reading ---" in file("company", "money") and "# TODO: refunds" in file("company", "money")), "True")
+run(ns, '''
+import datetime
+def when():
+    """A date."""
+    return datetime.date(2026, 1, 1)
+''')
+check("a skill file loaded later doesn't replace the session's own", str((T.record("def pay(x):\n    return 'skill'", keep=True), T._src["pay"][1])[1].endswith("amount * 1")), "True")
+
 # a tool that changes things asks first (emplio tools allow), against a stand-in emplio command
 reset()
 ns = session()
@@ -438,6 +481,12 @@ assert asked.startswith("tools allow acct.grant ") and '"kwargs": {"months": 2}'
 check("…and doesn't run when refused", call("error: Ashish said no", "from tools.acct import grant, RAN; grant('a@b.c'); print(RAN)"), "REFUSED error: Ashish said no")
 check("a reading tool never asks", (os.remove(os.path.join(fake, "asked")), call("error: no", "from tools.acct import note; print(note('x'))"))[1], "x")
 assert not os.path.exists(os.path.join(fake, "asked"))
+check("a date input can't go with the ask", call("allowed", "import datetime\n    from tools.acct import grant; grant(datetime.date(2026, 1, 1))"), "REFUSED tools.acct.grant needs the person's OK")
+open(os.path.join(WORK, "company", "toolset", "acct.py"), "a").write('\n\n# risk: changes\ndef grant_all(emails):\n    """All."""\n    import emplio\n    return [str(x) for x in emplio.map(grant, emails)]\n')
+if os.path.exists(os.path.join(fake, "asked")):
+    os.remove(os.path.join(fake, "asked"))
+out = call("allowed", "from tools.acct import grant_all; print(grant_all(['a', 'b', 'c']))")
+check("emplio.map inside an allowed tool asks once, not per item", str(open(os.path.join(fake, "asked")).read().count("tools allow")) + " " + out[-30:], "1 " + out[-30:])
 check("Emplio's own run once allowed doesn't ask again", call("error: no", "import os; os.environ['EMPLIO_TOOL_OK'] = 'acct.grant'\n    from tools.acct import grant; print(grant('z@z.z'))"), "granted z@z.z 1")
 
 print(f"\n{'all passed' if not FAILED else f'{len(FAILED)} failed'}")
