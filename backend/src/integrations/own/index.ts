@@ -43,6 +43,11 @@ import { swipe } from "./swipe";
 import { todoist } from "./todoist";
 import { vercel } from "./vercel";
 import { zoom } from "./zoom";
+import { cloudflare } from "./cloudflare";
+import { godaddy } from "./godaddy";
+import { namecheap } from "./namecheap";
+import { wix } from "./wix";
+import { wordpress } from "./wordpress";
 import { zoho } from "./zoho";
 import { zoho_books } from "./zoho_books";
 import { zoho_invoice } from "./zoho_invoice";
@@ -113,7 +118,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom, onepassword };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
