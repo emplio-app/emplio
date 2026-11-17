@@ -236,9 +236,9 @@ test("a run counts as having kept a tool only for what it saved since its last b
   expect(savedTool([brief("grant pro"), ran("u = emplio.skill('emplio-server-users'); sh('psql ... insert ...')")])).toBe(false);
   // a save that was refused prints no "Saved tool" line
   expect(savedTool([brief("grant pro"), ran("emplio.tools.save(grant, area='billing')", "Error\ngrant uses email from earlier in this session")])).toBe(false);
-  expect(savedTool([brief("check usage"), ran("open('/work/me/skills/usage/functions.py','w').write(src)")])).toBe(true);
+  expect(savedTool([brief("check usage"), ran("open('/work/me/toolset/usage.py','w').write(src)")])).toBe(true);
   expect(savedTool([brief("check usage"), ran("Path('/work/company/toolset/usage.py').write_text(src)")])).toBe(true);
-  expect(savedTool([brief("a"), ran("x = 'functions.py'"), brief("b"), ran("print(1)")])).toBe(false);
+  expect(savedTool([brief("a"), ran("x = 'toolset/usage.py'"), brief("b"), ran("print(1)")])).toBe(false);
   expect(savedTool([brief("a"), ran("emplio.tools.save(f, area='a')", saved), brief("b"), ran("print(1)")])).toBe(false);
 });
 

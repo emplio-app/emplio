@@ -119,14 +119,13 @@ export function toolsUsed(parts: { input?: { code?: string }; output?: unknown }
   return [...names];
 }
 
-// The skills a piece of work read or wrote: `emplio.skills.use("x")`, `emplio skills use x`, `emplio.skill("x")`,
-// or a write to skills/<name>/.
+// The skills a piece of work read or wrote: `emplio.skills.use("x")`, `emplio skills use x`, or a write to skills/<name>/.
 export function skillsUsed(parts: { input?: { code?: string; command?: string } }[]) {
   const names = new Set<string>();
   for (const p of parts) {
     const code = p.input?.code ?? p.input?.command ?? "";
-    for (const m of code.matchAll(/emplio\.skills?\.use\(\s*["']([a-z0-9][\w-]*)["']|emplio\.skill\(\s*["']([a-z0-9][\w-]*)["']|\b(?:emplio|ez) skills use\s+["']?([a-z0-9][\w-]*)/g))
-      names.add((m[1] ?? m[2] ?? m[3])!);
+    for (const m of code.matchAll(/emplio\.skills\.use\(\s*["']([a-z0-9][\w-]*)["']|\b(?:emplio|ez) skills use\s+["']?([a-z0-9][\w-]*)/g))
+      names.add((m[1] ?? m[2])!);
     if (/write_text\(|\.write\(|open\([^)]*['"][wa]['"]|cat\s*>|\btee\b/.test(code))
       for (const m of code.matchAll(/skills\/([a-z0-9][\w-]*)\/SKILL\.md/g)) names.add(m[1]!);
   }
@@ -216,7 +215,7 @@ export const lessonsNow = lessonLines;
 export async function changeLessons(w: { workspaceId: string; userId: string; author: Author }, a: Pick<Agent, "slug" | "name" | "repo">, add: string[], drop: number[] = []) {
   const day = dayIn(new Date(), await timezoneOf(w.userId));
   const kept = (await lessonLines(w.workspaceId, a)).filter((_, i) => !drop.includes(i + 1));
-  const lines = [...kept, ...add.map((l) => `- ${day}: ${l.replace(/\s+/g, " ").slice(0, 300)}`)];
+  const lines = [...kept, ...add.map((l) => `- ${day}: ${l.replace(/\s+/g, " ").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "").slice(0, 300)}`)];
   await writeFile(w.workspaceId, repoOf(a), `agents/${a.slug}/LESSONS.md`, `${lines.slice(-MAX_LESSONS).join("\n")}\n`, `Lesson for ${a.name}`, w.author);
 }
 

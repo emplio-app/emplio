@@ -45,14 +45,13 @@ test("add --bucket writes to that bucket's repo; lessons follow the agent", asyn
   expect((await agentsCommand(member, ["add", "X", "--description", "x", "--bucket", "nope"])).text).toContain("--bucket is");
 });
 
-test("the daily cleanup is told about look-alike tools, long files and old functions.py", async () => {
+test("the daily cleanup is told about look-alike tools and long files", async () => {
   const tool = (name: string, doc: string) => `# risk: reads\ndef ${name}(x):\n    """${doc}"""\n    return x\n`;
   fake({
     company: {
       "toolset/gmail.py": tool("send", "Send an email."),
       "toolset/mail.py": tool("send", "Send a mail."),
       "toolset/big.py": "x = 1\n".repeat(320),
-      "skills/invoices/functions.py": "def total(): pass\n",
     },
     restricted: { "toolset/pay.py": tool("payslip", "Make a payslip.") + tool("slip", "make a PAYSLIP.") },
   });
@@ -60,7 +59,6 @@ test("the daily cleanup is told about look-alike tools, long files and old funct
   expect(tidy).toContain("gmail.send (company/toolset/gmail.py) and mail.send");
   expect(tidy).toContain("pay.payslip (restricted/toolset/pay.py) and pay.slip");
   expect(tidy).toContain("company/toolset/big.py: 321 lines");
-  expect(tidy).toContain("company/skills/invoices/functions.py: move its functions into tools");
 });
 
 test("a tool that changes things: Just do it runs it now, a live step just hears allowed, a background run is refused", async () => {

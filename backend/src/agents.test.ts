@@ -73,10 +73,9 @@ test("the tools a piece of work saved or used", () => {
 test("the skills a run read or wrote", () => {
   const parts = [
     { input: { code: 'print(emplio.skills.use("website-login")[:3000])' } },
-    { input: { code: 'f = emplio.skill("gst-quote")' } },
     { input: { command: "emplio skills use courier-booking" } },
     { input: { code: 'Path("/work/company/skills/returns/SKILL.md").write_text(text)' } },
     { input: { code: 'print(open("/work/company/skills/other/SKILL.md").read())' } },
   ];
-  expect(skillsUsed(parts).sort()).toEqual(["courier-booking", "gst-quote", "returns", "website-login"]);
+  expect(skillsUsed(parts).sort()).toEqual(["courier-booking", "returns", "website-login"]);
 });

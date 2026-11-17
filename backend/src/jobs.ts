@@ -66,8 +66,7 @@ const RESTARTED =
 // next to a skill that only reads) would never keep that part. A run that only called tools says so in a line.
 export const SAVE_TOOL =
   'Before your report: keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. If every step was already a call to a saved tool, or this was a true one-off, say so in one line. Then give your report again in full.';
-// "Saved tool <area>.<name> (" is what emplio.tools.save prints; a skill's functions.py or a toolset file written by
-// hand counts too. true also for a run the person started by writing in the job's chat: chatting there isn't a task
+// "Saved tool <area>.<name> (" is what emplio.tools.save prints; a toolset file written by hand counts too. true also for a run the person started by writing in the job's chat: chatting there isn't a task
 export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
   const lastAsk = [...msgs].reverse().find((m) => m.role === "user");
   if (!lastAsk || !textOf(lastAsk).startsWith(FROM_EMPLIO)) return true;
@@ -78,7 +77,7 @@ export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
     .some((p) => {
       const code = p.input?.code ?? p.input?.command ?? "";
       const out = typeof p.output?.output === "string" ? p.output.output : "";
-      const wrote = /\.write_text\(|\.write\(|open\([^)]*['"][wa]['"]/.test(code) && /functions\.py|toolset\/\w+\.py/.test(code);
+      const wrote = /\.write_text\(|\.write\(|open\([^)]*['"][wa]['"]/.test(code) && /toolset\/\w+\.py/.test(code);
       return /^Saved tool [a-z][a-z0-9_]*\.\w+ \(/m.test(out) || wrote;
     });
 };

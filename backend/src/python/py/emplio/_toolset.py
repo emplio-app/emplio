@@ -89,9 +89,8 @@ def blocks(code):
     return [(k, n, t) for k, n, t, _ in out]
 
 
-def record(code, keep=False):
-    """Called by the session with every piece of code it runs, before running it. keep: a file loaded from disk (a
-    skill's functions.py), which doesn't replace what the session wrote itself under the same name."""
+def record(code):
+    """Called by the session with every piece of code it runs, before running it."""
     try:
         found = blocks(code)
     except (SyntaxError, ValueError):
@@ -102,8 +101,6 @@ def record(code, keep=False):
                 # importing a tool by the name of a function written here keeps the function: the whole step is
                 # recorded before it runs, so a save above the import in the same step still finds it
                 if kind == "import" and re.match(r"\s*from\s+tools\.", text) and _src.get(n, [""])[0] in ("def", "class"):
-                    continue
-                if keep and n in _src:
                     continue
                 _src[n] = [kind, text]
         if kind == "def":

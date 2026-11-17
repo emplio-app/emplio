@@ -384,25 +384,6 @@ check("save after the session restarted", save("later", area="misc"), "Saved too
 check("…works", fresh("misc", "later(2)"), "6")
 T._drafts = None
 
-# an old skill's functions.py, loaded with emplio.skill, can be kept as tools without pasting it
-reset()
-os.makedirs(os.path.join(WORK, "company", "skills", "invoices"), exist_ok=True)
-open(os.path.join(WORK, "company", "skills", "invoices", "functions.py"), "w").write('''import json
-
-
-def _fmt(n):
-    return f"Rs {n:,}"
-
-
-def total(items):
-    """Total of an invoice's lines, formatted."""
-    return _fmt(sum(i["amount"] for i in items))
-''')
-ns = session()
-run(ns, 'f = emplio.skill("invoices")')
-check("an old skill's function saves as a tool", T.save(ns["f"].total, area="invoices"), "Saved tool invoices.total (only reads) in company/toolset/invoices.py, with _fmt")
-check("…and works in a fresh Python", fresh("invoices", 'total([{"amount": 1200}, {"amount": 34}])'), "'Rs 1,234'")
-
 # review fixes: labels, areas in two buckets, comments, inputs
 reset()
 ns = session()
@@ -444,7 +425,6 @@ def when():
     """A date."""
     return datetime.date(2026, 1, 1)
 ''')
-check("a skill file loaded later doesn't replace the session's own", str((T.record("def pay(x):\n    return 'skill'", keep=True), T._src["pay"][1])[1].endswith("amount * 1")), "True")
 
 # a tool that changes things asks first (emplio tools allow), against a stand-in emplio command
 reset()

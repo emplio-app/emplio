@@ -63,11 +63,11 @@ def fresh_namespace():
     return {"__name__": "__main__", "__builtins__": builtins, "emplio": emplio, "sh": sh, "help": help, "json": json, "os": os, "re": re, "sys": sys, "Path": Path}
 
 
-# saved functions: skills' functions.py, the shared lib/ files and the toolset/ files, checked when a run changes them
+# saved functions: the toolset/ files, checked when a run changes them
 def saved_files():
     found = {}
     for top in ("company", "me", "restricted"):
-        for pattern_dir, name in ((os.path.join(W, top, "skills"), "functions.py"), (os.path.join(W, top, "lib"), None), (os.path.join(W, top, "toolset"), None)):
+        for pattern_dir, name in ((os.path.join(W, top, "toolset"), None),):
             if not os.path.isdir(pattern_dir):
                 continue
             for entry in os.listdir(pattern_dir):
@@ -115,7 +115,7 @@ def trimmed(exc):
     if isinstance(exc, SyntaxError) and exc.filename == "<code>":
         line = (exc.text or "").rstrip("\n")
         return f"SyntaxError on line {exc.lineno}: {exc.msg}\n    {line}"
-    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "<code>" or any(d in f.filename.replace("\\", "/") for d in ("/skills/", "/lib/", "/toolset/"))]
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == "<code>" or any(d in f.filename.replace("\\", "/") for d in ("/toolset/",))]
     where = []
     for f in frames[-3:]:
         place = "your code" if f.filename == "<code>" else ("/work" + f.filename[len(W):] if f.filename.startswith(W) else f.filename)

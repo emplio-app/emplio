@@ -140,7 +140,7 @@ const DAILY = `Today's cleanup (do each part now):
 a. Tasks (all open ones are listed below): close each one that's already done (a chat, an email or the activity shows it, by \`emplio search <words>\` or \`emplio history search <words>\`: \`emplio tasks done <id>\`); tasks that are the same thing: keep one, cancel the rest (\`emplio tasks update <id> --status cancelled\`); cancel ones that no longer matter; chase or reassign late ones (the person's own reminder covers a task due today).
 b. Memory: rewrite each file under "Memory files over their limit" so it fits in half its limit: merge repeated lines into one, drop rules that are stale or that a later line contradicts, move lines about one client, person or job into that one's knowledge file or skill (their exact words), keep every rule that still holds for all their work, one short line each without dates or backstory. Rules where a slip would hurt stay in the file even when they name someone: who never to contact, money, what needs their OK before it goes out. People's files with the \`emplio person <email> rewrite\` command named beside each; company files in place.
 c. A job that went wrong or was corrected today: fix its skill. Work done by hand again and again: suggest an automation (journal first).
-d. Tools, only what "Toolset to tidy" lists, in Python: tools that do the same thing: keep the better one (fix it to cover both, \`emplio.tools.save(fn, area=..., risk=..., replace=True)\`), delete the other from its file, and put the kept name in place of the other in each agent's list (\`emplio agents update <agent> --tools ...\`) and skill that names it. A file too long: move a group of its tools that belong together into a new area file the same way, then delete them from the old one. An old skill's functions.py: define its functions in Python, save each one a job would call again as a tool (a one-line docstring, the right risk, nothing about one customer), delete functions.py, and change the skill's SKILL.md to \`from tools.<area> import <name>\`. Check each changed area still loads (\`from tools.<area> import *\`).`;
+d. Tools, only what "Toolset to tidy" lists, in Python: tools that do the same thing: keep the better one (fix it to cover both, \`emplio.tools.save(fn, area=..., risk=..., replace=True)\`), delete the other from its file, and put the kept name in place of the other in each agent's list (\`emplio agents update <agent> --tools ...\`) and skill that names it. A file too long: move a group of its tools that belong together into a new area file the same way, then delete them from the old one. Check each changed area still loads (\`from tools.<area> import *\`).`;
 // Mondays, in the brief
 const WEEKLY = `This week's goals review (do it now, before the rest): for each goal in company/goals.md, look at the real numbers (apps to read, \`emplio db sql\`, tasks, activity), then write company/goals.md again with one new dated line under each goal ("- 2026-11-16: 31% of sales online, up from 28%"), every goal heading and earlier line left as it was. Add up to 3 tasks for this week that would move it most (to the AI or the person whose work it is), unless open ones already cover it. A goal with no progress in two weeks: one line in the brief. No goals set: ask the owner for them in the brief.`;
 
@@ -391,7 +391,7 @@ async function openTasks(workspaceId: string, userId: string, tz: string) {
 }
 
 // What in the toolsets needs the daily cleanup (part d): tools that look like the same one (the same name in two areas,
-// or the same description), files past TOOLSET_LINES, and skills still on an old functions.py (a few a day).
+// or the same description), and files past TOOLSET_LINES.
 // ponytail: retiring tools nobody uses needs their use counted; add when lists fill with dead ones
 const TOOLSET_LINES = 300;
 export async function toolsetTidy(workspaceId: string) {
@@ -406,8 +406,6 @@ export async function toolsetTidy(workspaceId: string) {
       if (lines > TOOLSET_LINES) out.push(`- ${repo}/${p.path}: ${lines} lines (over ${TOOLSET_LINES}): split it`);
       for (const t of toolsIn(area, text)) tools.push({ name: t.name, description: t.description, where: `${repo}/${p.path}` });
     }
-    const old = paths.filter((p) => /^skills\/[^/]+\/functions\.py$/.test(p.path)).slice(0, 3);
-    for (const p of old) out.push(`- ${repo}/${p.path}: move its functions into tools`);
   }
   const same = (a: (typeof tools)[number], b: (typeof tools)[number]) =>
     a.name.split(".")[1] === b.name.split(".")[1] || (a.description !== "(no description)" && a.description.toLowerCase() === b.description.toLowerCase());
