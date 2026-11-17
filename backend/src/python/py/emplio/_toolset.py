@@ -268,15 +268,18 @@ def _tools_in(path):
 
 
 def listing(words=None, buckets=BUCKETS):
-    words = [w.lower() for w in (words or "").split() if w]
-    lines = []
+    # any of the words, best match first: a search names the case ("reddit signed in") and a tool the general job
+    # ("check_signed_in"), so all-words missed it. Short words (in, to, a) don't count.
+    words = [w for w in re.split(r"[^a-z0-9]+", (words or "").lower()) if len(w) > 2]
+    found = []
     for area, (bucket, path) in sorted(_areas(buckets).items()):
         for name, sig, doc, risk in _tools_in(path):
-            hay = f"{area} {name} {doc}".lower()
-            if words and not all(w in hay for w in words):
+            hay = re.sub(r"[^a-z0-9]+", " ", f"{area} {name} {doc}".lower())
+            hits = sum(w in hay for w in words)
+            if words and not hits:
                 continue
-            lines.append(f"  tools.{area}.{sig}: {doc} [{RISKS.get(risk, risk)}{'' if bucket == 'company' else ', ' + bucket}]")
-    return lines
+            found.append((-hits, f"  tools.{area}.{sig}: {doc} [{RISKS.get(risk, risk)}{'' if bucket == 'company' else ', ' + bucket}]"))
+    return [line for _, line in sorted(found, key=lambda f: f[0])]
 
 
 # ---- saving ----
@@ -318,7 +321,8 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
     name = fn if isinstance(fn, str) else getattr(fn, "__name__", None)
     if not isinstance(name, str):
         raise ToolError("save a function you defined: emplio.tools.save(my_function, area=\"gmail\")")
-    if not AREA.match(area or "") or keyword.iskeyword(area) or area in ("tools", "emplio"):
+    area = re.sub(r"[-\s]+", "_", (area or "").strip().lower())  # website-login → website_login, as Python can import it
+    if not AREA.match(area) or keyword.iskeyword(area) or area in ("tools", "emplio"):
         raise ToolError(f"area {area!r}: one lower-case word or words_with_underscores, for what the tools are about (gmail, billing, reddit)")
     if risk not in RISKS:
         raise ToolError(f"risk {risk!r}: say \"reads\" (only looks things up), \"changes\" (writes, sends or deletes) or \"spends\" (money)")
@@ -327,6 +331,9 @@ def save(fn, area, risk="reads", bucket=None, replace=False):
         raise ToolError(f"bucket {bucket!r}: \"company\" (everyone), \"restricted\" (admins only) or \"me\" (only you)")
     if not os.path.isdir(os.path.join(W, bucket)):
         raise ToolError(f"there is no {bucket}/ folder here: save it in \"me\" or \"company\"")
+    if bucket == "company" and _default_bucket() == "me":
+        # a member's company/ is read-only (only inbox/ goes back): a save there would be lost
+        raise ToolError("company tools are the owner's and admins' to keep: save it in \"me\" (only you), and propose it for everyone in company/inbox/")
     kind = _src.get(name, [""])[0]
     if kind not in ("def", "class"):
         raise ToolError(f"{name} wasn't defined in this session: define it (def {name}(...)) and run it once, then save it")

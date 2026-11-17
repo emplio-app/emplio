@@ -255,7 +255,7 @@ case("not from this session", ["x = 1"], [("nothing", "misc", "", "REFUSED wasn'
 reset()
 ns = session()
 run(ns, 'def f(x):\n    """x"""\n    return x')
-check("bad area", save("f", area="Bad Area"), "REFUSED area 'Bad Area'")
+check("bad area", save("f", area="9 lives.py"), "REFUSED area '9_lives.py'")
 check("bad risk", save("f", area="misc", risk="maybe"), "REFUSED risk 'maybe'")
 check("bucket that isn't there", (reset(admin=False), session(), run(T.__dict__.setdefault("_ns", kernel.fresh_namespace()), 'def f(x):\n    """x"""\n    return x'), save("f", area="misc", bucket="restricted"))[-1], "REFUSED there is no restricted/ folder")
 
@@ -352,7 +352,10 @@ out = "\n".join(T.listing())
 assert "tools.gmail.send(to, account): Send a mail. [changes things]" in out, out
 assert "tools.gmail.search(q, account, limit=10): Find mails, at most limit. [only reads]" in out, out
 assert "_headers" not in out
-assert [l for l in T.listing("mail every")] == ["  tools.outreach.notify_all(people): Mail everyone. [only reads]"], T.listing("mail every")
+assert T.listing("mail every")[0] == "  tools.outreach.notify_all(people): Mail everyone. [only reads]", T.listing("mail every")
+# a search that names the case still finds the general tool, best match first; short words don't count
+assert T.listing("send acme a mail")[0].startswith("  tools.gmail.send("), T.listing("send acme a mail")
+assert T.listing("in to a") == T.listing(), "short words alone match everything, like no words"
 check("emplio.tools.<area> loads the area", repr(emplio.tools.gmail.send("x", "y")[0]), "'send'")
 
 # buckets: a member saves to me/, own tools first; company tools never link to someone's own
@@ -360,6 +363,8 @@ reset(admin=False)
 ns = session()
 run(ns, 'def mine(x):\n    """Mine."""\n    return x')
 check("a member's tool goes in me/", save("mine", area="own"), "in me/toolset/own.py")
+check("a member can't keep company tools", save("mine", area="own", bucket="company"), "REFUSED company tools are the owner's")
+check("a dashed area becomes underscores", save("mine", area="Website-Login"), "Saved tool website_login.mine")
 reset()
 ns = session()
 run(ns, 'def helper(x):\n    """Helper."""\n    return x + 1')
