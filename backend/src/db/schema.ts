@@ -227,7 +227,11 @@ export const connections = pgTable(
     provider: text().notNull(),
     // the provider's id for this sign-in (Composio connected account; ours: the connection's own)
     externalId: text().notNull(),
+    // during a reconnect: the login it had, kept until the new sign-in is done, and back in use if it isn't finished
+    oldExternalId: text(),
     status: text({ enum: ["pending", "active", "expired", "failed"] }).notNull().default("pending"),
+    // why it isn't working, for the person (missing permissions, the sign-in stopped working); null when it's fine
+    problem: text(),
     // which account it is, to tell several of one app apart: filled from the account (the Gmail address)
     // once signed in, renamable; null until then (shown as the app's name)
     label: text(),

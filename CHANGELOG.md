@@ -2,6 +2,25 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.85 (2026-11-19)
+
+### What's new
+
+- Connected apps no longer show "Expired, reconnect" when nothing is wrong. A sign-in you started but didn't finish no longer leaves an expired account behind, and one action an app turns down no longer marks your account expired.
+- An account marked expired that still works goes back to connected by itself.
+- Reconnecting an account keeps the old sign-in working until the new one is finished, so giving up halfway loses nothing.
+- When an account was connected without some permissions (a box left unticked on Google's page), Integrations says so and offers Reconnect, and Emplio tells you which of your accounts to use instead.
+- Disconnecting one Google app no longer signs out your other Google apps on the same Google account.
+
+### For developers
+
+- `runAction` marks a connection expired only once the login holder agrees (`loginWorks`: Composio's account status, or our app's `check` with a renewed login); otherwise it reports the action as turned down. Expired connections are re-checked (`recheck`, at most every 5 minutes) and go back to active. `connections.problem` keeps why, shown in the app and `emplio apps list` (#219, #221).
+- Unfinished sign-ins: a new account that never signed in is deleted instead of stored as expired; a reconnect keeps its old login in `connections.old_external_id` and goes back to it if the new sign-in isn't finished. Our own apps' sign-ins time out after 15 minutes like Composio's.
+- OAuth renewals take a Postgres advisory lock on the connection and re-read it first, so two servers or a stale copy never spend a single-use refresh token twice.
+- A missing-permissions answer (`MISSING_SCOPE`) sets `problem` on the connection and names the person's other working accounts.
+- Disconnecting one of our Google apps revokes Google's grant only when no other of the person's Google apps is on the same Google account (`sharesGoogleGrant`).
+- Migration: `connections.old_external_id`, `connections.problem`.
+
 ## 1.2.84 (2026-11-19)
 
 ### What's new
