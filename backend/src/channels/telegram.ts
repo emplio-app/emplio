@@ -28,7 +28,8 @@ async function api(method: string, body: Json = {}, timeoutMs = 30_000): Promise
   return data.result;
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// " too: email (channels/index.ts noteEmail) uses this as HTML, where a quote in a link could end its href
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // The agent's Markdown as the little HTML Telegram understands.
 export function toHtml(md: string) {

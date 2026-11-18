@@ -23,7 +23,8 @@ import { readStored } from "../files";
 import { phoneAppUrl } from "../logins";
 import { notify } from "../live";
 import { pushTo } from "../push";
-import { telegram } from "./telegram";
+import { sendEmail } from "../mail";
+import { telegram, toHtml } from "./telegram";
 
 export type ChannelName = (typeof channelLinks.$inferSelect)["channel"];
 export type Link = typeof channelLinks.$inferSelect;
@@ -139,18 +140,37 @@ export const chatLink = (conversationId: string) => `${phoneAppUrl()}/chat/${con
 // Something the person should see that was written outside their main chat (a check-in's finding, a task's
 // result, a reminder): onto their channel when they have one in this business, and into the main chat (unless
 // it's already there, `inChat`), so whatever they answer, wherever, carries on from it. `from`: the chat it
-// was worked out in, so the AI there knows it didn't make it up (chat.ts fromNote).
-export async function post(workspaceId: string, userId: string, markdown: string, o: { inChat?: boolean; from?: string } = {}) {
+// was worked out in, so the AI there knows it didn't make it up (chat.ts fromNote). `email`: a subject to email it
+// to them under when no channel reaches them in this business; only check-ins ask (heartbeat.ts), as an email
+// after every task or automation run would be noise.
+export async function post(workspaceId: string, userId: string, markdown: string, o: { inChat?: boolean; from?: string; email?: string } = {}) {
   const links = await linksHere(workspaceId, userId);
   for (const l of links) await CHANNELS()[l.channel].send(l.address, markdown).catch((error) => console.error(`posting to ${l.channel} failed`, error));
+  const id = await mainChat(workspaceId, userId);
   if (!o.inChat) {
-    const id = await mainChat(workspaceId, userId);
     await postMessage(id, { id: generateId(), role: "assistant", parts: [{ type: "text", text: markdown }, ...(o.from ? [{ type: "data-from", data: o.from }] : [])] });
     await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
   }
   notify(userId);
-  void pushTo(userId, markdown, await mainChat(workspaceId, userId));
+  void pushTo(userId, markdown, id);
+  if (!links.length && o.email) {
+    const user = await db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });
+    // sendEmail never throws: a lost email mustn't stop the check-in
+    if (user) await sendEmail(user.email, o.email, ...noteEmail(markdown, chatLink(id)));
+  }
   return links[0]?.channel ?? null;
+}
+
+// A note as an email: the markdown as its text, and as HTML with a button to their main chat, where it now is.
+export function noteEmail(markdown: string, link: string): [string, { html: string }] {
+  return [
+    `${markdown}\n\nAnswer in Emplio: ${link}`,
+    {
+      html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#262521;max-width:560px">
+<div>${toHtml(markdown).replace(/\n/g, "<br>")}</div>
+<p style="margin:24px 0"><a href="${link}" style="background:#1f6b4e;color:#fff;text-decoration:none;padding:11px 20px;border-radius:10px;font-weight:600;display:inline-block">Answer in Emplio</a></p></div>`,
+    },
+  ];
 }
 
 // A reply nobody was waiting on (a job finished, a restart): it goes to their phone too only if that's where they last wrote.

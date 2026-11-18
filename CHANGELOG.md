@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.80 (2026-11-19)
+
+### What's new
+
+- If you haven't connected Telegram, your morning brief, end-of-day report and check-ins now come to your email too, so they reach you without opening Emplio.
+
+### For developers
+
+- `post()` takes an `email` subject: when no channel links the person in that business, it also emails the note to their account email (`noteEmail`: the markdown as text, and as HTML through Telegram's `toHtml` with an "Answer in Emplio" button to their main chat). Only `heartbeat.ts` opts in: the owner's check-ins, brief and report, staff briefs and reports, and the "check-ins paused" notice. Task, job and automation reports don't email. Telegram's `toHtml` now also escapes `"` (#166).
+
 ## 1.2.79 (2026-11-19)
 
 ### What's new
