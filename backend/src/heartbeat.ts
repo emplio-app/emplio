@@ -18,7 +18,8 @@ import { at, dayIn as day, hourIn, minuteIn, timezoneOf, when as time } from "./
 
 // Check-ins (on by default): every few hours in the working day the agent looks around on
 // its own, as the owner, in one hidden "Check-ins" chat per business (kind background); a note that needs them is
-// posted to the owner's main chat (channels/index.ts post), and so to their phone. It goes through the owner's
+// posted to the owner's main chat (channels/index.ts post), and so to their phone (to their email when no Telegram
+// reaches them in this business). It goes through the owner's
 // list, company/heartbeat.md, handles what it can and writes only when something needs a person. The same timer sends people's task reminders (`chase`).
 // The day's first check-in is the morning brief (always written: today's tasks, what's late, what needs the owner),
 // and one at the report hour (Settings → Schedule) is the end-of-day report (done / not done / couldn't / assumed), whatever the interval. Everyone
@@ -310,7 +311,7 @@ export async function briefFor(m: typeof workspaceMembers.$inferSelect, kind: "b
   const text = kind === "report" ? staffReport(person.userName, tasks, tz) : staffBrief(person.userName, m.briefAt, tasks, tz);
   const note = await run(person, chatId, { id: generateId(), role: "user", parts: [{ type: "text", text }] });
   // already in the main chat: only their phone still needs it
-  if (note) await post(m.workspaceId, m.userId, note, { inChat: true });
+  if (note) await post(m.workspaceId, m.userId, note, { inChat: true, email: `${LABEL[kind]} for ${person.workspaceName}` });
 }
 
 // The AI's turn in a check-in chat; its last words, or null when it had nothing to say.
@@ -354,7 +355,7 @@ export async function checkIn(w: typeof workspaces.$inferSelect, kind: Kind) {
   const idle = await quietDays(w);
   if (idle >= PAUSE_DAYS) {
     // the day it crosses the line, once (the brief is claimed once a day)
-    if (kind === "brief" && idle < PAUSE_DAYS + 1) await post(w.id, person.userId, PAUSED);
+    if (kind === "brief" && idle < PAUSE_DAYS + 1) await post(w.id, person.userId, PAUSED, { email: `Check-ins paused for ${person.workspaceName}` });
     return;
   }
   if (idle >= SLOW_DAYS) {
@@ -385,7 +386,8 @@ export async function checkIn(w: typeof workspaces.$inferSelect, kind: Kind) {
   // the round's own instructions start the message, so the chat still shows it as a check-in, brief or report
   const text = `${instructions(kind, w.heartbeatAt, tasks, tz, { daily, weekly })}\n\n${await thinkerBrief(w, chatId, w.heartbeatAt, tz, changes.join("\n"), daily)}`;
   const note = await run(person, chatId, { id: generateId(), role: "user", parts: [{ type: "text", text }] });
-  if (note) await post(w.id, person.userId, `**${LABEL[kind]}**\n\n${note}\n\n[See how I got there](${chatLink(chatId)})`, { from: chatId });
+  // no Telegram here: by email too, so a brief reaches someone who doesn't open the app
+  if (note) await post(w.id, person.userId, `**${LABEL[kind]}**\n\n${note}\n\n[See how I got there](${chatLink(chatId)})`, { from: chatId, email: `${LABEL[kind]} for ${person.workspaceName}` });
 }
 
 // Every open task, with its id, for the daily cleanup to close what's done and tidy the rest.
