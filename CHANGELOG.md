@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.78 (2026-11-19)
+
+### What's new
+
+- Tapping "Always allow" on an approval card now asks you to confirm first, so a misclick can't let an app action run unchecked from then on.
+
+### For developers
+
+- `ApprovalAsk`'s "Always allow" button opens the shared `useConfirm` dialog and only sends `always` on Confirm; Allow and Deny are unchanged. Telegram's inline "Always allow" button still applies at once (#209).
+
 ## 1.2.77 (2026-11-19)
 
 ### What's new
