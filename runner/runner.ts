@@ -331,7 +331,11 @@ const server = Bun.serve({
     const to = await previewOf(req.headers.get("host"));
     if (to) return preview(req, url, to);
     // the HTTPS proxy asks before it gets a certificate for a preview name
-    if (url.pathname === "/preview-ok") return (await previewOf(url.searchParams.get("domain"))) ? new Response("ok") : new Response("no", { status: 404 });
+    // (and for runner.<domain>, this program's own address behind it, which sits under the same wildcard)
+    if (url.pathname === "/preview-ok") {
+      const domain = url.searchParams.get("domain");
+      return domain === `runner.${PREVIEW_DOMAIN}` || (await previewOf(domain)) ? new Response("ok") : new Response("no", { status: 404 });
+    }
     const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token") ?? "";
     if (!allowed(given)) return new Response("Unauthorized", { status: 401 });
     try {
