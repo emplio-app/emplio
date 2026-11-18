@@ -28,7 +28,7 @@ import {
   UsersIcon,
   XIcon,
 } from "lucide-react";
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask, TextLayer } from "pdfjs-dist";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -491,13 +491,13 @@ function SheetView({ file }: { file: Shown }) {
 
 const finger = () => matchMedia("(pointer: coarse)").matches;
 
-// the browser's own viewer opens a narrow frame with its page list down the side: hide it, fit the page to the width.
-// Phones ignore that (an iPhone shows the page at full size, Android shows nothing), so there the pages are drawn here.
-const PdfFrame = ({ href, title }: { href: string; title: string }) =>
-  finger() ? <PdfPages href={href} title={title} /> : <iframe src={`${href}#navpanes=0&view=FitH`} title={title} className="size-full min-h-[70vh] rounded-md border bg-white" />;
+// Drawn here on every screen, not in the browser's own viewer: phones don't show that one properly (an iPhone shows the
+// page at full size, Android shows nothing), and its words can't be selected to reply to (#200).
+const PdfFrame = PdfPages;
 
 function PdfPages({ href, title }: { href: string; title: string }) {
   const [doc, setDoc] = useState<PDFDocumentProxy>();
+  const [Words, setWords] = useState<typeof TextLayer>();
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let left = false;
@@ -511,6 +511,7 @@ function PdfPages({ href, title }: { href: string; title: string }) {
       opening = pdfjs.getDocument({ data: new Uint8Array(await res.arrayBuffer()) });
       const loaded = await opening.promise;
       if (left) return void opening.destroy();
+      setWords(() => pdfjs.TextLayer);
       setDoc(loaded);
     })().catch(() => !left && setFailed(true));
     return () => {
@@ -531,32 +532,43 @@ function PdfPages({ href, title }: { href: string; title: string }) {
   return (
     <div className="grid gap-2" role="document" aria-label={title}>
       {Array.from({ length: doc.numPages }, (_, i) => (
-        <PdfPage key={i} doc={doc} n={i + 1} />
+        <PdfPage key={i} doc={doc} n={i + 1} Words={Words!} />
       ))}
     </div>
   );
 }
 
 // One page, as wide as the panel, drawn only while near the screen: a phone runs out of memory on a long PDF's worth of pictures.
-function PdfPage({ doc, n }: { doc: PDFDocumentProxy; n: number }) {
+// Its words lie unseen over the picture, so they can be selected, copied and replied to.
+function PdfPage({ doc, n, Words }: { doc: PDFDocumentProxy; n: number; Words: typeof TextLayer }) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = box.current!;
     const c = canvas.current!;
+    const w = layer.current!;
     let near = false;
     let task: RenderTask | undefined;
+    let words: TextLayer | undefined;
     const draw = async () => {
       const page = await doc.getPage(n);
       const flat = page.getViewport({ scale: 1 });
       el.style.aspectRatio = `${flat.width} / ${flat.height}`;
       if (!near) return;
-      const viewport = page.getViewport({ scale: (el.clientWidth * devicePixelRatio) / flat.width });
+      const scale = el.clientWidth / flat.width;
+      const viewport = page.getViewport({ scale: scale * devicePixelRatio });
       c.width = viewport.width;
       c.height = viewport.height;
       task?.cancel();
       task = page.render({ canvas: c, viewport });
-      await task.promise;
+      words?.cancel();
+      w.replaceChildren();
+      w.style.setProperty("--total-scale-factor", String(scale));
+      words = new Words({ textContentSource: page.streamTextContent(), container: w, viewport: page.getViewport({ scale }) });
+      await Promise.all([task.promise, words.render()]);
+      // drawn: its white stand-in goes, as it showed as a thin white edge round a dark page's rounded corners
+      c.classList.remove("bg-white");
     };
     const watch = new IntersectionObserver(
       ([entry]) => {
@@ -564,7 +576,11 @@ function PdfPage({ doc, n }: { doc: PDFDocumentProxy; n: number }) {
         if (near) void draw().catch(() => {});
         else {
           task?.cancel();
+          words?.cancel();
           c.width = c.height = 0;
+          c.classList.add("bg-white");
+          // not while some of its words are selected: the selection would go with them
+          if (!window.getSelection()?.containsNode(w, true)) w.replaceChildren();
         }
       },
       { root: el.closest(".overflow-auto"), rootMargin: "100%" },
@@ -573,11 +589,13 @@ function PdfPage({ doc, n }: { doc: PDFDocumentProxy; n: number }) {
     return () => {
       watch.disconnect();
       task?.cancel();
+      words?.cancel();
     };
-  }, [doc, n]);
+  }, [doc, n, Words]);
   return (
-    <div ref={box} className="relative w-full rounded-sm bg-white shadow-sm" style={{ aspectRatio: "1 / 1.414" }}>
-      <canvas ref={canvas} className="absolute inset-0 size-full rounded-sm" />
+    <div ref={box} className="relative w-full rounded-sm shadow-sm" style={{ aspectRatio: "1 / 1.414" }}>
+      <canvas ref={canvas} className="absolute inset-0 size-full rounded-sm bg-white" />
+      <div ref={layer} className="pdf-words" />
     </div>
   );
 }
@@ -803,7 +821,8 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
             </div>
           </header>
           {/* the page, not a frame inside it, gets the pointer while the edge is dragged */}
-          <div className={`min-h-0 flex-1 overflow-auto bg-muted/40 p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
+          {/* data-quotable: text selected in it can be replied to in the chat beside it (chat/quote.tsx) */}
+          <div data-quotable className={`min-h-0 flex-1 overflow-auto bg-muted/40 p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
             <Preview file={file} />
           </div>
         </>

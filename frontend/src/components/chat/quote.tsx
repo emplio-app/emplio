@@ -37,11 +37,12 @@ export const addQuote = (quotes: Quote[], text: string) => (quotes.some((q) => q
 
 const finger = () => matchMedia("(pointer: coarse)").matches;
 
-// The "Reply" button over text selected in a message in the chat (the AI's or the person's own, #200), inside `area`.
-export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | null>; onQuote: (text: string) => void }) {
+// The "Reply" button over text selected in a message in the chat (the AI's or the person's own, #200), inside `area`,
+// or in a file open beside it (its preview marked data-quotable, file-viewer.tsx); `file` says which.
+export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | null>; onQuote: (text: string, file: boolean) => void }) {
   // shown: off, it fades where it was, so the next selection's button glides over from there; glide: false while
   // the chat scrolls, so it stays on the text rather than trailing it
-  const [at, setAt] = useState<{ text: string; x: number; y: number; above: boolean; shown: boolean; glide: boolean } | null>(null);
+  const [at, setAt] = useState<{ text: string; file: boolean; x: number; y: number; above: boolean; shown: boolean; glide: boolean } | null>(null);
   useEffect(() => {
     const hide = () => setAt((a) => a && { ...a, shown: false });
     const place = (glide: boolean) => {
@@ -50,22 +51,24 @@ export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | n
       const range = sel.getRangeAt(0).cloneRange();
       const elOf = (n: Node) => (n instanceof Element ? n : n.parentElement);
       // a triple-click, or a drag let go below the reply, ends the selection past it: keep the reply's part
-      const msg = elOf(range.startContainer)?.closest(".is-assistant, .is-user") ?? elOf(range.endContainer)?.closest(".is-assistant, .is-user");
+      const from = ".is-assistant, .is-user, [data-quotable]";
+      const msg = elOf(range.startContainer)?.closest(from) ?? elOf(range.endContainer)?.closest(from);
       // not while editing a message: its box has its own selection
       if (msg?.querySelector("textarea")) return hide();
-      if (!msg || !area.current?.contains(msg)) return hide();
+      const file = !!msg?.matches("[data-quotable]");
+      if (!msg || !area.current || !(file || area.current.contains(msg))) return hide();
       if (!msg.contains(range.startContainer)) range.setStart(msg, 0);
       if (!msg.contains(range.endContainer)) range.setEnd(msg, msg.childNodes.length);
       const text = range.toString().trim();
       if (!text) return hide();
       const rect = range.getBoundingClientRect();
-      // scrolled out of the chat's view: hidden until it's back
-      const view = area.current.getBoundingClientRect();
+      // scrolled out of the chat's (or the file's) view: hidden until it's back
+      const view = (file ? msg : area.current).getBoundingClientRect();
       if (rect.bottom < view.top || rect.top > view.bottom) return hide();
-      if (!finger()) return setAt({ text, x: rect.left + rect.width / 2, y: rect.top - 8, above: true, shown: true, glide });
+      if (!finger()) return setAt({ text, file, x: rect.left + rect.width / 2, y: rect.top - 8, above: true, shown: true, glide });
       // below the selection, the phone's own Copy menu being above it; on screen, and clear of the selection's handle
       const below = Math.min(rect.bottom + 20, window.innerHeight - 64);
-      setAt({ text, x: Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56), y: below, above: false, shown: true, glide });
+      setAt({ text, file, x: Math.min(Math.max(rect.left + rect.width / 2, 56), window.innerWidth - 56), y: below, above: false, shown: true, glide });
     };
     const check = () => place(true);
     // A finger's selection has no release to listen for: once it has been still for a moment. The selection handles
@@ -108,7 +111,7 @@ export function QuoteButton({ area, onQuote }: { area: RefObject<HTMLElement | n
   const reply = () => {
     // cleared first: clearing it after would take the caret back out of the message box onQuote focuses
     window.getSelection()?.removeAllRanges();
-    onQuote(at.text);
+    onQuote(at.text, at.file);
     setAt(null);
   };
   return (
