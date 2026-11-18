@@ -6,7 +6,7 @@
 # Standard library only: it runs on the cloud computer, a Mac and Windows alike.
 import ast, builtins, json, linecache, os, re, signal, socket, subprocess, sys, threading, time, traceback, _thread
 
-VERSION = "4"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check; 4: skills in skillset/
+VERSION = "5"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check; 4: skills in skillset/; 5: /work in answers is this computer's own folder
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("EMPLIO_WORK") or "/work"
 SESSIONS = os.path.join(W, "tmp", ".emplio", "sessions")

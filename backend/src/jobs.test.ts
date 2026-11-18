@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, recordedLine, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -246,4 +246,58 @@ test("a run the person started by chatting in the job isn't asked for a skill", 
   const said = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
   expect(savedTool([said(FROM_EMPLIO + "check usage"), said("hello, how are you")])).toBe(true);
   expect(savedTool([])).toBe(true);
+});
+
+test("a question nobody answers for a day stops waiting; \"Question: none\" never waited", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `jobs-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `jobs-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const main = crypto.randomUUID();
+    const chatId = crypto.randomUUID();
+    await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: chatId, ...who, title: "job", kind: "job" }]);
+    const hour = 3_600_000;
+    const [old, fresh] = await db
+      .insert(jobs)
+      .values([
+        { ...who, conversationId: main, depth: 1, name: "old", status: "asking", report: "Question: code?", finishedAt: new Date(Date.now() - 25 * hour) },
+        { ...who, conversationId: main, depth: 1, name: "fresh", status: "asking", report: "Question: code?", finishedAt: new Date(Date.now() - 23 * hour) },
+      ])
+      .returning();
+    await expireAsking();
+    expect((await db.query.jobs.findFirst({ where: eq(jobs.id, old!.id) }))!.status).toBe("stopped");
+    expect((await db.query.jobs.findFirst({ where: eq(jobs.id, fresh!.id) }))!.status).toBe("asking");
+
+    await db.insert(jobs).values({ ...who, conversationId: main, chatId, depth: 1, name: "check", status: "done", report: "first" });
+    await (await (await jobReply(chatId))!.began(() => {}))("Question: none. Sent the email.", "completed", false, false, []);
+    expect((await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) }))!.status).toBe("done");
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
+});
+
+test("the report goes first: the job is done with its answer before the tool-saving run, which comes once", async () => {
+  const said = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
+  expect(nudged([said(FROM_EMPLIO + "check usage")])).toBe(false);
+  expect(nudged([said(FROM_EMPLIO + SAVE_TOOL)])).toBe(true);
+  expect(nudged([said(FROM_EMPLIO + "Before your report: keep what the next job like this would call as tools.")])).toBe(true);
+
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `jobs-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `jobs-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const main = crypto.randomUUID();
+    const chatId = crypto.randomUUID();
+    await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: chatId, ...who, title: "job", kind: "job" }]);
+    await db.insert(messages).values({ id: crypto.randomUUID(), conversationId: chatId, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + "Check if Tushar replied" }] });
+    await db.insert(jobs).values({ ...who, conversationId: main, chatId, depth: 1, name: "check", status: "working" });
+    await (await (await jobReply(chatId))!.began(() => {}))("Yes, Tushar replied: it's failing.", "completed", false, false, []);
+    expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "done", report: "Yes, Tushar replied: it's failing." });
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
 });

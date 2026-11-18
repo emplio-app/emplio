@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canReopen, keepIndexedDb, signInPrint, signedInSites, sitesIn, stillRunning } from "./browser";
+import { BrowserGone, canReopen, keepIndexedDb, signInPrint, signedInSites, sitesIn, socketUrl, stillRunning } from "./browser";
 
 test("the Live browser button lasts 24 hours after the browser last ran", () => {
   const now = Date.now();
@@ -56,4 +56,16 @@ test("a computer's browser saves again when a sign-in changes, not when analytic
   expect(signInPrint([c("_ga", "2", false), c("session", "a", true)])).toBe(before);
   expect(signInPrint([c("session", "b", true), c("_ga", "1", false)])).not.toBe(before);
   expect(signInPrint([c("session", "a", true), c("sid", "x", true), c("_ga", "1", false)])).not.toBe(before);
+});
+
+test("a browser that closed is reported gone, not an address of undefined", async () => {
+  let answer = new Response(JSON.stringify({ error: "the browser didn't answer" }), { status: 502 });
+  const server = Bun.serve({ port: 0, fetch: () => answer.clone() });
+  const url = `http://localhost:${server.port}`;
+  await expect(socketUrl(url)).rejects.toBeInstanceOf(BrowserGone);
+  answer = Response.json({});
+  await expect(socketUrl(url)).rejects.toBeInstanceOf(BrowserGone);
+  answer = Response.json({ webSocketDebuggerUrl: "ws://x/devtools/browser/1" });
+  expect(await socketUrl(url)).toBe("ws://x/devtools/browser/1");
+  server.stop(true);
 });

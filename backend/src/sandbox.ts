@@ -1,3 +1,4 @@
+import { countAwake, PRIORITY, withComputer } from "./computer-queue";
 import { readFileSync } from "node:fs";
 import type { Box } from "./computer";
 import { cloud } from "./cloud";
@@ -9,7 +10,7 @@ import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
 import { deviceFor, localBox, type Conn } from "./devices";
 import { browserKindFor, isDeviceBrowser } from "./device-browser";
-import { browserFor, browserLocal, browserOpen, browserSize, connectionFor, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
+import { BrowserGone, browserFor, browserLocal, browserOpen, browserSize, connectionFor, forget, socketUrl, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitForCommand } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -910,8 +911,13 @@ PY
   hand)
     # the brief comes on stdin: it's long and full of quotes. Given as a word, it's not read
     shift
-    words "$@"
-    { [ "$n" -eq 1 ] && [ "$1" != help ] || [ "$last" = - ]; } && set -- "$@" "$(cat)"
+    # the agent alone, or with only its flags (--new, --description <d>, --level <l>), or a "-" anywhere: the brief is on stdin
+    k=0; skip=
+    for a in "$@"; do
+      if [ -n "$skip" ]; then skip=; continue; fi
+      case "$a" in --new) ;; --description|--level) skip=1 ;; -) k=99 ;; *) k=$((k+1)) ;; esac
+    done
+    { [ "$k" -eq 1 ] && [ "$1" != help ] || [ "$k" -ge 99 ]; } && set -- "$@" "$(cat)"
     req WORK hand "$@" ;;
   threads)
     shift
@@ -1148,7 +1154,7 @@ export function inPython(text: string) {
 
 // How code mode works, for the top of "Your computer". Every command elsewhere is already written as its Python call
 // (inPython, applied to the whole prompt in chat.ts). Emplio, the manager, runs a command or two; an agent does the work.
-const codeModeNote = (name: string, admin: boolean, agent: boolean) =>
+const codeModeNote = (name: string, admin: boolean, agent: boolean, seconds: number) =>
   [
     `How you work: the python tool runs Python in a session that stays open for this chat like a notebook (what you define is still there next step; a new session says so). Anything you'll likely do again (a check, a retry loop, a parse, and so on), define once as a small general function taking what changes, and call it after. Only what you print comes back.`,
     `- Emplio's commands are the \`emplio\` library, already imported, written as calls throughout. Answers are data: \`emplio.db.sql(...)\` a list of dicts, \`emplio.web.search(...)\` a list of {title, url, date, text}, \`emplio.apps.run(...)\` the app's JSON; the rest text. Do the work in one run (query, loop, sum, decide in code) and print only what you need. Never sh("emplio ...").`,
@@ -1158,8 +1164,8 @@ const codeModeNote = (name: string, admin: boolean, agent: boolean) =>
     ...(agent
       ? [
           `- Each emplio call is a server request: many rows go in one call (one SQL statement, or \`emplio.db.script\`). Many items at once: \`emplio.map(fn, items, limit=5)\`; a failure comes back in its place as Failed (falsy, .item, .error).`,
-          `- Tools: functions kept so the next job is one call, one file per area (gmail, billing) in toolset/ folders. Before writing a step, look: \`emplio.tools.search("<words>")\`; use one with \`from tools.<area> import <name>\`. Keep one you wrote: \`emplio.tools.save(fn, area="<area>", risk="reads" | "changes" | "spends")\`${admin ? ` (\`bucket="me"\` if only for ${name}, \`"restricted"\` for money, HR or the owner's matters)` : ""}: it brings the helpers fn uses, links tools already kept, loads the file fresh before saving, and refuses a value left in the session that should be an input. Each one step, generic, with a one-line docstring; never customer data or keys. A tool that fails: fix that function and save it again.`,
-          `- Long runs: background: true runs the code in its own process (no session variables) and returns at once.`,
+          `- Tools: functions kept so the next job is one call, one file per area (gmail, billing) in toolset/ folders. Before writing a step, look: \`emplio.tools.search("<words>")\`; use one with \`from tools.<area> import <name>\`; \`emplio.tools.show("<area>.<name>")\` shows one in full (what it takes and returns) without reading its code. Keep one you wrote: \`emplio.tools.save(fn, area="<area>", risk="reads" | "changes" | "spends")\`${admin ? ` (\`bucket="me"\` if only for ${name}, \`"restricted"\` for money, HR or the owner's matters)` : ""}: it brings the helpers fn uses, links tools already kept, loads the file fresh before saving, and refuses a value left in the session that should be an input. Each one step, generic, with a docstring saying what it does and what it returns; never customer data or keys. A tool that fails: fix that function and save it again.`,
+          `- A run stops after ${seconds} seconds. Longer work (many pages, a big download, OCR): background: true runs the code in its own process (no session variables) and returns at once. Waiting for something (a reply, a file, a page): never sleep it out in one run; check, and check again in a later step.`,
         ]
       : []),
   ].join("\n");
@@ -1181,7 +1187,7 @@ export function sandboxPrompt(s: Session, agent = false) {
   return `## Your computer
 Your own computer, through the ${py ? "python" : "bash"} tool: a cloud Linux one, or ${name}'s own Mac or Windows PC while the Emplio app is open there (the note on their latest message says which; a result says when it changes). On their computer, work only inside /work and never look through ${name}'s other files unless asked. All ${name}'s chats share it. Do the work rather than telling people how.
 
-${py ? `${codeModeNote(name, admin, agent)}\n\n` : ""}Folders:
+${py ? `${codeModeNote(name, admin, agent, s.settings.commandSeconds)}\n\n` : ""}Folders:
 - /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skillset/, toolset/, agents/, automations/, knowledge/, inbox/
 ${admin ? "- /work/restricted/  finance, HR, owner notes (git), and admins-only toolset/. Admins only.\n" : ""}- /work/me/  ${name}'s own files (git): profile.md, preferences.md, notes/, skillset/, toolset/
 - /work/in/  files attached in ${name}'s chats (a document's words beside it in <name>.txt)
@@ -1462,16 +1468,30 @@ async function sandboxFor(s: Session): Promise<Box> {
     if (!known.local) meter(s, awakeFor);
     return known;
   }
-  const box = await findOrCreate(s, !!known?.local);
-  live.set(boxKey(s), box);
-  if (!box.local) meter(s, IDLE_MS);
-  return box;
+  const start = async () => {
+    const box = await findOrCreate(s, !!known?.local);
+    live.set(boxKey(s), box);
+    if (!box.local) meter(s, IDLE_MS);
+    return box;
+  };
+  // the person's own computer, or a cloud one still counted awake, takes no turn; others wait for room (computer-queue.ts)
+  if (mine || (awake.get(boxKey(s))?.until ?? 0) > Date.now()) return start();
+  return withComputer(s.watched ? PRIORITY.person : s.background ? PRIORITY.background : PRIORITY.work, s.watched ? PERSON_WAIT_MS : WORK_WAIT_MS, start, s.signal);
 }
+// how long a start waits for a free computer: a person in a live chat a little, work nobody watches a while
+const PERSON_WAIT_MS = 2 * 60_000;
+const WORK_WAIT_MS = 20 * 60_000;
 
 // Computer time, charged to the business (credit.ts): from a box's first command until it pauses, its idle
 // timeout after the last one.
 // ponytail: kept in memory; a box still awake when the server restarts isn't charged for that stretch
 const awake = new Map<string, { since: number; until: number; bill: Bill }>();
+countAwake(() => {
+  const now = Date.now();
+  let n = 0;
+  for (const a of awake.values()) if (a.until > now) n++;
+  return n;
+});
 function meter(s: Session, awakeFor: number) {
   const key = boxKey(s);
   const now = Date.now();
@@ -2374,13 +2394,18 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     // this chat's browser is up every step gets it
     if (usesBrowser(command) || (codeMode() && browserOpen(s.conversationId))) {
       const owner = { workspaceId: s.workspaceId, userId: s.user.id };
-      const live = await browserFor(s.conversationId, owner);
+      let live = await browserFor(s.conversationId, owner);
+      // the person closed the Chrome their computer started: a fresh one
+      if (isDeviceBrowser(live.id) && !(await socketUrl(live.cdpUrl).then(() => true, (e) => (e instanceof BrowserGone ? false : Promise.reject(e))))) {
+        await forget(s.conversationId, live);
+        live = await browserFor(s.conversationId, owner);
+      }
       await connectionFor(live, owner, command).catch((error) => console.error("browser connection not chosen:", error));
       browserId = live.id;
       // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one. A computer's browser ids all
       // start dev_<computer>, so its name comes from the browser's own key: chats on one computer must not share a session.
       // the agent's tool drops the path of an http address, so a browser on someone's computer (its address has one) gets the socket's own
-      const cdp = isDeviceBrowser(live.id) ? await fetch(`${live.cdpUrl}/json/version`).then((r) => r.json()).then((j: any) => String(j.webSocketDebuggerUrl)) : live.cdpUrl;
+      const cdp = isDeviceBrowser(live.id) ? await socketUrl(live.cdpUrl) : live.cdpUrl;
       env = { ...env, BROWSER_CDP_URL: cdp, BROWSER_SESSION: `chat-${isDeviceBrowser(live.id) ? `dev-${live.id.split("_")[2]}` : live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
     }
     used.add(boxKey(s));

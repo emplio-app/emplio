@@ -2,6 +2,29 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.67 (2026-11-18)
+
+### What's new
+
+- When an agent finishes, you get its answer straight away. It then keeps what worked for next time in the background, and says in one line what it kept, instead of making you wait and repeating its report. ![](frontend/public/whats-new/1.2.67-answers-first.webp)
+- Busy mornings no longer fail: when every cloud computer is in use, work waits a moment for one, with people chatting first. Morning briefs are spread over the first quarter hour.
+- A chat follows a reply as it's written while you're at the end, and stays put once you scroll up to read.
+- An agent's chat you have open now shows new work as it starts, without a refresh.
+- Work on your Mac can open files Emplio hands back, like an email's attachment.
+- Starting a fresh job for an agent works the first time.
+- A question nobody answers for a day stops waiting, so the agent can take new work.
+- Agents' notes for next time keep only what went wrong or what you corrected, not a diary of the work.
+
+### For developers
+
+- Jobs: the report is final when the run ends; the tool-saving nudge (`SAVE_TOOL`) runs once per job afterwards (`nudged()` reads the job's chat), leaves status and report alone, and answers in a line. `/jobs` gives `updatedAt` and `running`, which an open job chat follows.
+- `computer-queue.ts`: cloud computer starts wait for room under `COMPUTER_MAX` (default 18), by priority (watched chat, work, background), and a provider "too many" goes back in line. First rounds of the day start at a per-business/person minute (`startMinute`).
+- Tools: `emplio.tools.show("<area>.<name>")` shows one in full without its code; a tool that returns a value must say what in its docstring (or `->`), and listings show it.
+- Python helper on a person's computer: `/work` in emplio answers and `sh()` commands is swapped for the real folder (kernel version 5).
+- `emplio hand <agent> --new` reads its brief from stdin; `asks()` ignores "Question: none"; asking jobs older than a day are stopped hourly (`expireAsking`).
+- `devtools()`/`socketUrl` throw `BrowserGone` for a closed Mac browser, which is dropped; `writeFile`/`writeFiles` take the repo's lock like box pushes.
+- One lesson rule (`LESSON_RULE`) for agents and the reader; `scripts/clean-lessons.ts` tidies existing lessons (dry run by default).
+
 ## 1.2.66 (2026-11-18)
 
 ### What's new

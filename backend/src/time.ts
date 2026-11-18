@@ -35,6 +35,7 @@ export const when = (d: Date, tz: string) => d.toLocaleString("en-IN", { timeZon
 export const dayIn = (d: Date, tz: string) => d.toLocaleDateString("en-CA", { timeZone: tz });
 // 0-23
 export const hourIn = (tz: string, d = new Date()) => Number(d.toLocaleString("en-US", { timeZone: tz, hour: "numeric", hour12: false })) % 24;
+export const minuteIn = (tz: string, d = new Date()) => Number(d.toLocaleString("en-US", { timeZone: tz, minute: "numeric" }));
 
 // How far `tz`'s clock is ahead of UTC at `d`, in ms.
 function offset(tz: string, d: Date) {

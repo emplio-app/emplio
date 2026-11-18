@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentMd, flags, parseAgent, skillsUsed, slugOf, toolsIn, toolsUsed } from "./agents";
+import { agentMd, described, flags, parseAgent, skillsUsed, slugOf, toolsIn, toolsUsed } from "./agents";
 
 test("AGENT.md round-trips", () => {
   const a = { name: "Supplier Finder", description: "Finds suppliers. Use for: cheaper vendor", skills: ["web-research", "price-compare"], tools: ["gmail.send", "suppliers.find_near"], level: "strong" as const, archived: false, instructions: "Near first, then wider." };
@@ -56,9 +56,15 @@ def buy(n):
 `;
   expect(toolsIn("gmail", py)).toEqual([
     { name: "gmail.search", signature: "search(q, account, limit=10)", description: "Find mails, at most limit.", risk: "only reads" },
-    { name: "gmail.send", signature: "send(to, body: str, account=\"office\")", description: "Send a mail.", risk: "changes things" },
+    { name: "gmail.send", signature: "send(to, body: str, account=\"office\")", description: "Send a mail. Returns dict.", risk: "changes things" },
     { name: "gmail.buy", signature: "buy(n)", description: "(no description)", risk: "spends money" },
   ]);
+});
+
+test("a tool's line says what it gives back: its docstring's sentence about it, else its annotation", () => {
+  expect(described("Messages in a thread.\n\n    Each one a dict. Returns a list of dicts with from, text.", "list")).toBe("Messages in a thread. Returns a list of dicts with from, text.");
+  expect(described("Returns the sheet's rows as lists.")).toBe("Returns the sheet's rows as lists.");
+  expect(described("Archive a thread.")).toBe("Archive a thread.");
 });
 
 test("the tools a piece of work saved or used", () => {

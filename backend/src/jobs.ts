@@ -11,7 +11,7 @@ import { generateId, type UIMessage } from "ai";
 import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context, type Ctx } from "./auth";
 import { personFor } from "./automations";
@@ -23,6 +23,7 @@ import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, ski
 import { canReopen, liveView, REOPEN_MS } from "./browser";
 import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
+import { isReplying } from "./live";
 import { cloud } from "./cloud";
 
 type Action = JobInfo["actions"][number];
@@ -61,12 +62,16 @@ const carryUntil = new Map<string, number>();
 const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
 const RESTARTED =
   "The server restarted and cut your last run off mid-work. Carry on from where you stopped, without redoing what's done: what you found is in your files and this chat. Threads you started were cut off too: check them with `emplio threads` before starting any again.";
-// A finished run that kept no tool gets this once (began, below): every kind of task done once is one call the next
-// time. Opening a skill or calling a tool doesn't count: a job that did part of the work inline (a write by hand
-// next to a skill that only reads) would never keep that part. A run that only called tools says so in a line.
+// A job whose run kept no tool gets this once, after its report has gone (began, below): every kind of task done once
+// is one call the next time. Opening a skill or calling a tool doesn't count: a job that did part of the work inline
+// (a write by hand next to a skill that only reads) would never keep that part. Its answer is a line, not the report.
 export const SAVE_TOOL =
-  'Before your report: keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. If every step was already a call to a saved tool, or this was a true one-off, say so in one line. Then give your report again in full.';
-// "Saved tool <area>.<name> (" is what emplio.tools.save prints; a toolset file written by hand counts too. true also for a run the person started by writing in the job's chat: chatting there isn't a task
+  'Your report has gone to whoever asked; nobody is waiting on this. Now keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. Keep it simple: save the steps that worked as they are, in a few steps. Don\'t debug, retry or redo the work here, and don\'t build more than the job needed; a step that won\'t save cleanly is left out. If every step was already a call to a saved tool, or this was a true one-off, save nothing. Reply with one line: the tools you saved, or "Nothing to keep." Not the report again.';
+// this job had the nudge already (the job's chat says so): never twice, even after a restart or a follow-up
+const NUDGED = /^\[From Emplio\] (Your report has gone|Before your report)/;
+export const nudged = (msgs: { role: string; parts: unknown }[]) => msgs.some((m) => m.role === "user" && NUDGED.test(textOf(m)));
+// jobs in their tool-saving run: its end leaves the report and status as they were and wakes nobody
+const saving = new Set<string>();
 export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
   const lastAsk = [...msgs].reverse().find((m) => m.role === "user");
   if (!lastAsk || !textOf(lastAsk).startsWith(FROM_EMPLIO)) return true;
@@ -81,7 +86,6 @@ export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
       return /^Saved tool [a-z][a-z0-9_]*\.\w+ \(/m.test(out) || wrote;
     });
 };
-const skillAsked = new Set<string>();
 export const CARRY_ON =
   "That run used up its steps, so this is a fresh one: carry on from where you stopped. What you found is in your files; keep building the result as you go.";
 // What happens to a report when a job's reply ends: wake Emplio, keep it for its next reply, or nothing.
@@ -212,6 +216,14 @@ async function resume(w: Pick<Row, "id" | "workspaceId" | "userId" | "conversati
   if (!(await wake(w, note))) for (const r of done) unseen.add(r.id);
 }
 
+// A question nobody answered in a day isn't waited on any more: like closing it (the close route), so Emplio stops
+// expecting its report and the agent can take new work. A day: its browser can't be reopened after that either.
+export async function expireAsking(now = Date.now()) {
+  const gone = await db.update(jobs).set({ status: "stopped" }).where(and(eq(jobs.status, "asking"), lt(jobs.finishedAt, new Date(now - REOPEN_MS)))).returning({ id: jobs.id });
+  for (const { id } of gone) owed.delete(id), untold.delete(id);
+  return gone.length;
+}
+
 // Jobs that died with the process (a restart, a deploy) are marked so at startup, and Emplio is told in each
 // chat, so it can have them carry on from their last step (`emplio hand <id>`).
 // ponytail: one server, so anything working at startup is dead; with several, claim each one first
@@ -292,6 +304,14 @@ async function began(w: Row, stop: () => void) {
   const e = track(w.id);
   Object.assign(e, { stop, began: true });
   // it asked a question: whoever answers it here, Emplio is still waiting on the result
+  // the tool-saving run after the report: the job stays done, with its report, and the run's end only ends it
+  if (saving.has(w.id))
+    return async () => {
+      saving.delete(w.id);
+      if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
+      live.delete(w.id);
+      e.end();
+    };
   if (w.depth === 1 && w.status === "asking") owed.add(w.id);
   await db.update(jobs).set({ status: "working", report: null, finishedAt: null }).where(eq(jobs.id, w.id));
   // its last words are its report: a question waits for an answer
@@ -311,17 +331,8 @@ async function began(w: Row, stop: () => void) {
       if (!told) owed.delete(w.id);
       return;
     }
-    if (outcome === "completed" && !capped && !interrupted && !carded.length && timeLeft && !asks(answer) && !skillAsked.has(w.id) && w.chatId && !savedTool(await loadMessages(w.chatId))) {
-      skillAsked.add(w.id);
-      carryUntil.set(w.id, until);
-      live.delete(w.id);
-      track(w.id).done.then(e.end);
-      const told = owed.has(w.id);
-      void send(w, SAVE_TOOL, undefined, true);
-      if (!told) owed.delete(w.id);
-      return;
-    }
-    skillAsked.delete(w.id);
+    const msgs = outcome === "completed" && !capped && !interrupted && !carded.length && !asks(answer) && w.chatId ? await loadMessages(w.chatId) : null;
+    const nudge = !!msgs && !savedTool(msgs) && !nudged(msgs);
     const unfinished =
       outcome === "failed" && !timeLeft ? "Ran out of time, not finished. " : capped && !interrupted ? "Stopped at the step limit, not finished. " : "";
     const asked = outcome === "completed" && !unfinished && carded.length > 0;
@@ -344,6 +355,12 @@ async function began(w: Row, stop: () => void) {
       unseen.add(w.id);
       // Emplio's reply ended first: the chat that started it carries on once its jobs are all done
       if (!waited.has(w.id)) void resume(w).catch((error) => console.error(`job ${w.id}: resuming the chat failed`, error));
+    }
+    if (nudge && status === "done") {
+      saving.add(w.id);
+      const told = owed.has(w.id);
+      void send(w, SAVE_TOOL, undefined, true);
+      if (!told) owed.delete(w.id);
     }
   };
 }
@@ -387,6 +404,11 @@ async function send(w: Row, text: string, run = generateId(), hidden = false) {
   }
   // it never began (the business is paused, say): ended here, so nobody waits on it
   if (live.get(w.id) === e && !e.began) {
+    // the tool-saving run after a report: the job is done either way
+    if (saving.delete(w.id)) {
+      live.delete(w.id);
+      return e.end();
+    }
     await db.update(jobs).set({ status: "failed", report: `It couldn't start: ${error ?? "unknown error"}`, finishedAt: new Date() }).where(eq(jobs.id, w.id));
     owed.delete(w.id);
     live.delete(w.id);
@@ -432,7 +454,8 @@ export function openAsks(msgs: { role: string; parts: unknown }[]): AskCard[] {
 
 // A job's card for one run (the prompt that started it, see send). The latest run is the job's own status and
 // report; an earlier one is finished, with what it did and said then. A prompt not in the chat yet is queued.
-const asks = (report: string) => /^\W*question\b/i.test(report);
+// "Question: none." is a report that asks nothing
+const asks = (report: string) => /^\W*question\b/i.test(report) && !/^\W*question:\s*(none|no)\b/i.test(report);
 const textOf = (m: { parts: unknown }) =>
   ((m.parts as { type?: string; text?: string }[]) ?? []).flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("");
 
@@ -841,7 +864,7 @@ yourself, finish with \`emplio threads wait\`.
 with your next reply; act on it if it changes what you're doing.
 
 ## Agents
-Agents are your saved specialists: a role with its own instructions, skills and notes from past work. What each one \
+Agents are your saved specialists: a role with its own instructions, skills, tools and lessons. What each one \
 learns in its jobs is saved for it automatically.
 - One agent, one kind of work, named like a job title: "Supplier Finder", "Invoice Chaser". Not the task \
 ("Weekly Task Summary") and not one instance ("Flour suppliers Pune"): the brief carries this time's details. \
@@ -967,7 +990,7 @@ export async function jobRoutes(app: FastifyInstance) {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const rows = await db
-      .select({ id: jobs.id, name: jobs.name, agent: jobs.agent, status: jobs.status, chatId: jobs.chatId, conversationId: jobs.conversationId })
+      .select({ id: jobs.id, name: jobs.name, agent: jobs.agent, status: jobs.status, chatId: jobs.chatId, conversationId: jobs.conversationId, updatedAt: conversations.updatedAt })
       .from(jobs)
       .innerJoin(conversations, eq(conversations.id, jobs.chatId))
       .where(
@@ -981,7 +1004,10 @@ export async function jobRoutes(app: FastifyInstance) {
       )
       .orderBy(desc(jobs.openedAt));
     // ponytail: one lookup per level per opened job, and people keep a few open; join if the list grows
-    return (await Promise.all(rows.map(async ({ conversationId, ...r }) => ({ ...r, agent: agentName(r.agent), startedIn: await startedIn(conversationId) })))) satisfies JobSummary[];
+    // updatedAt and running: an open job chat follows a run the server started (a follow-up, the tool-saving run)
+    return (await Promise.all(
+      rows.map(async ({ conversationId, updatedAt, ...r }) => ({ ...r, agent: agentName(r.agent), startedIn: await startedIn(conversationId), updatedAt: updatedAt.toISOString(), running: isReplying(r.chatId!) })),
+    )) satisfies JobSummary[];
   });
 
   // out of the sidebar; its line in the chat still opens it

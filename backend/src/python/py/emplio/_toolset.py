@@ -14,6 +14,8 @@ broken save never lands.
 """
 import ast, builtins, dis, importlib.abc, importlib.util, json, keyword, os, re, subprocess, sys, threading, types
 
+from emplio import _local
+
 W = os.environ.get("EMPLIO_WORK") or "/work"
 BUCKETS = ("me", "restricted", "company")  # own first, like skills
 RISKS = {"reads": "only reads", "changes": "changes things", "spends": "spends money"}
@@ -171,14 +173,11 @@ def _defined(path):
         return set()
 
 
-_WORK_WORD = re.compile(r"(?<![\w.~/-])/work(?=$|[\s/\"';:)|&<>,}\]])", re.M)
-
-
 def _source(path):
     with open(path, encoding="utf-8") as f:
         src = f.read()
     # saved files say /work; on a person's own computer that's a folder in their home (same rule as emplio._load)
-    return _WORK_WORD.sub(lambda _: W, src) if W != "/work" else src
+    return _local(src)
 
 
 class _Loader(importlib.abc.Loader):
@@ -308,9 +307,43 @@ def _tools_in(path):
             if not risk:
                 continue
             args = ast.unparse(node.args)
-            doc = (ast.get_docstring(node) or "(no description)").strip().split("\n")[0]
-            out.append((node.name, f"{node.name}({args})", doc, risk))
+            out.append((node.name, f"{node.name}({args})", described(node), risk))
     return out
+
+
+# ponytail: off only in test_toolset.py, whose small examples (add, mul) predate the rule
+NEED_RETURNS = True
+_RETURNS = re.compile(r"\b(returns?|gives? back|yields?)\b", re.I)
+
+
+def gives(node):
+    """What a function says it gives back: the docstring's sentence about it, else its -> annotation; "" when neither."""
+    doc = " ".join((ast.get_docstring(node) or "").split())
+    said = next((x for x in re.split(r"(?<=[.;])\s+", doc) if _RETURNS.search(x)), "")
+    if said:
+        return said
+    return f"Returns {ast.unparse(node.returns)}." if node.returns is not None else ""
+
+
+def described(node):
+    """The docstring's first line, and what the function gives back when that line doesn't say: how a tool is listed."""
+    first = ((ast.get_docstring(node) or "").strip().split("\n")[0]) or "(no description)"
+    back = gives(node)
+    return first if not back or _RETURNS.search(first) else f"{first} {back}"
+
+
+def _gives_value(node):
+    # a `return <something>` of its own (not one inside a nested def)
+    def walk(n):
+        for c in ast.iter_child_nodes(n):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                continue
+            if isinstance(c, ast.Return) and c.value is not None and not (isinstance(c.value, ast.Constant) and c.value.value is None):
+                return True
+            if walk(c):
+                return True
+        return False
+    return walk(node)
 
 
 def listing(words=None, buckets=BUCKETS):
@@ -389,8 +422,12 @@ def save(fn, area, risk=None, bucket=None, replace=False):
         raise ToolError(f"{name} wasn't defined in this session: define it (def {name}(...)) and run it once, then save it")
     if name.startswith("_"):
         raise ToolError(f"{name}: a tool's name can't start with _ (that marks a private helper)")
-    if kind == "def" and not ast.get_docstring(ast.parse(_src[name][1]).body[0]):
+    node = ast.parse(_src[name][1]).body[0] if kind == "def" else None
+    if node is not None and not ast.get_docstring(node):
         raise ToolError(f"give {name} a one-line docstring saying what it does: it's how the tool is listed and found")
+    # the next job reads what it gets back here, not in the code
+    if NEED_RETURNS and node is not None and _gives_value(node) and not gives(node):
+        raise ToolError(f"say in {name}'s docstring what it returns (\"Returns a list of dicts with from, date, text.\"): the next job reads that instead of the code")
 
     path = _path(bucket, area)
     existing = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
@@ -558,6 +595,19 @@ class Tools:
         """Every tool, with what it takes, what it's for and what calling it does."""
         lines = [l for l in listing() if area is None or l.startswith(f"  tools.{area}.")]
         print("Tools:\n" + "\n".join(lines) if lines else "No tools saved yet.")
+
+    def show(self, name):
+        """One tool in full, without its code: what it takes, what it's for, what it returns, what calling it does."""
+        area, _, fn = name.removeprefix("tools.").partition(".")
+        bucket, path = _find(area)
+        node = next((n for n in (ast.parse(open(path, encoding="utf-8").read()).body if path else []) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn), None)
+        if node is None:
+            print(f"No tool {name!r}. emplio.tools.search(\"<words>\") finds one.")
+            return
+        risk = next((r for n, _, _, r in _tools_in(path) if n == fn), None)
+        print(f"tools.{area}.{fn}({ast.unparse(node.args)})" + (f" -> {ast.unparse(node.returns)}" if node.returns is not None else "")
+              + f"  [{RISKS.get(risk, risk or 'a helper, not a tool')}, {bucket}/toolset/{area}.py]\n\n{ast.get_docstring(node) or '(no description)'}"
+              + ("" if gives(node) else "\n\n(It doesn't say what it returns.)") + f"\n\nUse it: from tools.{area} import {fn}")
 
     def search(self, words):
         """Tools whose area, name or description has all these words."""

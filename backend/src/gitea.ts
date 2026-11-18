@@ -96,7 +96,11 @@ const indexLater = (workspaceId: string, repo: string) =>
 
 // Commit one file (created or replaced) or its removal (content null) as `author`. False when there's nothing
 // to remove. Boxes pick the commit up on their next catch-up.
-export async function writeFile(workspaceId: string, repo: string, path: string, content: string | null, message: string, author: Author) {
+// Waits its turn with a box's push to the same repo (locked): Gitea refuses a write made while main moves under it.
+export const writeFile = (workspaceId: string, repo: string, path: string, content: string | null, message: string, author: Author) =>
+  locked(`${workspaceId}/${repo}`, () => writeFileNow(workspaceId, repo, path, content, message, author));
+
+async function writeFileNow(workspaceId: string, repo: string, path: string, content: string | null, message: string, author: Author) {
   const sha = await shaOf(workspaceId, repo, path);
   if (content === null && !sha) return false;
   const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents/${path}`, {
@@ -117,7 +121,10 @@ export async function writeFile(workspaceId: string, repo: string, path: string,
 
 // Commit many files (each created or replaced) at once, as one commit (imports.ts).
 // Several files in one commit; a null content deletes that file.
-export async function writeFiles(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) {
+export const writeFiles = (workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) =>
+  locked(`${workspaceId}/${repo}`, () => writeFilesNow(workspaceId, repo, files, message, author));
+
+async function writeFilesNow(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) {
   const shas = new Map((await listPaths(workspaceId, repo)).map((p) => [p.path, p.sha]));
   const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents`, {
     method: "POST",

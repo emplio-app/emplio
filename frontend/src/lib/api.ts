@@ -130,6 +130,8 @@ export function useLiveEvents() {
     // a reply that ended may have added or finished tasks too; a card asked or answered nudges as well
     const refresh = () => {
       void queryClient.invalidateQueries({ queryKey: conversationsQueryKey });
+      // jobs' chats aren't in the chat list: theirs is the jobs list
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       void queryClient.invalidateQueries({ queryKey: approvalsQueryKey });
     };
