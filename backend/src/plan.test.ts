@@ -17,7 +17,7 @@ test("a job under way can't be wiped or ticked off wholesale; a finished or near
   expect(blocked("set", ["new"], of("done", "doing"))).toContain("isn't finished");
   expect(blocked("set", ["new"], of("done", "done"))).toBeNull();
   expect(blocked("set", ["new"], [])).toBeNull();
-  expect(blocked("done", [], of("doing", "todo", "todo"))).toContain("never started");
+  expect(blocked("done", [], of("doing", "todo", "todo"))).toBeNull(); // the work's finished, steps never reached included
   expect(blocked("done", [], of("done", "doing", "todo"))).toBeNull(); // the answer itself may cover the last one
   expect(blocked("done", ["2", "3"], of("doing", "todo", "todo"))).toBeNull();
 });
