@@ -12,7 +12,7 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
 ENV LANG=C.UTF-8 PIP_BREAK_SYSTEM_PACKAGES=1
 RUN pip install -q --no-cache-dir openpyxl pandas python-docx python-pptx
 # what runs commands inside the computer when gVisor runs it directly (runner/gvisor.ts)
-COPY --chmod=644 computer-helper.js /usr/local/lib/emplio-computer-helper.js
+COPY --chmod=644 docker/computer-helper.js /usr/local/lib/emplio-computer-helper.js
 RUN useradd -m -s /bin/bash user && echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/user && chmod 440 /etc/sudoers.d/user
 USER user
 WORKDIR /home/user
