@@ -127,7 +127,7 @@ export function skillsUsed(parts: { input?: { code?: string; command?: string } 
     for (const m of code.matchAll(/emplio\.skills\.use\(\s*["']([a-z0-9][\w-]*)["']|\b(?:emplio|ez) skills use\s+["']?([a-z0-9][\w-]*)/g))
       names.add((m[1] ?? m[2])!);
     if (/write_text\(|\.write\(|open\([^)]*['"][wa]['"]|cat\s*>|\btee\b/.test(code))
-      for (const m of code.matchAll(/skills\/([a-z0-9][\w-]*)\/SKILL\.md/g)) names.add(m[1]!);
+      for (const m of code.matchAll(/skill(?:set|s)\/([a-z0-9][\w-]*)\/SKILL\.md/g)) names.add(m[1]!);
   }
   return [...names];
 }
@@ -151,7 +151,7 @@ export async function addTools(w: { workspaceId: string; author: Author; admin?:
     return false;
   };
   const skillKept = async (n: string) => {
-    for (const repo of repos) if (await read(repo, `skills/${n}/SKILL.md`)) return true;
+    for (const repo of repos) if (await read(repo, `skillset/${n}/SKILL.md`)) return true;
     return false;
   };
   const more: string[] = [];
@@ -290,7 +290,7 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
   const [ref, ...text] = rest.filter((x) => x !== "-");
   const body = text.join("\n\n").trim();
   const level = (l?: string): Level | undefined => (l === "strong" || l === "light" ? l : undefined);
-  const skills = (s?: string) => s?.split(",").map((x) => x.trim().replace(/^(company|me)\/skills\//, "")).filter(Boolean);
+  const skills = (s?: string) => s?.split(",").map((x) => x.trim().replace(/^(company|me)\/skill(?:set|s)\//, "")).filter(Boolean);
   const tools = (s?: string) => s?.split(",").map((x) => x.trim().replace(/^tools\./, "")).filter(Boolean);
   const badTools = (tools(set.tools) ?? []).filter((x) => !TOOL_NAME.test(x));
   if (badTools.length) return { text: `error: tools are named area.function (gmail.send), not ${badTools.join(", ")}; emplio.tools.list() in Python shows them` };

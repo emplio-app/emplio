@@ -81,8 +81,8 @@ test("a company agent's list takes only company tools and skills, never admins-o
   const { addTools } = await import("./agents");
   const tool = (name: string) => `# risk: reads\ndef ${name}(x):\n    """Does ${name}."""\n    return x\n`;
   const files = fake({
-    company: { "agents/web/AGENT.md": md("Web"), "toolset/gmail.py": tool("send"), "skills/quote/SKILL.md": "x" },
-    restricted: { "toolset/payroll.py": tool("salaries"), "skills/pay/SKILL.md": "x" },
+    company: { "agents/web/AGENT.md": md("Web"), "toolset/gmail.py": tool("send"), "skillset/quote/SKILL.md": "x" },
+    restricted: { "toolset/payroll.py": tool("salaries"), "skillset/pay/SKILL.md": "x" },
     "me-u1": { "toolset/mine.py": tool("own") },
   });
   const web = (await findAgent("w", "web"))!;

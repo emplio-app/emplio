@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.63 (2026-11-18)
+
+### What's new
+
+- Skills now live in a folder called skillset, next to toolset, so the two are easy to find side by side.
+- An automation keeps running as the person who set it up when Emplio tidies its file.
+
+### For developers
+
+- `skills/` is now `skillset/` in every repo (company, restricted, each person's); `scripts/migrate-skillset.ts --apply` moves existing ones and repoints paths in the business's files. A skill written to the old `skills/` folder is moved to `skillset/` before saving; `emplio skills use` takes either path (kernel version 4).
+- `lastAuthor` passes over Emplio's own upkeep commits (`UPKEEP`), and automations with no owner are looked at again on sync; one lost its owner to the toolset move's commit.
+- `writeFiles` deletes a file when its content is `null`.
+
 ## 1.2.62 (2026-11-18)
 
 ### What's new

@@ -431,8 +431,8 @@ test("a size the browser said yes to but didn't take goes to the server, and lat
 test("on a person's own computer, its folder's paths reach the server as /work ones, and skills are found there", async () => {
   const home = mkdtempSync(join(tmpdir(), "emplio-"));
   const work = join(home, "my work");
-  mkdirSync(join(work, "company/skills/quote"), { recursive: true });
-  writeFileSync(join(work, "company/skills/quote/SKILL.md"), "how to quote\n");
+  mkdirSync(join(work, "company/skillset/quote"), { recursive: true });
+  writeFileSync(join(work, "company/skillset/quote/SKILL.md"), "how to quote\n");
   writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
   const key = `test${Date.now()}`;
   const run = async (command: string) => {

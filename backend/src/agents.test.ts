@@ -74,8 +74,8 @@ test("the skills a run read or wrote", () => {
   const parts = [
     { input: { code: 'print(emplio.skills.use("website-login")[:3000])' } },
     { input: { command: "emplio skills use courier-booking" } },
-    { input: { code: 'Path("/work/company/skills/returns/SKILL.md").write_text(text)' } },
-    { input: { code: 'print(open("/work/company/skills/other/SKILL.md").read())' } },
+    { input: { code: 'Path("/work/company/skillset/returns/SKILL.md").write_text(text)' } },
+    { input: { code: 'print(open("/work/company/skillset/other/SKILL.md").read())' } },
   ];
   expect(skillsUsed(parts).sort()).toEqual(["courier-booking", "returns", "website-login"]);
 });

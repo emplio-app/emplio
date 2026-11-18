@@ -1,4 +1,4 @@
-// Skills: company/skills/<name>/SKILL.md (the business's) and me/skills/<name>/SKILL.md (one person's own).
+// Skills: company/skillset/<name>/SKILL.md (the business's) and me/skillset/<name>/SKILL.md (one person's own).
 // Git holds them; the `skills` table mirrors each one's name and description, synced from git's file list
 // (only changed SKILL.md files are read again). The prompt lists them, and the chat box offers them as
 // /name: a message starting with /name gets that SKILL.md handed to the agent with it. The box offers the
@@ -13,7 +13,7 @@ import { listPaths, readFile } from "./gitea";
 import { availableApps } from "./integrations";
 
 type Who = { workspaceId: string; userId: string };
-const SKILL_MD = /^skills\/([^/]+)\/SKILL\.md$/;
+const SKILL_MD = /^skillset\/([^/]+)\/SKILL\.md$/;
 const reposOf = (who: Who) => ["company", `me-${who.userId}`];
 
 // A SKILL.md's description line, or its first line of text when it has none.
@@ -66,8 +66,8 @@ export async function slashCommand(who: Who, text: string) {
       ? `The person started with /${app.app}: they want this done with ${app.name}, using their own ${app.name} account (emplio apps list shows it; if it isn't connected, emplio apps add ${app.app}).`
       : null;
   }
-  const folder = `${found.scope}/skills/${name}`;
-  const md = await readFile(who.workspaceId, found.scope === "me" ? `me-${who.userId}` : "company", `skills/${name}/SKILL.md`);
+  const folder = `${found.scope}/skillset/${name}`;
+  const md = await readFile(who.workspaceId, found.scope === "me" ? `me-${who.userId}` : "company", `skillset/${name}/SKILL.md`);
   return md === null ? null : `The person picked the skill /${name}: follow ${folder}/SKILL.md for this message (its scripts and files are in ${folder}/).\n\n${md}`;
 }
 

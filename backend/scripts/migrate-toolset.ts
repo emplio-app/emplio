@@ -9,10 +9,10 @@ import { eq } from "drizzle-orm";
 import { agentMd, parseAgent, toolsIn } from "../src/agents";
 import { db } from "../src/db";
 import { users, workspaceMembers, workspaces } from "../src/db/schema";
-import { listPaths, readFile, writeFile, writeFiles } from "../src/gitea";
+import { listPaths, readFile, UPKEEP, writeFile, writeFiles } from "../src/gitea";
 
 const APPLY = process.argv.includes("--apply");
-const AUTHOR = { name: "Emplio", email: "noreply@emplio.app" };
+const AUTHOR = UPKEEP;
 const KEYWORDS = new Set(["and", "as", "class", "def", "del", "for", "from", "global", "if", "import", "in", "is", "not", "or", "pass", "return", "try", "while", "with", "tools", "emplio"]);
 // a function that changes something outside the computer: sends, clicks on a site, posts, writes a database or an
 // app. Files it writes on the computer don't count: asking each time for those would be noise.

@@ -116,7 +116,8 @@ export async function writeFile(workspaceId: string, repo: string, path: string,
 }
 
 // Commit many files (each created or replaced) at once, as one commit (imports.ts).
-export async function writeFiles(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array }[], message: string, author: Author) {
+// Several files in one commit; a null content deletes that file.
+export async function writeFiles(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) {
   const shas = new Map((await listPaths(workspaceId, repo)).map((p) => [p.path, p.sha]));
   const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents`, {
     method: "POST",
@@ -126,9 +127,9 @@ export async function writeFiles(workspaceId: string, repo: string, files: { pat
       author,
       committer: author,
       files: files.map((f) => ({
-        operation: shas.has(f.path) ? "update" : "create",
+        operation: f.content === null ? "delete" : shas.has(f.path) ? "update" : "create",
         path: f.path,
-        content: Buffer.from(f.content).toString("base64"),
+        ...(f.content !== null && { content: Buffer.from(f.content).toString("base64") }),
         ...(shas.has(f.path) && { sha: shas.get(f.path) }),
       })),
     }),
@@ -137,12 +138,15 @@ export async function writeFiles(workspaceId: string, repo: string, files: { pat
   indexLater(workspaceId, repo);
 }
 
-// Who made the last commit touching a file.
+// Emplio's own upkeep commits (moving files, repointing paths) are made under this name.
+export const UPKEEP = { name: "Emplio", email: "noreply@emplio.app" };
+
+// The person who last changed a file, passing over Emplio's own upkeep commits.
 export async function lastAuthor(workspaceId: string, repo: string, path: string): Promise<Author | null> {
-  const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/commits?${new URLSearchParams({ sha: "main", path, limit: "1", stat: "false", files: "false" })}`);
+  const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/commits?${new URLSearchParams({ sha: "main", path, limit: "10", stat: "false", files: "false" })}`);
   if (!res.ok) return null;
-  const [c] = (await res.json()) as { commit: { author: Author } }[];
-  return c?.commit.author ?? null;
+  const all = (await res.json()) as { commit: { author: Author } }[];
+  return all.find((c) => c.commit.author.email !== UPKEEP.email)?.commit.author ?? null;
 }
 
 async function git(cwd: string, ...args: string[]) {
