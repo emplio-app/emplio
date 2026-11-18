@@ -1301,7 +1301,18 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 >
                   {/* -mx-4 px-4: the phone's sideways chip row still runs to the screen edge inside the clip */}
                   <div className="-mx-4 min-h-0 overflow-hidden px-4 sm:mx-0 sm:px-0">
-                    <JobCards onPick={send} paused={!!job || !!input.trim()} />
+                    {/* a pick goes into the box to read or change first, not straight out */}
+                    <JobCards
+                      onPick={(text) => {
+                        setInput(text);
+                        requestAnimationFrame(() => {
+                          const box = document.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+                          box?.focus();
+                          box?.setSelectionRange(text.length, text.length);
+                        });
+                      }}
+                      paused={!!job || !!input.trim()}
+                    />
                   </div>
                 </div>
               </div>

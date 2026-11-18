@@ -2,6 +2,12 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.72 (2026-11-18)
+
+### What's new
+
+- Tapping a suggestion on the new-chat screen now puts it in the message box, so you can read or change it before sending.
+
 ## 1.2.71 (2026-11-18)
 
 ### What's new
