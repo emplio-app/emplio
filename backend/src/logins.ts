@@ -155,13 +155,16 @@ async function find(w: Who, name: string): Promise<Entry | undefined> {
 // --- typing into the chat's browser, over its DevTools connection -------------------------------------------
 
 // Runs in the page: focus the field for a saved login's `label` ("Email", "Phone", "Password"), or with no label
-// the focused one, and select what's in it so typing replaces it. Fields already typed into are skipped.
-const FOCUS = (label: string | null) => `(() => {
+// the focused one, and select what's in it so typing replaces it. Fields already typed into are skipped. With
+// `single` (a key, or one value to type), a page with one box needs no click: that box is used. Returns what the
+// box is called, so a wrong box shows in the reply, or false when there's none.
+const FOCUS = (label: string | null, single: boolean) => `(() => {
   const want = ${JSON.stringify(label?.toLowerCase() ?? null)};
   const ok = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled && !e.readOnly && getComputedStyle(e).visibility !== "hidden"; };
-  let el = document.activeElement;
+  const inputs = [...document.querySelectorAll("input, textarea")].filter((e) => ok(e) && !e.dataset.ezFilled && !["hidden", "checkbox", "radio", "submit", "button", "image", "reset", "file"].includes(e.type));
+  const focused = document.activeElement;
+  let el = want === null && (inputs.includes(focused) || focused?.isContentEditable) ? focused : undefined;
   if (want !== null) {
-    const inputs = [...document.querySelectorAll("input")].filter((e) => ok(e) && !e.dataset.ezFilled && !["hidden", "checkbox", "radio", "submit", "button"].includes(e.type));
     const about = (e) => [e.name, e.id, e.placeholder, e.getAttribute("aria-label"), e.autocomplete, e.type, ...[...(e.labels ?? [])].map((l) => l.textContent)].join(" ").toLowerCase();
     const words = want.split(/[^a-z0-9]+/).filter((w) => w.length > 2 && w !== "the" && w !== "your");
     const hint = (e) => /pass/.test(want) ? e.type === "password"
@@ -171,7 +174,13 @@ const FOCUS = (label: string | null) => `(() => {
     const score = (e) => (hint(e) ? 5 : 0) + words.filter((w) => about(e).includes(w)).length * 2 - (e.type === "password" && !/pass|pin|secret/.test(want) ? 10 : 0);
     el = inputs.map((e) => [e, score(e)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])[0]?.[0];
   }
-  if (!el || !("value" in el)) return false;
+  // one value to type and nothing picked: the page's only box, or its only empty one. Never for one field of a
+  // login with several, which could put an email into a lone password box.
+  if (!el && ${single}) {
+    const pool = inputs.length === 1 ? inputs : inputs.filter((e) => !e.value);
+    if (pool.length === 1) el = pool[0];
+  }
+  if (!el) return false;
   el.focus();
   // empty it first, through the native setter so React-style pages see the change: a refill must never leave
   // the old text in (select-and-type alone didn't reliably replace it)
@@ -181,7 +190,8 @@ const FOCUS = (label: string | null) => `(() => {
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }
   if (el.dataset) el.dataset.ezFilled = "1";
-  return true;
+  const name = el.getAttribute("aria-label") || el.labels?.[0]?.textContent || el.placeholder || el.name || el.id || el.type || "box";
+  return String(name).trim().replace(/\\s+/g, " ").slice(0, 60) || "box";
 })()`;
 
 type Cdp = Awaited<ReturnType<typeof devtools>>;
@@ -224,7 +234,7 @@ const MAC_SIGN_IN = ` If the sign-in still doesn't go through after 2 tries (the
 
 // Fill a saved login into the chat's open tab on its site: each of its fields the page has a box for. Sites that
 // ask on two pages: fill, press Next, fill again. With `field`, only that one, typed into the box that has focus
-// (for a page whose boxes can't be told apart). A key is always typed into the focused box.
+// (for a page whose boxes can't be told apart). A key goes into the focused box, or the page's only one.
 export async function fill(w: Who, conversationId: string, name: string, field?: string) {
   const row = await find(w, name);
   if (!row) return `error: nothing saved as ${nameOf(name)} (emplio logins list)`;
@@ -242,7 +252,10 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     if (!onSite(String(await run("location.hostname")), row.site)) return `error: that tab has left ${row.site}`;
     const frames = await framesOnSite(cdp, sessionId, row.site);
     const inFrames = async (expression: string) => {
-      for (const f of frames) if (await f.run(expression).catch(() => false)) return true;
+      for (const f of frames) {
+        const got = await f.run(expression).catch(() => false);
+        if (got) return got;
+      }
       return false;
     };
     const saved = await row.values().catch((error: Error) => error);
@@ -251,16 +264,20 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     if (field && !pick) return `error: ${nameOf(name)} has no field "${field}"; it has ${Object.keys(saved).join(", ")}`;
     const filled: string[] = [];
     await inFrames(`document.querySelectorAll("[data-ez-filled]").forEach((e) => delete e.dataset.ezFilled), false`);
+    const single = row.kind === "key" || !!pick || Object.keys(saved).length === 1;
     for (const [label, text] of Object.entries(saved)) {
       if (pick ? label !== pick : false) continue;
-      if (!(await inFrames(FOCUS(row.kind === "key" || pick ? null : label)))) continue;
+      const want = row.kind === "key" || pick ? null : label;
+      // a focused or labelled box in any frame first; only then a frame's lone box
+      const box = (await inFrames(FOCUS(want, false))) || (single && (await inFrames(FOCUS(want, true))));
+      if (!box) continue;
       // typed into whichever frame has focus, by the page's own keyboard
       await cdp.send("Input.insertText", { text }, sessionId);
-      filled.push(label);
+      filled.push(`${label} (into the "${box}" box)`);
     }
-    const missed = Object.keys(saved).filter((label) => !filled.includes(label));
+    const missed = Object.keys(saved).filter((label) => !filled.some((f) => f.startsWith(`${label} (`)));
     if (!filled.length)
-      return `error: found no box for ${row.kind === "key" || pick ? "it; click into the box first" : `${missed.join(", ")} on ${siteOf(tab.url)}; go to the sign-in page, or click into a box and use emplio logins fill ${nameOf(name)} "<field>"`}`;
+      return `error: found no box for ${row.kind === "key" || pick ? "it; the page has several boxes, so click into the right one first" : `${missed.join(", ")} on ${siteOf(tab.url)}; go to the sign-in page, or click into a box and use emplio logins fill ${nameOf(name)} "<field>"`}`;
     await row.used();
     record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "connection", summary: `Filled ${nameOf(name)} on ${row.site}` });
     return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}. Now press the sign-in or next button yourself.${isDeviceBrowser(live.id) ? MAC_SIGN_IN : ""}`;
@@ -427,8 +444,9 @@ if (import.meta.main) {
   console.assert(siteOf("api.vercel.com") === "api.vercel.com");
   console.assert(onSite("api.vercel.com", "vercel.com") && !onSite("evilvercel.com", "vercel.com"));
   // the page script parses, and the marks it sets (dataset.ezFilled) are the ones fill() clears
-  new Function(FOCUS("Password"));
-  console.assert(FOCUS(null).includes("dataset.ezFilled") && fill.toString().includes("[data-ez-filled]"), "fill clears the marks FOCUS sets");
+  new Function(FOCUS("Password", false));
+  console.assert(FOCUS(null, true).includes("&& true)") && FOCUS("Email", false).includes("&& false)"), "the one-box flag reaches the page");
+  console.assert(FOCUS(null, true).includes("dataset.ezFilled") && fill.toString().includes("[data-ez-filled]"), "fill clears the marks FOCUS sets");
   console.assert(phoneAppUrl("https://app.example.com") === "https://app.example.com");
   console.assert(!phoneAppUrl("http://localhost:3000").includes("localhost") || !Object.values(networkInterfaces()).flat().some((a) => a && !a.internal && a.family === "IPv4"));
   console.log("ok");
