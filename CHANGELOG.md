@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.73 (2026-11-18)
+
+### What's new
+
+- A saved key or password now fills in on a page with just one box, without clicking into the box first, and Emplio says which box it used.
+
+### For developers
+
+- `emplio logins fill`: for a key, a picked field, or a one-value login, when nothing is focused and no box matches by label, the page's only box (or only empty one) is used. The reply names each box filled. Fixes #220.
+
 ## 1.2.72 (2026-11-18)
 
 ### What's new
