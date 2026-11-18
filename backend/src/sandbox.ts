@@ -41,10 +41,9 @@ import type { Bill } from "./credit";
 // (company/, restricted/, me/) and storage (in/), and go back the same way after every command.
 // A box can reach the whole internet: nothing filters where it connects.
 // ponytail: paused boxes are never cleaned up yet; kill ones idle for days once there are many
-// The box pauses (disk and memory kept) after 5 minutes without a command; longer once something
-// runs in the background, so its preview link stays up. Commands time out after settings.commandSeconds.
+// The box pauses (disk and memory kept) after 5 minutes without a command, background jobs included; opening its
+// preview link wakes it with them. Commands time out after settings.commandSeconds.
 const IDLE_MS = 5 * 60_000;
-const SERVE_MS = 15 * 60_000;
 const MAX_OUTPUT = 8_000;
 const MAX_SKILL = 60_000;
 const BIG_FILE = 1024 * 1024;
@@ -1424,19 +1423,20 @@ async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
   }
   const listed = await cloud.computer.findBoxes({ employee0User: s.user.id, employee0Workspace: s.workspaceId });
   const found = listed.find((b) => b.labels.employee0Env === BOX_ENV);
-  if (found) {
-    const box = await cloud.computer.wakeBox(found.id, IDLE_MS);
+  // one that can't wake is swapped for a fresh one, like a frozen one below (the runner removes it when it can't start)
+  const woken = found && (await cloud.computer.wakeBox(found.id, IDLE_MS).catch((error) => void console.warn(`box ${found.id} wouldn't wake; starting a fresh one`, error)));
+  if (found && woken) {
     // A box can freeze (seen after a restart cut a command off): "running", but not even `true` answers, and
     // sleeping and waking it doesn't help. It's swapped for a fresh one; what wasn't saved in it is lost, but a
     // frozen box can't give that back anyway.
-    if ((await exec(box, "true", undefined, ANSWER_S)).exitCode === 124) console.warn(`box ${found.id} froze; starting a fresh one`);
+    if ((await exec(woken, "true", undefined, ANSWER_S)).exitCode === 124) console.warn(`box ${found.id} froze; starting a fresh one`);
     // a box from an older template is swapped for a new one, but only once nothing in it is waiting to be saved
-    else if (found.labels.employee0Box === BOX_VERSION || !(await nothingUnsaved(box, s))) {
+    else if (found.labels.employee0Box === BOX_VERSION || !(await nothingUnsaved(woken, s))) {
       // other chats may have pushed while this one slept
-      if (found.asleep || fromLocal) for (const r of reposFor(s)) await catchUp(box, s, r);
-      return box;
+      if (found.asleep || fromLocal) for (const r of reposFor(s)) await catchUp(woken, s, r);
+      return woken;
     }
-    await box.kill().catch(() => {});
+    await woken.kill().catch(() => {});
   }
   const box = await cloud.computer.createBox({ employee0User: s.user.id, employee0Workspace: s.workspaceId, employee0Box: BOX_VERSION, ...(BOX_ENV && { employee0Env: BOX_ENV }) }, IDLE_MS);
   try {
@@ -1451,11 +1451,9 @@ async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
 // Boxes this server is connected to. Each command pushes the idle timeout back; a box that paused
 // in the meantime refuses that, and is looked up (and resumed) again.
 const live = new Map<string, Box>();
-// ponytail: never cleared, so a box that once ran a background job sleeps after 15 min instead of 5
-const serving = new Set<string>();
 async function sandboxFor(s: Session): Promise<Box> {
   const known = live.get(boxKey(s));
-  const awakeFor = serving.has(boxKey(s)) ? SERVE_MS : IDLE_MS;
+  const awakeFor = IDLE_MS;
   // The person's own computer whenever it's connected, the cloud's whenever it isn't: a box of the other kind is let go
   // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
   const mine = deviceFor(s.user.id, true);
@@ -2403,9 +2401,6 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         30,
       );
       const pid = Number((done.result ?? "").trim());
-      serving.add(boxKey(s));
-      await box.keepAwake(SERVE_MS);
-      if (!box.local) meter(s, SERVE_MS);
       const result: BoxResult = {
         pid,
         log,

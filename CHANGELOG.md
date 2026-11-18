@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.66 (2026-11-18)
+
+### What's new
+
+- Emplio's computer now sleeps 5 minutes after it was last used, background work included.
+- A command on a computer that stops answering now ends with a clear timeout instead of hanging.
+
+### For developers
+
+- Computers sleep after `IDLE_MS` (5 minutes) for background work too; `SERVE_MS` is gone.
+- `boxOf().run` gives up 30 s after the command's own limit and returns exit 124; a box that won't wake is replaced with a fresh one.
+- The session cookie is `__Host-session` on HTTPS (old `session` cookies still read until they expire); computers' own `/live` and `/git` calls skip the per-address rate limit.
+
 ## 1.2.65 (2026-11-18)
 
 ### What's new

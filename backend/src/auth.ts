@@ -14,7 +14,12 @@ import { cloud } from "./cloud";
 import { sendEmail } from "./mail";
 import { clearLimit, tooMany } from "./rate";
 
-const COOKIE = "session";
+// production on a plain http address (a self-hosted install on localhost) couldn't keep a secure cookie
+const secure = () => process.env.NODE_ENV === "production" && !process.env.FRONTEND_URL?.startsWith("http:");
+// __Host-: no other address under the same domain can set one in its place
+const COOKIE = () => (secure() ? "__Host-session" : "session");
+// ponytail: sessions from before the rename (until Dec 20, 2026, when the last 30-day one ends); then read COOKIE() only
+const tokenOf = (req: FastifyRequest) => req.cookies[COOKIE()] ?? req.cookies.session;
 const SESSION_DAYS = 30;
 const CODE_MINUTES = 10;
 const MAX_TRIES = 5;
@@ -36,7 +41,7 @@ const findUser = (email: string) => db.query.users.findFirst({ where: eq(users.e
 export const emailSchema = { type: "string", format: "email", maxLength: 254 } as const;
 
 export async function currentUser(req: FastifyRequest) {
-  const token = req.cookies[COOKIE];
+  const token = tokenOf(req);
   if (!token) return null;
   const [row] = await db
     .select({ id: users.id, email: users.email, name: users.name, workspaceId: sessions.workspaceId, tokenHash: sessions.tokenHash })
@@ -62,12 +67,11 @@ async function startSession(reply: FastifyReply, userId: string) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await db.insert(sessions).values({ tokenHash: hash(token), userId, expiresAt });
-  reply.setCookie(COOKIE, token, {
+  reply.setCookie(COOKIE(), token, {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    // production on a plain http address (a self-hosted install on localhost) couldn't keep it otherwise
-    secure: process.env.NODE_ENV === "production" && !process.env.FRONTEND_URL?.startsWith("http:"),
+    secure: secure(),
     expires: expiresAt,
   });
 }
@@ -394,8 +398,8 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.post("/auth/logout", async (req, reply) => {
-    const token = req.cookies[COOKIE];
+    const token = tokenOf(req);
     if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hash(token)));
-    return reply.clearCookie(COOKIE, { path: "/" }).send({ ok: true });
+    return reply.clearCookie(COOKIE(), { path: "/", secure: secure() }).clearCookie("session", { path: "/" }).send({ ok: true });
   });
 }
