@@ -25,14 +25,13 @@ export const planText = (steps: PlanStep[]) =>
     ? [`Checklist, ${steps.filter((s) => s.status === "done").length} of ${steps.length} done:`, ...steps.map((s, i) => `${i + 1}. ${MARK[s.status]} ${s.text}`)].join("\n")
     : "No checklist.";
 
-// What a command may not do to a job still under way: wipe it, or tick off steps it never reached. Asking the person
+// What a command may not do to a job still under way: wipe it. (`plan done` with no number is the agent saying the
+// work is finished, so it ticks everything left, steps never reached included.) Asking the person
 // something, or a side topic, isn't the job being done; the list is what brings Emplio back to it (unfinishedNote).
 export function blocked(sub: string | undefined, rest: string[], steps: PlanStep[]) {
   const left = steps.filter((s) => s.status !== "done");
   if (sub === "set" && left.length)
     return `error: this checklist isn't finished (${left.length} left, next: "${left[0]!.text}"), so it stays. Same job: emplio plan update or add. Something new while it waits: emplio plan add. Only if it was finished or dropped, tick its steps by number or emplio plan clear, then set.`;
-  if (sub === "done" && !rest.length && steps.filter((s) => s.status === "todo").length >= 2)
-    return `error: ${steps.filter((s) => s.status === "todo").length} steps were never started, so they stay open. Tick the ones really done by number (emplio plan done 2 3); waiting on someone: emplio plan update <n> with what it needs.`;
   return null;
 }
 
