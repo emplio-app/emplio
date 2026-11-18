@@ -349,7 +349,7 @@ async function previewTarget(host: string | null) {
   const p = await previewOf(host);
   if (!p?.c) return new Response("Not found", { status: 404 });
   if (!p.c.State.Running) {
-    await wake(p.c, 15 * 60_000);
+    await wake(p.c, 5 * 60_000);
     return new Response(ASLEEP, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "retry-after": "30" } });
   }
   const ip = Object.values(p.c.NetworkSettings.Networks)[0]?.IPAddress;

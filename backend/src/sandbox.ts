@@ -41,10 +41,9 @@ import type { Bill } from "./credit";
 // (company/, restricted/, me/) and storage (in/), and go back the same way after every command.
 // A box can reach the whole internet: nothing filters where it connects.
 // ponytail: paused boxes are never cleaned up yet; kill ones idle for days once there are many
-// The box pauses (disk and memory kept) after 5 minutes without a command; longer once something
-// runs in the background, so its preview link stays up. Commands time out after settings.commandSeconds.
+// The box pauses (disk and memory kept) after 5 minutes without a command, background jobs included; opening its
+// preview link wakes it with them. Commands time out after settings.commandSeconds.
 const IDLE_MS = 5 * 60_000;
-const SERVE_MS = 15 * 60_000;
 const MAX_OUTPUT = 8_000;
 const MAX_SKILL = 60_000;
 const BIG_FILE = 1024 * 1024;
@@ -1445,11 +1444,9 @@ async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
 // Boxes this server is connected to. Each command pushes the idle timeout back; a box that paused
 // in the meantime refuses that, and is looked up (and resumed) again.
 const live = new Map<string, Box>();
-// ponytail: never cleared, so a box that once ran a background job sleeps after 15 min instead of 5
-const serving = new Set<string>();
 async function sandboxFor(s: Session): Promise<Box> {
   const known = live.get(boxKey(s));
-  const awakeFor = serving.has(boxKey(s)) ? SERVE_MS : IDLE_MS;
+  const awakeFor = IDLE_MS;
   // The person's own computer whenever it's connected, the cloud's whenever it isn't: a box of the other kind is let go
   // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
   const mine = deviceFor(s.user.id, true);
@@ -2397,9 +2394,6 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         30,
       );
       const pid = Number((done.result ?? "").trim());
-      serving.add(boxKey(s));
-      await box.keepAwake(SERVE_MS);
-      if (!box.local) meter(s, SERVE_MS);
       const result: BoxResult = {
         pid,
         log,

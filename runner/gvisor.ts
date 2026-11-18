@@ -312,6 +312,7 @@ async function outOfMemory(m: Meta) {
 export async function run(m: Meta, body: Record<string, unknown>, signal: AbortSignal) {
   const timeoutMs = Number(body.timeoutMs) || 60_000;
   const late = AbortSignal.timeout(timeoutMs + 20_000);
+  await asleep(m);
   try {
     const r = await helper(m, "/run", { method: "POST", body: JSON.stringify(body), signal: AbortSignal.any([signal, late]) });
     return new Response(r.body, { status: r.status, headers: { "content-type": "application/json" } });
@@ -323,7 +324,15 @@ export async function run(m: Meta, body: Record<string, unknown>, signal: AbortS
   }
 }
 
+// Not running at all (asleep, or the server restarted under it): woken with its saved memory first (a few ms to check).
+async function asleep(m: Meta) {
+  if ((await status(m.id)) === "running") return false;
+  await wake(m, IDLE_MS, true);
+  return true;
+}
+
 export async function file(m: Meta, method: string, path: string, body?: ArrayBuffer) {
+  await asleep(m);
   const r = await helper(m, `/file?${new URLSearchParams({ path })}`, { method, body }).catch(async () => {
     await outOfMemory(m);
     return new Response(MEMORY_NOTE, { status: 500 });
@@ -332,11 +341,11 @@ export async function file(m: Meta, method: string, path: string, body?: ArrayBu
 }
 
 // Where a preview link goes. A sleeping computer is brought back first (its memory too, so what served the page
-// is still there), and every visit keeps it awake 15 minutes more.
+// is still there), and every visit keeps it awake 5 minutes more.
 export async function previewTarget(id: string, port: string) {
   const m = find(id);
   if (!m) return null;
-  await wake(m, 15 * 60_000, true);
+  await wake(m, 5 * 60_000, true);
   return `${m.ip}:${port}`;
 }
 
@@ -351,4 +360,10 @@ export async function resume() {
   // the image unpacked now rather than on the first computer (a minute or so for a new version)
   void image().catch((error) => console.error("unpacking the computer image failed", error));
   for (const m of all()) if ((await status(m.id)) === "running") sleepAfter(m.id, IDLE_MS);
+  // the server shutting down (not just this program restarting): every awake computer saved, so a reboot loses nothing
+  process.once("SIGTERM", async () => {
+    if ((await sh(["systemctl", "is-system-running"], true)).out.trim() === "stopping")
+      await Promise.all(all().map((m) => serial(m.id, () => sleep(m)).catch((error) => console.error(`computer ${m.id}: saving at shutdown failed`, error))));
+    process.exit(0);
+  });
 }

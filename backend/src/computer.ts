@@ -72,4 +72,4 @@ export async function createBox(labels: Record<string, string>, idleMs: number) 
 
 // ponytail: no public preview links here; the cloud's own computer servers have them (cloud/backend/own-computers.ts)
 export const previewNote = (name: string) =>
-  `Previews: a server you start can only be reached from this computer, not by ${name}. Check it with \`curl -sI localhost:<port>\`, and to show ${name} the result send files or screenshots instead of a link. Servers stop when this computer goes to sleep, about 15 minutes after the last command.`;
+  `Previews: a server you start can only be reached from this computer, not by ${name}. Check it with \`curl -sI localhost:<port>\`, and to show ${name} the result send files or screenshots instead of a link. Servers stop when this computer goes to sleep, about 5 minutes after the last command.`;
