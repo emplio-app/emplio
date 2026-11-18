@@ -6,7 +6,7 @@
 // scripts; "Just do it" and "Always allow" don't skip it, and nobody-watching runs can't install. A skill two
 // scanners rate high risk isn't offered at all. Its files come from GitHub and are committed by the server, with
 // SOURCE.md saying where from, so `update` can fetch it again and `remove` takes it out.
-import { approve } from "./approvals";
+import { approve, Deferred } from "./approvals";
 import { listPaths, readFile, writeFile, writeFiles } from "./gitea";
 import type { Session } from "./sandbox";
 import { syncSkills } from "./skills";
@@ -215,6 +215,8 @@ export async function skillsCommand(s: Session, args: string[], catchUp: (repo: 
       return isAdmin(s) ? `error: no skill ${name}` : `error: no skill ${name} of yours (the company's are changed by the owner or an admin)`;
     }
   } catch (error) {
+    // the OK asked in a live chat: the card comes after the command, so this isn't a failure
+    if (error instanceof Deferred) throw error;
     return `error: ${error instanceof Error ? error.message : String(error)}`;
   }
   return USAGE;

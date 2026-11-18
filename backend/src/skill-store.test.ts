@@ -21,3 +21,14 @@ test("skills show lists a store skill's scripts and files and how to install it,
   expect(text).toContain("Other files: LICENSE.txt");
   expect(text).toContain("emplio skills add anthropics/skills/pptx");
 });
+
+test("an install waiting for the person's OK in a live chat isn't turned into an error", async () => {
+  const { spyOn } = await import("bun:test");
+  const gitea = await import("./gitea");
+  const { Deferred } = await import("./approvals");
+  const { skillsCommand } = await import("./skill-store");
+  const spy = spyOn(gitea, "listPaths").mockImplementation(() => Promise.reject(new Deferred()));
+  const s = { workspaceId: "w", role: "owner", user: { id: "u", name: "A", email: "a@x" } } as unknown as Parameters<typeof skillsCommand>[0];
+  await expect(skillsCommand(s, ["add", "a/b/c"], async () => {})).rejects.toBeInstanceOf(Deferred);
+  spy.mockRestore();
+});
