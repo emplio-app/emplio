@@ -6,7 +6,7 @@
 # Standard library only: it runs on the cloud computer, a Mac and Windows alike.
 import ast, builtins, json, linecache, os, re, signal, socket, subprocess, sys, threading, time, traceback, _thread
 
-VERSION = "2"  # 2: sessions remember what they define, for emplio.tools.save
+VERSION = "3"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("EMPLIO_WORK") or "/work"
 SESSIONS = os.path.join(W, "tmp", ".emplio", "sessions")
@@ -103,7 +103,7 @@ def check_saved(path):
         return f"{rel} has a mistake on line {e.lineno}: {e.msg}. It can't be used until it's fixed."
     bare = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_") and not ast.get_docstring(n)]
     try:
-        done = subprocess.run([sys.executable, "-c", "import runpy,sys; sys.path.insert(0, sys.argv[2]); runpy.run_path(sys.argv[1])", path, os.path.join(HERE, "py")], capture_output=True, text=True, timeout=60)
+        done = subprocess.run([sys.executable, "-c", "import runpy,sys; sys.path.insert(0, sys.argv[2]); import emplio; runpy.run_path(sys.argv[1])", path, os.path.join(HERE, "py")], capture_output=True, text=True, timeout=60)
         if done.returncode:
             last = (done.stderr or done.stdout).strip().splitlines()[-1:] or ["(no message)"]
             return f"{rel} doesn't load: {last[0]}. Fix it before you finish."

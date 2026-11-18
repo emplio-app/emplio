@@ -196,6 +196,18 @@ def _usage():
 
 # ---- tools ----
 
+def skill(name, *_, **__):
+    """Gone: a skill's functions are tools now."""
+    area = re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
+    raise EmplioError(f'emplio.skill() is gone: a skill\'s functions are tools now. Use `from tools.{area} import <name>` '
+                      f'(help(emplio.tools.{area}) lists them), or emplio.tools.search("<words>"); emplio.skills.use("{name}") reads the skill.')
+
+
+def lib(name, *_, **__):
+    """Gone: shared helpers are tools now."""
+    raise EmplioError(f'emplio.lib() is gone: shared helpers are tools now. Use `from tools.{name} import <name>`, or emplio.tools.search("<words>").')
+
+
 def describe(mod):
     """Each public function of a tools area, with its inputs and one-line description."""
     import inspect

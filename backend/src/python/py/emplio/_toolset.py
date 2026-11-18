@@ -542,7 +542,7 @@ class Tools:
         import importlib
         return importlib.import_module(f"tools.{area}")
 
-    def save(self, fn, area, risk="reads", bucket=None, replace=False):
+    def save(self, fn, area, risk=None, bucket=None, replace=False):
         msg = save(fn, area, risk, bucket, replace)
         print(msg)
         return msg

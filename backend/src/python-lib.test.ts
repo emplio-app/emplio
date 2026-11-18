@@ -54,3 +54,17 @@ test("an old-style functions.py written by a run gets a note to keep tools inste
   });
   expect(p.stdout.toString()).toContain("emplio.tools.save(fn");
 });
+
+test("a tool that uses another tool passes the after-run check; emplio.skill says where tools are", () => {
+  const work = mkdtempSync(join(tmpdir(), "work-"));
+  mkdirSync(join(work, "company/toolset"), { recursive: true });
+  writeFileSync(join(work, "company/toolset/gmail.py"), '# risk: reads\ndef find(q):\n    """Find."""\n    return q\n');
+  const file = join(work, "company/toolset/acme.py");
+  writeFileSync(file, 'from tools.gmail import find\n\n\n# risk: reads\ndef acme(q):\n    """Acme mail."""\n    return find(q)\n');
+  const p = Bun.spawnSync(["python3", "-c", "import sys, kernel; print(kernel.check_saved(sys.argv[1]))", file], {
+    env: { PATH: process.env.PATH!, PYTHONPATH: join(import.meta.dir, "python"), EMPLIO_WORK: work },
+  });
+  expect(p.stdout.toString().trim()).toBe("None");
+  const { err } = py(`emplio.skill("github-issues")`, { EMPLIO_WORK: work });
+  expect(err).toContain("from tools.github_issues import");
+});
