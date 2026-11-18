@@ -863,9 +863,9 @@ PY
     shift
     if [ "$1" = use ]; then
       # read here, not from git: an edit made in this chat counts. Framed for the server, which hands it over whole
-      n="\${2#*skills/}"; n="\${n%/SKILL.md}"; n="\${n%/}"
+      n="\${2#*skillset/}"; n="\${n#*skills/}"; n="\${n%/SKILL.md}"; n="\${n%/}"
       [ -n "$n" ] || { echo "usage: emplio skills use <name>" >&2; exit 2; }
-      for d in "$W/me/skills" "$W/company/skills"; do
+      for d in "$W/me/skillset" "$W/company/skillset"; do
         [ -f "$d/$n/SKILL.md" ] || continue
         echo "SKILL:$EZ_KEY"; echo "# $d/$n/SKILL.md"; cat "$d/$n/SKILL.md"; echo; echo "SKILL:$EZ_KEY"
         other=$(cd "$d/$n" && find . -type f ! -name SKILL.md ! -path './.*' | sed 's|^\./||' | sort | head -n 50)
@@ -1183,8 +1183,8 @@ export function sandboxPrompt(s: Session, agent = false) {
 Your own computer, through the ${py ? "python" : "bash"} tool: a cloud Linux one, or ${name}'s own Mac or Windows PC while the Emplio app is open there (the note on their latest message says which; a result says when it changes). On their computer, work only inside /work and never look through ${name}'s other files unless asked. All ${name}'s chats share it. Do the work rather than telling people how.
 
 ${py ? `${codeModeNote(name, admin, agent)}\n\n` : ""}Folders:
-- /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skills/, toolset/, agents/, automations/, knowledge/, inbox/
-${admin ? "- /work/restricted/  finance, HR, owner notes (git), and admins-only toolset/. Admins only.\n" : ""}- /work/me/  ${name}'s own files (git): profile.md, preferences.md, notes/, skills/, toolset/
+- /work/company/  shared company files (git): AGENT.md, README.md, goals.md, heartbeat.md, skillset/, toolset/, agents/, automations/, knowledge/, inbox/
+${admin ? "- /work/restricted/  finance, HR, owner notes (git), and admins-only toolset/. Admins only.\n" : ""}- /work/me/  ${name}'s own files (git): profile.md, preferences.md, notes/, skillset/, toolset/
 - /work/in/  files attached in ${name}'s chats (a document's words beside it in <name>.txt)
 - /work/out/  files you make: kept, and stored in Files
 - /work/tmp/  scratch, shared by ${name}'s chats: earlier work's files and scripts are there (look when it's relevant); lost when the computer is replaced
@@ -1203,7 +1203,7 @@ Where things go:
 ${only(manager && !background, `- ${name}: me/profile.md (who they are) and me/preferences.md (how they like things), shown below. When they tell you something lasting or correct how you do things, add one short line in the same reply (change an existing line rather than repeat it; delete one that's wrong or they want forgotten). Not one-off details. Never repeat it to anyone else. Their notes and drafts: me/notes/ (also where anything unsure goes; say so).\n`)}- Before answering about a client, supplier, price or past decision: \`emplio search <words>\` (files, past chats, activity, tasks, database), and say where it came from. Earlier chats: \`emplio history search <words>\`; who did what: \`emplio activity [words]\`.
 - Records to count or filter go in the database; things to do later are tasks.
 
-Skills: how this business (company/skills/<name>/${admin ? "" : ", owner or admins only; yours go in me/skills/<name>/"}) or ${name} (me/skills/<name>/) does a recurring job: SKILL.md plus the ${py ? "tools it names" : "scripts"}. Listed below.
+Skills: how this business (company/skillset/<name>/${admin ? "" : ", owner or admins only; yours go in me/skillset/<name>/"}) or ${name} (me/skillset/<name>/) does a recurring job: SKILL.md plus the ${py ? "tools it names" : "scripts"}. Listed below.
 - Before a job, check the list. If one fits even partly, read it with \`emplio skills use <name>\` and follow it. Wrong or missing a step: fix it before you finish.
 - When you've worked out a repeatable job (it took tries, ${name} corrected you, it's the second time, or it plainly recurs), keep it before you finish, for the kind of job, not this instance: ${py ? "its steps as tools (emplio.tools.save), and a skill only for the judgment around them (when to ask first, what to check, how to word things)" : "a skill, with a script for steps that repeat"}; or improve the closest one. Not skills: one-off tasks, errors, facts.
 - SKILL.md: frontmatter \`name: <folder name>\` and \`description: <when to use it, under 100 characters>\` between --- lines; then when to use it, what it needs, the steps, what goes wrong, how to check. Under 200 lines.${only(manager && !bg, `
@@ -1315,13 +1315,13 @@ export async function businessInstructions(s: Session) {
 }
 
 
-// The skills in company/skills/ and me/skills/ (see sandboxPrompt), one line each, for the end of the prompt.
+// The skills in company/skillset/ and me/skillset/ (see sandboxPrompt), one line each, for the end of the prompt.
 export async function skillsList(s: Session) {
-  const all = (await syncSkills({ workspaceId: s.workspaceId, userId: s.user.id })).map((k) => `- ${k.scope}/skills/${k.name}: ${k.description}`);
+  const all = (await syncSkills({ workspaceId: s.workspaceId, userId: s.user.id })).map((k) => `- ${k.scope}/skillset/${k.name}: ${k.description}`);
   // ponytail: the first ones as listed; rank by use or by the request if the rest matter more often
   return all.length <= MAX_PROMPT_LINES
     ? all
-    : [...all.slice(0, MAX_PROMPT_LINES), `- [${all.length - MAX_PROMPT_LINES} more skills not shown: ls ${WORK}/company/skills ${WORK}/me/skills, or grep -ri <words> --include=SKILL.md there, before a job none of these fit]`];
+    : [...all.slice(0, MAX_PROMPT_LINES), `- [${all.length - MAX_PROMPT_LINES} more skills not shown: ls ${WORK}/company/skillset ${WORK}/me/skillset, or grep -ri <words> --include=SKILL.md there, before a job none of these fit]`];
 }
 
 // A person's own files in me/, created the first time; both go in every chat's prompt (the agent keeps them up to date).
@@ -1621,7 +1621,9 @@ const NESTED = `grep -qxF '.git.emplio*' .git/info/exclude 2>/dev/null || { mkdi
 find . \\( -path ./.git -o -name node_modules -o -name '.git.emplio*' \\) -prune -o -name .git -print | while IFS= read -r g; do
   t="$g.emplio"; [ -e "$t" ] && t="$t-$(date +%s)"; mv -- "$g" "$t"
 done
-git ls-files -s | awk -F'\\t' '/^160000 /{print $2}' | while IFS= read -r p; do git rm -q --cached -- "$p"; done`;
+git ls-files -s | awk -F'\\t' '/^160000 /{print $2}' | while IFS= read -r p; do git rm -q --cached -- "$p"; done
+# skills live in skillset/: one written to the old skills/ folder out of habit moves there
+if [ -d skills ]; then mkdir -p skillset && cp -R skills/. skillset/ && rm -rf skills; fi`;
 
 // Stage each repo and list big/binary files to move to storage.
 export const stageScript = (dirs: string[]) =>

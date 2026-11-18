@@ -18,7 +18,7 @@ const ctx = { workspaceName: "Kaveri Home Furnishings", userName: "Meera", role:
 const session = { conversationId: "c", workspaceId: "w", workspaceName: ctx.workspaceName, user: { id: "u", name: ctx.userName, email: "meera@kaveri.example" }, role: "owner", attachments: [], settings: DEFAULTS, watched: true, channel: "web" } as Session;
 
 export type Business = {
-  // "- company/skills/<name>: <when to use it>", as the app lists them
+  // "- company/skillset/<name>: <when to use it>", as the app lists them
   skills?: string[];
   // "- <Name> (agents/<slug>, light): <what it does>"
   agents?: string[];

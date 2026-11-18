@@ -25,9 +25,9 @@ export type Case = {
 };
 
 export const SKILLS = [
-  "- company/skills/gst-quote: Make a customer quote PDF with GST, in our format",
-  "- company/skills/courier-booking: Book a Delhivery pickup for an online order",
-  "- me/skills/weekly-sales-summary: Monday summary of last week's sales from Zoho",
+  "- company/skillset/gst-quote: Make a customer quote PDF with GST, in our format",
+  "- company/skillset/courier-booking: Book a Delhivery pickup for an online order",
+  "- me/skillset/weekly-sales-summary: Monday summary of last week's sales from Zoho",
 ];
 
 // a function, not a list: see hand-off/cases.ts

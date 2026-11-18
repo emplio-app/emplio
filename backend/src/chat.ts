@@ -897,7 +897,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           (list) => (list.length ? list : ["(none yet)"]),
           (error) => {
             log.error(error, "listing skills failed");
-            return ["(unavailable right now; look in company/skills/ and me/skills/)"];
+            return ["(unavailable right now; look in company/skillset/ and me/skillset/)"];
           },
         ),
         visual,

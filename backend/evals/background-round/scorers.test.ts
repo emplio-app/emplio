@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { didOf, ideal, lean, noBrowser, rightCall, staysInside } from "./scorers";
 
 const args = (commands: string[], does: ("skill" | "knowledge" | "preference" | "task")[]) => ({ input: null, output: { text: "", commands }, expected: { does } });
-const skill = "mkdir -p /work/company/skills/packing-slip && cat > /work/company/skills/packing-slip/SKILL.md <<'EOF'\nx\nEOF";
+const skill = "mkdir -p /work/company/skillset/packing-slip && cat > /work/company/skillset/packing-slip/SKILL.md <<'EOF'\nx\nEOF";
 const fact = "cat >> /work/company/knowledge/shop.md <<'EOF'\nClosed Sundays from 15 Nov\nEOF";
 
 test("what a round did is read from its commands", () => {

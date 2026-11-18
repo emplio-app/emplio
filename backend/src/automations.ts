@@ -170,7 +170,9 @@ export function syncAutomations(workspaceId: string): Promise<void> {
     for (const f of files) {
       const name = f.name.slice(0, -3);
       const old = rows.find((r) => r.name === name);
-      if (old && old.sha === f.sha && !old.error) continue;
+      // one with no owner is looked at again: its person may be found now (an upkeep commit once hid them)
+      // ponytail: re-reads ownerless files every sync; fine while they're rare
+      if (old && old.sha === f.sha && !old.error && old.userId) continue;
       const values = await build(workspaceId, name, f.sha, old);
       await db.insert(automations).values(values).onConflictDoUpdate({ target: [automations.workspaceId, automations.name], set: values });
       if (!old) cloud.onWork(workspaceId, null, "automation");
