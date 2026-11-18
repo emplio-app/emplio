@@ -43,3 +43,14 @@ test("a tool saved on a person's own computer keeps /work, not their folder", ()
   expect(p.stderr.toString()).toBe("");
   expect(readFileSync(file, "utf8")).toBe(`KEY = "/work/restricted/key.pem"\n`);
 });
+
+test("an old-style functions.py written by a run gets a note to keep tools instead", () => {
+  const work = mkdtempSync(join(tmpdir(), "work-"));
+  mkdirSync(join(work, "company/skills/s"), { recursive: true });
+  const file = join(work, "company/skills/s/functions.py");
+  writeFileSync(file, "def f():\n    pass\n");
+  const p = Bun.spawnSync(["python3", "-c", "import sys, kernel; print(kernel.check_saved(sys.argv[1]))", file], {
+    env: { PATH: process.env.PATH!, PYTHONPATH: join(import.meta.dir, "python"), EMPLIO_WORK: work },
+  });
+  expect(p.stdout.toString()).toContain("emplio.tools.save(fn");
+});
