@@ -301,3 +301,26 @@ test("the report goes first: the job is done with its answer before the tool-sav
     await db.delete(users).where(eq(users.id, user!.id));
   }
 });
+
+test("told something new while it runs, the job stays working until the reply that took over ends", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `jobs-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `jobs-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const main = crypto.randomUUID();
+    const chatId = crypto.randomUUID();
+    await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: chatId, ...who, title: "job", kind: "job" }]);
+    await db.insert(jobs).values({ ...who, conversationId: main, chatId, depth: 2, name: "check", status: "working" });
+    const first = await (await jobReply(chatId))!.began(() => {});
+    // the next message's reply begins before the steered one has wrapped up
+    const second = await (await jobReply(chatId))!.began(() => {});
+    await first("Partway there.", "completed", true, false, []);
+    expect((await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) }))!.status).toBe("working");
+    await second("All done.", "completed", false, false, []);
+    expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "done", report: "All done." });
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
+});

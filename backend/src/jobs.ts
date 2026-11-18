@@ -35,7 +35,9 @@ const MAX_DEPTH = 3;
 
 // Jobs whose chat is replying now, so wait and stop can reach them: done resolves when the reply ends. Made when
 // a job is started or told something, before its reply begins, so a wait right after doesn't miss it.
-type Live = { done: Promise<void>; end: () => void; stop: () => void; began: boolean };
+// run: the reply running for it now, so a reply that was told something new and wrapped up (steered) doesn't end
+// the job under the reply that took over
+type Live = { done: Promise<void>; end: () => void; stop: () => void; began: boolean; run?: object };
 const live = new Map<string, Live>();
 function track(id: string) {
   let e = live.get(id);
@@ -302,7 +304,8 @@ async function began(w: Row, stop: () => void) {
   const until = deadline(w.id);
   carryUntil.delete(w.id);
   const e = track(w.id);
-  Object.assign(e, { stop, began: true });
+  const run = {};
+  Object.assign(e, { stop, began: true, run });
   // it asked a question: whoever answers it here, Emplio is still waiting on the result
   // the tool-saving run after the report: the job stays done, with its report, and the run's end only ends it
   if (saving.has(w.id))
@@ -321,6 +324,8 @@ async function began(w: Row, stop: () => void) {
     const timeLeft = Date.now() < until - 60_000;
     // the tools and skills this run saved or used join its agent's list now, so its next job has them up front
     if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
+    // told something new while it ran (carryOn), the next reply has begun on the job: that one ends it, with its report
+    if (live.get(w.id)?.run !== run) return;
     if (capped && outcome === "completed" && !interrupted && timeLeft) {
       // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
       carryUntil.set(w.id, until);
