@@ -5,7 +5,8 @@ import { encrypt, vapidHeader } from "./webpush";
 
 test("a lock screen shows plain words", () => {
   expect(plain("**Done.** See [the report](https://x.y/z)\n\n# Next")).toBe("Done. See the report Next");
-  expect(plain("a".repeat(400))).toHaveLength(180);
+  expect(plain("a".repeat(400))).toHaveLength(400);
+  expect(plain("a".repeat(5000))).toHaveLength(1000);
 });
 
 const note = (body = "Done") => ({ title: "Emplio", body, path: "/chat/c1" });

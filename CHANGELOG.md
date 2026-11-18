@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.87 (2026-11-19)
+
+### What's new
+
+- Notifications on your phone, Mac and browser now show much more of a long reply instead of stopping after a sentence or two.
+
+### For developers
+
+- `plain()` in `backend/src/push.ts` cuts at 1000 characters instead of 180, leaving the shortening to the device; the cap stays so the payload fits Apple's and web push's 4 KB limit (#208).
+
 ## 1.2.86 (2026-11-19)
 
 ### What's new
