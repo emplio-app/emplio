@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports } from "./jobs";
+import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -126,6 +126,13 @@ test("chatting in a job's chat stays quiet until Emplio's next reply; answering 
     const asking = await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) });
     expect(asking).toMatchObject({ status: "asking", report: "Question: Which account? [Work / Personal]" });
     expect(await untoldReports(main)).toBeNull();
+
+    // a run that ends without a word did nothing anyone can check: failed, not done (#244)
+    await reply("");
+    expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "failed", report: "(it ended without a report)" });
+    expect(await reportsDue(main)).toBe(false);
+    await db.update(jobs).set({ status: "working" }).where(eq(jobs.chatId, chatId));
+    expect(await reportsDue(main)).toBe(true);
   } finally {
     await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
     await db.delete(users).where(eq(users.id, user!.id));

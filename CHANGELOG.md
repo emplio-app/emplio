@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.88 (2026-11-19)
+
+### What's new
+
+- An automation that couldn't do its work, like one stopped by a sign-in check every time, now shows as failed with the reason, and the reason comes to your chat, instead of showing as done.
+- An automation that hands its work to an agent now shows as running until the agent has finished, and you get the agent's real result rather than "still working".
+
+### For developers
+
+- A run's last words decide its status (`outcome` in `automations.ts`): a line with `[NOT DONE]` (`NOT_DONE`, which the run's first message, now `runMessage`, asks for when the work was blocked or little of it went through) or no words at all make it `failed`, with the line as its `error`; only an error used to. A run whose reply ends with hand-offs still working, or reports it hasn't read (`reportsDue` in `jobs.ts`), stays `running` and ends with the reply those reports wake (`woke`, called from `wake`), or after `JOB_MINUTES` + 15 if they never come. A job whose reply ends with no words is `failed` ("(it ended without a report)"), not `done`. New eval `evals/automation-outcome` (97% right on 12 cases × 3) (#244).
+
 ## 1.2.87 (2026-11-19)
 
 ### What's new

@@ -33,6 +33,7 @@ import { ensureWebhook } from "./integrations/composio";
 import { AppsError } from "./integrations/types";
 import { DEFAULT_ZONE, timezoneOf } from "./time";
 import { cloud } from "./cloud";
+import { JOB_MINUTES, reportsDue } from "./jobs";
 
 const REPO = "company";
 const FOLDER = "automations";
@@ -195,8 +196,42 @@ export async function personFor(workspaceId: string, userId: string): Promise<Ct
   return { userId, userName: m.name, userEmail: m.email, workspaceId, workspaceName: m.workspaceName, role: m.role };
 }
 
+// A run's last line starts with this when the work didn't get done: the run shows as failed, with that line as why.
+export const NOT_DONE = "[NOT DONE]";
+
+// What a run came to: failed on an error, on its own word (NOT_DONE) or when it ended without a word on what came
+// of it; otherwise done. said: what goes to the person's main chat (null: routine, nothing to say).
+export function outcome(error: string | null, words: string | null) {
+  const why = error ?? (!words?.trim() ? "it ended without saying what came of it" : words.includes(NOT_DONE) ? words.replace(NOT_DONE, "").trim() || "it didn't get the work done" : null);
+  if (why) return { status: "failed", error: why, said: `failed: ${why}` } as const;
+  return { status: "done", error: null, said: words!.includes(SILENT) ? null : words!.trim() } as const;
+}
+
+// Runs whose reply ended with hand-offs still out: each ends with the reply their reports wake (woke, from jobs.ts).
+// ponytail: in memory; a restart leaves such a run "running", as one cut off mid-reply already is
+const handedOff = new Map<string, (error: string | null) => Promise<void>>();
+export async function woke(conversationId: string, error: string | null) {
+  const finish = handedOff.get(conversationId);
+  if (!finish || (!error && (await reportsDue(conversationId)))) return;
+  handedOff.delete(conversationId);
+  await finish(error);
+}
+
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max)}\n... (${text.length - max} more characters cut)`);
 const LABEL = { trigger: "an app event", schedule: "its schedule", manual: "someone ran it" };
+
+// A run's first message: the automation's prompt, the event that started it, and how to end.
+export const runMessage = (row: Pick<Row, "name" | "agent" | "prompt">, userName: string, reason: (typeof WHEN)[number], event?: unknown) =>
+  [
+    row.agent
+      ? `${AUTOMATION_PREFIX}Automation "${row.name}" started (${LABEL[reason]}). Hand this to your ${row.agent} agent: emplio hand ${JSON.stringify(row.agent)}, with the work below and the event as its brief. Wait for it, check its report, then finish what's left yourself:`
+      : `${AUTOMATION_PREFIX}Automation "${row.name}" started (${LABEL[reason]}). Do this:`,
+    "",
+    row.prompt,
+    ...(event === undefined ? [] : ["", "The event that started it:", "```json", clip(JSON.stringify(event, null, 2), 20_000), "```"]),
+    "",
+    `End with a line or two for ${userName} on what came of it; they get it in their main chat. If it was routine and nothing needs them, end with exactly ${SILENT} instead. If the work didn't get done (something blocked it so little or none of it went through, a hand-off came back empty or failed and you couldn't finish it), start that line with ${NOT_DONE} and say why, even when it's the same as last time; never ${SILENT} then. Most of it done with a few left over is done (say what's left), and so is nothing to do this time.`,
+  ].join("\n");
 
 // Start a run in a new chat; returns once the chat exists, while the reply carries on in the background.
 async function fire(row: Row, reason: (typeof WHEN)[number], event?: unknown) {
@@ -219,34 +254,29 @@ async function fire(row: Row, reason: (typeof WHEN)[number], event?: unknown) {
     .returning();
   if (!person) return { runId: run!.id, conversationId: null };
 
-  const text = [
-    row.agent
-      ? `${AUTOMATION_PREFIX}Automation "${row.name}" started (${LABEL[reason]}). Hand this to your ${row.agent} agent: emplio hand ${JSON.stringify(row.agent)}, with the work below and the event as its brief. Wait for it, check its report, then finish what's left yourself:`
-      : `${AUTOMATION_PREFIX}Automation "${row.name}" started (${LABEL[reason]}). Do this:`,
-    "",
-    row.prompt,
-    ...(event === undefined ? [] : ["", "The event that started it:", "```json", clip(JSON.stringify(event, null, 2), 20_000), "```"]),
-    "",
-    `End with a line or two for ${person.userName} on what came of it; they get it in their main chat. If it was routine and nothing needs them, end with exactly ${SILENT} instead.`,
-  ].join("\n");
+  const text = runMessage(row, person.userName, reason, event);
   const message: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text }] };
-  const finish = async (error: string | null) => {
-    record({ workspaceId: row.workspaceId, userId: person.userId, conversationId, kind: "automation", summary: `Automation "${row.name}" ${error ? `failed: ${error}` : "finished"}` });
-    await db.update(automationRuns).set({ status: error ? "failed" : "done", error, finishedAt: new Date() }).where(eq(automationRuns.id, run!.id));
-    // what came of it, in their main chat (and on their phone): always a failure, a success unless it was routine
+  const finish = async (failure: string | null) => {
     await quiet(conversationId);
-    // the marker anywhere means routine, even after a line ("No new notes this run. [SILENT]")
-    const words = error ? null : await lastWords(conversationId);
-    const last = words?.includes(SILENT) ? null : words?.trim();
-    if (!error && !last) return;
-    const said = error ? `failed: ${error}` : last;
-    await post(row.workspaceId, person.userId, `**Automation "${row.name}"** ${said}\n\n[Open the run](${chatLink(conversationId)})`, { from: conversationId });
+    // the markers anywhere count, even after a line ("No new notes this run. [SILENT]")
+    const { status, error, said } = outcome(failure, failure ? null : await lastWords(conversationId));
+    record({ workspaceId: row.workspaceId, userId: person.userId, conversationId, kind: "automation", summary: `Automation "${row.name}" ${error ? `failed: ${error}` : "finished"}` });
+    await db.update(automationRuns).set({ status, error, finishedAt: new Date() }).where(eq(automationRuns.id, run!.id));
+    // what came of it, in their main chat (and on their phone): always a failure, a success unless it was routine
+    if (said) await post(row.workspaceId, person.userId, `**Automation "${row.name}"** ${said}\n\n[Open the run](${chatLink(conversationId)})`, { from: conversationId });
   };
   void (async () => {
     const log = { error: (obj: unknown, msg: string) => console.error(`automation ${row.name}: ${msg}`, obj) };
     let error: string | null = null;
     for await (const chunk of (await generateReply(person, conversationId, message, log, row.name))!)
       if (chunk.type === "error") error = chunk.errorText;
+    // handed off and didn't wait them out: what came of it is in the reply their reports wake
+    if (!error && (await reportsDue(conversationId))) {
+      handedOff.set(conversationId, finish);
+      // reports that never come (a thread stopped by hand goes back to nobody) still end it, past a thread's own time
+      setTimeout(() => void woke(conversationId, "its hand-offs never reported back").catch(() => {}), (JOB_MINUTES + 15) * 60_000).unref?.();
+      return;
+    }
     await finish(error);
   })().catch((error) => finish(String(error)).catch(() => {}));
   return { runId: run!.id, conversationId };
