@@ -57,6 +57,7 @@ import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
+import { NextCheck } from "@/components/chat/next-check";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { useMentionMenu } from "@/components/chat/mention-menu";
 import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
@@ -1069,6 +1070,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const composer = (
     <div className="relative">
       {skillMenu.menu ?? mentionMenu.menu}
+      {!job && <NextCheck chatId={id} />}
       {/* what's still going, however far up it was asked: each opens its chat */}
       {busyJobs.length > 0 && (
         <div className="mb-2 flex flex-col gap-1">

@@ -5,7 +5,9 @@
 // on their channel, once (their morning brief lists it as late after that); two days late, whoever asked (or the owner) is told, once.
 // The AI's own tasks (`startDueTasks`) start on their own at their due time (straight away without one), as whoever
 // asked, with their apps and view: back in the chat they came from, with everything said there,
-// or in a new background chat when there's none (added on the Tasks page, or the chat was deleted). The background agent's hand-offs always get a new one.
+// or in a background chat of its own when there's none (added on the Tasks page, or the chat was deleted), the same one each
+// time it wakes up again. The background agent's hand-offs always get a new one.
+// A run can set its own next wake-up (back to to do, with a new due date): at least MIN_GAP away, at most MAX_RUNS a task.
 // Its last words reach that person in their main chat (and on their phone), with a link when it was done elsewhere.
 import { generateId, type UIMessage } from "ai";
 import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
@@ -135,6 +137,19 @@ const find = (w: Who, id: string) =>
 
 // The AI runs a task as whoever asked for it, with their apps and what they may see. So anyone else who writes what it
 // should do, or hands it to the AI, becomes who asked: nobody gets to borrow someone's access by rewriting their task.
+// The AI setting its own next wake-up from a chat (its task, run before, back to to do): spaced out and capped, so a
+// self-paced loop can't burn usage. People on the Tasks page aren't held to it.
+export const MIN_GAP = 15 * 60_000;
+export const MAX_RUNS = 20;
+export function pacing(t: Pick<Row, "assigneeId" | "chases" | "dueAt">, input: TaskInput, due: Date | null | undefined, now = Date.now()) {
+  const forAI = (input.assigneeId === undefined ? t.assigneeId : input.assigneeId) === null;
+  if (!forAI || input.status !== "todo" || !t.chases) return null;
+  if (t.chases >= MAX_RUNS) return `it has woken up ${t.chases} times, the most a task may; set it waiting on whoever it needs instead`;
+  const next = due === undefined ? t.dueAt : due;
+  if (!next || next.getTime() < now + MIN_GAP) return `the next wake-up has to be at least ${MIN_GAP / 60_000} minutes from now: add --due <when>`;
+  return null;
+}
+
 export function takesOver(w: Pick<Who, "userId">, t: Pick<Row, "assigneeId" | "requesterId">, input: TaskInput) {
   const forAI = (input.assigneeId === undefined ? t.assigneeId : input.assigneeId) === null;
   const steered = input.title !== undefined || input.notes !== undefined || input.assigneeId !== undefined;
@@ -146,6 +161,9 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
   if (!t || (!mayChange(w, t) && !(await manages(w, t.assigneeId)))) return { ok: false, error: `no task ${id}` };
   const error = await check(w, input);
   if (error) return { ok: false, error };
+  const due = input.dueAt === undefined ? undefined : input.dueAt ? parseDue(input.dueAt, await timezoneOf(w.userId)) : null;
+  const paced = conversationId ? pacing(t, input, due) : null;
+  if (paced) return { ok: false, error: paced };
   const set: Partial<Row> = { updatedAt: new Date() };
   if (input.title !== undefined) set.title = input.title.trim();
   if (input.notes !== undefined) set.notes = input.notes?.trim() || null;
@@ -156,9 +174,10 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
     set.status = input.status;
     set.doneAt = input.status === "done" ? new Date() : null;
   }
-  // a new due date or a new person starts the reminders over
-  if (input.dueAt !== undefined || input.assigneeId !== undefined) Object.assign(set, { chasedAt: null, chases: 0, escalatedAt: null });
-  if (input.dueAt !== undefined) set.dueAt = input.dueAt ? parseDue(input.dueAt, await timezoneOf(w.userId)) : null;
+  // a new due date or a new person starts the reminders over; the AI's own count its runs (pacing), whatever the date
+  const ai = (input.assigneeId === undefined ? t.assigneeId : input.assigneeId) === null;
+  if (input.assigneeId !== undefined || (input.dueAt !== undefined && !ai)) Object.assign(set, { chasedAt: null, chases: 0, escalatedAt: null });
+  if (due !== undefined) set.dueAt = due;
   const [row] = await db.update(tasks).set(set).where(eq(tasks.id, t.id)).returning();
   const task = await one(row!);
   const what = input.status === "done" ? "Finished" : input.status === "cancelled" ? "Cancelled" : "Changed";
@@ -270,8 +289,13 @@ async function work(t: Row, asked = false) {
       ? await db.query.conversations.findFirst({ where: and(eq(conversations.id, t.conversationId), eq(conversations.userId, person.userId)) })
       : null;
   const source = from?.kind === "main" ? null : from;
-  const chatId = source?.id ?? crypto.randomUUID();
-  if (!source) await db.insert(conversations).values({ id: chatId, workspaceId: t.workspaceId, userId: person.userId, title: `Task: ${t.title}`.slice(0, 80), kind: "background" });
+  // woken up again: back in the chat of its own it had last time
+  const earlier =
+    !source && t.workConversationId
+      ? await db.query.conversations.findFirst({ where: and(eq(conversations.id, t.workConversationId), eq(conversations.userId, person.userId)) })
+      : null;
+  const chatId = source?.id ?? earlier?.id ?? crypto.randomUUID();
+  if (!source && !earlier) await db.insert(conversations).values({ id: chatId, workspaceId: t.workspaceId, userId: person.userId, title: `Task: ${t.title}`.slice(0, 80), kind: "background" });
   await db.update(tasks).set({ workConversationId: chatId }).where(eq(tasks.id, t.id));
   // they're mid-conversation there: generateReply waits for that reply (holdChat)
   // ponytail: waits in memory; a restart meanwhile leaves it doing (shown as such), like any task cut off by one
@@ -279,17 +303,18 @@ async function work(t: Row, asked = false) {
   const text = [
     `${TASK_PREFIX}Task ${id} from the Tasks list, for you, asked by ${person.userName}: ${t.title}`,
     ...(t.dueAt ? [`Due: ${when(t.dueAt, await timezoneOf(person.userId))}`] : []),
-    ...(t.chases > 1 ? [`This is run ${t.chases} of this task.`] : []),
+    ...(t.chases > 1 ? [`This is wake-up ${t.chases} of at most ${MAX_RUNS} for this task.`] : []),
     ...(t.notes ? ["", "How to do it:", t.notes] : []),
     ...(source ? ["", "You set it up earlier in this chat: what was said above is its background."] : []),
+    ...(earlier ? ["", "You worked on it earlier in this chat: what was said above is where it stands."] : []),
     ...(from && !source ? ["", `You set it up in your main chat with ${person.userName}; for what was said there: \`emplio history search <words> --chat ${from.id.slice(0, 8)}\`.`] : []),
     "",
     `First check it's still needed: ${person.userName} may have answered it or done it since (\`emplio history search <words>\`, recent messages first). If so, mark it done and say so in one line.`,
-    ...(t.chases > 2 ? [`It has run ${t.chases - 1} times already: if nothing has changed, don't push it again; set it waiting on ${person.userName} instead of rescheduling.`] : []),
+    ...(t.chases > 2 ? [`It has run ${t.chases - 1} times already: never send the same message or do the same thing twice. Checking again later is fine while you wait on something that will change (a reply, a delivery); otherwise set it waiting on ${person.userName} instead.`] : []),
     "Do it now. Then update the task:",
     `- finished: \`emplio tasks done ${id}\``,
     `- needs a person (a decision, an OK, a reply): \`emplio tasks update ${id} --status waiting --waiting "<who and what>"\``,
-    `- can't be done yet: \`emplio tasks update ${id} --status todo --due <when to try again>\` (it starts again then)`,
+    `- can't be done yet, or to check again later (a reply, tomorrow's numbers): \`emplio tasks update ${id} --status todo --due <when>\`, at least ${MIN_GAP / 60_000} minutes from now; you wake up again in this chat then. Pick the time the answer is likely, not the soonest.`,
     `End with a line or two for ${person.userName}: what you did, the result, anything they must decide.`,
   ].join("\n");
   const message: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text }] };

@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.72 (2026-11-18)
+
+### What's new
+
+- When Emplio says it will check back on something (a reply, tomorrow's numbers), it comes back to the same chat each time, with everything said there, until the work is done. The chat shows when the next check is, with a way to change or cancel it.
+
+### For developers
+
+- An AI task that runs without a source chat reuses its `workConversationId` on later runs instead of opening a new background chat each time.
+- `pacing` (tasks.ts): from a chat, an AI task that has run can only go back to `todo` with a due date at least 15 minutes away, and at most 20 runs; its `chases` (runs) no longer reset when the due date moves. The Tasks page isn't held to it.
+- The run's instructions say how to set the next wake-up; `next-check.tsx` shows the soonest one above the chat box (#30).
+
 ## 1.2.71 (2026-11-18)
 
 ### What's new
