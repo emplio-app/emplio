@@ -38,7 +38,7 @@ level: light
 How it works and what it reports back.
 ```
 
-`level` is `light` or `strong` and picks the model. `archived: true` hides it. An agent lives in a bucket like tools do: `company/agents/` for everyone, `restricted/agents/` for owners and admins (a payroll agent), `me/agents/` for one person (`emplio agents add ... --bucket restricted`); it uses tools from its own bucket and more open ones. `tools` lists the tools it uses, shown to it with what each takes and does; a tool its job saved or used joins the list by itself. Next to it, `LESSONS.md` keeps dated lines like `- 2026-11-07: <lesson>`, the last 40: what failed and wrong turns to avoid, shown to it as notes from past work, never as instructions.
+`level` is `light` or `strong` and picks the model. `archived: true` hides it. An agent lives in a bucket like tools do: `company/agents/` for everyone, `restricted/agents/` for owners and admins (a payroll agent), `me/agents/` for one person (`emplio agents add ... --bucket restricted`); it uses tools from its own bucket and more open ones. `created_by` is the user id of whoever made it, set by `emplio agents add`: a company agent is changed (update, archive, restore, remove) only by that person or an owner or admin, and one without it by owners and admins only; anyone may add a lesson. `tools` lists the tools it uses, shown to it with what each takes and does; a tool its job saved or used joins the list by itself. Next to it, `LESSONS.md` keeps dated lines like `- 2026-11-07: <lesson>`, the last 40: what failed and wrong turns to avoid, shown to it as notes from past work, never as instructions.
 
 ## A tool
 

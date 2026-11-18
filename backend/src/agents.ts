@@ -6,7 +6,8 @@
 // go in the thread's prompt, its skills are named up front, and its level picks the model. Its tools are a list of
 // names (gmail.send): each tool is kept once, in a toolset/ file (_toolset.py), and a tool its thread saved or used
 // joins the list as that run ends (jobs.ts keepTools). Only Emplio (not its threads) makes and changes agents, in anyone's chat
-// with it (staff too: every job has an agent); any thread may add a lesson. Lessons are shown as notes from past work, never as
+// with it (staff too: every job has an agent); a team agent is changed only by whoever made it (created_by) or an owner or
+// admin, and one made before makers were kept by owners and admins only. Any thread may add a lesson. Lessons are shown as notes from past work, never as
 // instructions. See docs/agents.md.
 import type { AgentInfo } from "@emplio/shared";
 import type { FastifyInstance } from "fastify";
@@ -17,7 +18,7 @@ import { dayIn, timezoneOf } from "./time";
 type Who = { workspaceId: string; userId: string };
 type Author = { name: string; email: string };
 export type Level = "light" | "strong";
-export type Agent = { slug: string; name: string; description: string; skills: string[]; tools: string[]; level: Level; archived: boolean; instructions: string; repo?: string };
+export type Agent = { slug: string; name: string; description: string; skills: string[]; tools: string[]; level: Level; archived: boolean; instructions: string; repo?: string; createdBy?: string };
 // who's looking: the buckets they see, their own first (me-<userId>, then restricted for an owner or admin, then company)
 export type Viewer = { userId?: string; admin?: boolean };
 export const BUCKETS = ["company", "restricted", "me"] as const;
@@ -57,11 +58,12 @@ export function parseAgent(slug: string, md: string): Agent {
     level: field("level") === "strong" ? "strong" : "light",
     archived: field("archived") === "true",
     instructions: md.slice(front?.[0].length ?? 0).trim(),
+    ...(field("created_by") && { createdBy: field("created_by") }),
   };
 }
 
 export const agentMd = (a: Omit<Agent, "slug">) =>
-  `---\nname: ${a.name}\ndescription: ${a.description.replace(/\n/g, " ")}\nskills: [${a.skills.join(", ")}]\n${a.tools.length ? `tools: [${a.tools.join(", ")}]\n` : ""}level: ${a.level}\n${a.archived ? "archived: true\n" : ""}---\n${a.instructions.trim()}\n`;
+  `---\nname: ${a.name}\ndescription: ${a.description.replace(/\n/g, " ")}\nskills: [${a.skills.join(", ")}]\n${a.tools.length ? `tools: [${a.tools.join(", ")}]\n` : ""}level: ${a.level}\n${a.archived ? "archived: true\n" : ""}${a.createdBy ? `created_by: ${a.createdBy}\n` : ""}---\n${a.instructions.trim()}\n`;
 
 // ---- tools: functions kept one file per area in toolset/ folders (python/py/emplio/_toolset.py) ----
 
@@ -292,6 +294,7 @@ const USAGE = `usage: emplio agents list [--all]                 your agents (--
        emplio agents remove <name>                delete it and its lessons
 --bucket: who can use it and see its work: company (everyone, the default), restricted (owners and admins: money, HR,
 the owner's matters) or me (only you). It uses tools from its own bucket and more open ones.
+update, archive, restore and remove: a team agent's maker or an owner or admin only; anyone may add a lesson.
 Name it as a doer, like a job title ("Invoice Chaser", "Task Reporter"), not the task ("Weekly Task Summary").
 Hand work to one: emplio hand <name> <<'EOF' ... EOF (emplio hand help).`;
 
@@ -311,6 +314,11 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
   const viewer = { userId: who.userId, admin: who.admin };
   const save = (a: Pick<Agent, "slug" | "repo">, file: string, content: string | null, message: string) => writeFile(who.workspaceId, repoOf(a), `agents/${a.slug}/${file}`, content, message, who.author);
   const find = (ref: string | undefined) => (ref ? findAgent(who.workspaceId, ref, viewer) : null);
+  // someone's own agent is theirs; a team one is changed by whoever made it or an owner or admin
+  const mayChange = (a: Agent) => who.admin || bucketOf(a) === "me" || (!!a.createdBy && a.createdBy === who.userId);
+  const notYours = (a: Agent) => ({
+    text: `error: only whoever made ${a.name}${a.createdBy ? "" : " (made before Emplio kept track)"} or an owner or admin can change it. Nothing was changed: tell the person what you'd change, so they can ask one of them`,
+  });
   try {
     switch (sub) {
       case undefined:
@@ -334,7 +342,7 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
           // one that isn't theirs to see is only "taken", so its name doesn't show
           return { text: (await find(slug)) ? `error: agents/${slug} already exists; emplio agents update ${slug}` : `error: the name ${ref.trim()} is taken; pick another` };
         const repo = bucket === "me" ? `me-${who.userId}` : bucket;
-        const a = { slug, repo, name: ref.trim(), description: set.description, skills: skills(set.skills) ?? [], tools: tools(set.tools) ?? [], level: level(set.level) ?? "light", archived: false, instructions: body };
+        const a = { slug, repo, name: ref.trim(), description: set.description, skills: skills(set.skills) ?? [], tools: tools(set.tools) ?? [], level: level(set.level) ?? "light", archived: false, instructions: body, createdBy: who.userId };
         await save(a, "AGENT.md", agentMd(a), `Added agent ${a.name}`);
         return { text: `added ${bucket}/agents/${slug} "${a.name}". Hand work to it: emplio hand ${slug}`, changed: true };
       }
@@ -343,6 +351,7 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
       case "restore": {
         const a = await find(ref);
         if (!a) return { text: `error: no agent ${ref ?? ""}; see emplio agents list` };
+        if (!mayChange(a)) return notYours(a);
         const next = {
           ...a,
           ...(set.name && { name: set.name.trim() }),
@@ -366,6 +375,7 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
       case "remove": {
         const a = await find(ref);
         if (!a) return { text: `error: no agent ${ref ?? ""}; see emplio agents list` };
+        if (!mayChange(a)) return notYours(a);
         const paths = (await listPaths(who.workspaceId, repoOf(a))).filter((p) => p.path.startsWith(`agents/${a.slug}/`));
         for (const p of paths) await writeFile(who.workspaceId, repoOf(a), p.path, null, `Removed agent ${a.name}`, who.author);
         return { text: `removed agents/${a.slug} "${a.name}"`, changed: true };
@@ -391,6 +401,7 @@ export async function agentRoutes(app: FastifyInstance) {
         skills: a.skills,
         tools: a.tools,
         bucket: bucketOf(a) as AgentInfo["bucket"],
+        createdBy: a.createdBy,
         lessons: (await lessonsOf(ctx.workspaceId, a)).split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2)),
       })),
     );
