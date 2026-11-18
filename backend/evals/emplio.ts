@@ -33,11 +33,14 @@ export const CODE_MODE = process.env.EVAL_CODE_MODE !== "0";
 process.env.CODE_MODE = CODE_MODE ? "1" : "0";
 export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgroundModel;
 
-// round: a background round (the owner's check-in), which nobody watches, on the cheaper model
-export const system = (b: Business, round: boolean) => [
+// round: a background round (the owner's check-in), which nobody watches, on the cheaper model; or the name of the
+// automation whose run this is (nobody watches it either, and it hands off like Emplio in a chat)
+export const system = (b: Business, round: boolean | string) => [
   emplioPrompt({
-    rules: agentRules(ctx, round ? HEARTBEAT : undefined),
-    computer: sandboxPrompt(round ? { ...session, automation: true, thinker: true, background: true, watched: false } : session),
+    rules: agentRules(ctx, typeof round === "string" ? round : round ? HEARTBEAT : undefined),
+    computer: sandboxPrompt(
+      typeof round === "string" ? { ...session, automation: true, watched: false } : round ? { ...session, automation: true, thinker: true, background: true, watched: false } : session,
+    ),
     team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
     connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
     business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
@@ -45,7 +48,7 @@ export const system = (b: Business, round: boolean) => [
     personal: "Runs the shop. Prefers short answers. Hindi or English.",
     skills: b.skills?.length ? b.skills : ["(none yet)"],
     // a background round hands nothing off (chat.ts)
-    agent: round,
+    agent: round === true,
   }),
   "This chat's id is ab12cd34.",
   ...(round ? [] : [mainChatNote(ctx)]),
@@ -66,7 +69,8 @@ const note = (b: Business) =>
 
 // messages: the reply as the chat keeps it (its commands and their results), for chats that go on (workday)
 // usage: what the reply took, all its steps (cost: what OpenRouter charged, in dollars)
-export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number }; steps?: number };
+// last: what its last step said, which is what the app reads as its last words (src/chat.ts lastWords)
+export type Said = { text: string; commands: string[]; messages?: ModelMessage[]; usage?: { input: number; output: number; cost: number }; steps?: number; last?: string };
 
 // One command Emplio already ran in this reply, for chats that start mid-work.
 let calls = 0;
@@ -180,7 +184,7 @@ export const pretend = (command: string, world: World = []): string =>
 
 // Emplio's reply to a chat whose last message is the person's (the note goes on it, as in the app).
 // session: a Python session to keep across replies (code mode; a conversation's), else one for this reply only
-export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round = false, session?: string): Promise<Said> {
+export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round: boolean | string = false, session?: string): Promise<Said> {
   const last = chat.map((m) => m.role).lastIndexOf("user");
   const asked = chat[last]!;
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
@@ -244,7 +248,8 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   };
   // EVAL_USAGE=<file>: every reply's cost, tokens and steps, one JSON line each, to add up a run (both modes)
   if (process.env.EVAL_USAGE) appendFileSync(process.env.EVAL_USAGE, `${JSON.stringify({ ...usage, steps: steps.length, commands: commands.length, ms: Date.now() - began })}\n`);
-  return { text: steps.map((s) => s.text).filter(Boolean).join("\n"), commands, messages: response.messages, usage, steps: steps.length };
+  const texts = steps.map((s) => s.text).filter(Boolean);
+  return { text: texts.join("\n"), commands, messages: response.messages, usage, steps: steps.length, last: texts.at(-1)?.trim() };
 }
 
 // ---- code mode: the real Python session on a stand-in computer (code/fake.py) ----

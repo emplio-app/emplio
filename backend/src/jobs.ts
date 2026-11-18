@@ -14,7 +14,7 @@ import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context, type Ctx } from "./auth";
-import { personFor } from "./automations";
+import { personFor, woke } from "./automations";
 import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./channels";
 import { generateReply, lastWords, loadMessages, quiet, replyFromNotification, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
@@ -175,6 +175,12 @@ const NOTE_REPORT = 1500;
 export const untoldNote = (reports: string[]) =>
   `[The person worked in these threads' chats directly, so you weren't woken. Their latest reports, for you to know; don't mention them unless it matters (\`emplio threads show <id>\` for all of one):\n\n${reports.map((r) => (r.length > NOTE_REPORT ? `${r.slice(0, NOTE_REPORT)}…` : r)).join("\n\n")}\n]`;
 
+// Emplio's threads in this chat still working, or ended with a report it hasn't read yet: a reply here comes once they're in (resume)
+export async function reportsDue(conversationId: string) {
+  const rows = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(and(eq(jobs.conversationId, conversationId), isNull(jobs.parentId)));
+  return rows.some((r) => r.status === "working" || unseen.has(r.id));
+}
+
 // agents still at it for this chat, or asking the person something: Emplio isn't waiting on the person yet (chat.ts nextStep)
 export const stillWorking = async (conversationId: string) =>
   !!(await db.query.jobs.findFirst({ where: and(eq(jobs.conversationId, conversationId), inArray(jobs.status, ["working", "asking"])), columns: { id: true } }));
@@ -196,9 +202,11 @@ export async function wake(w: Pick<Row, "id" | "workspaceId" | "userId" | "conve
   if (!person) return true;
   const message: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text }] };
   const log = { error: (obj: unknown, msg: string) => console.error(`job ${w.id}: ${msg}`, obj) };
-  let failed = false;
-  for await (const chunk of (await generateReply(person, w.conversationId, message, log))!) if (chunk.type === "error") failed = true;
-  if (failed) return false;
+  let error: string | null = null;
+  for await (const chunk of (await generateReply(person, w.conversationId, message, log))!) if (chunk.type === "error") error = chunk.errorText;
+  // an automation's run ends with the reply its threads' reports woke, not with the one that handed them off
+  void woke(w.conversationId, error).catch((err) => console.error(`job ${w.id}: ending the automation's run failed`, err));
+  if (error) return false;
   await quiet(w.conversationId);
   if (!(await wroteFromPhone(w.conversationId))) return true;
   const said = await lastWords(w.conversationId);
@@ -344,7 +352,8 @@ async function began(w: Row, stop: () => void) {
     const report = asked
       ? `Question: ${carded.map((c) => `${c.question}${c.options.length ? ` [${c.options.join(" / ")}]` : ""}`).join("\n")}`
       : unfinished + (answer || (outcome === "failed" ? "It failed." : outcome === "stopped" ? "Stopped." : "(it ended without a report)"));
-    const status = unfinished ? "failed" : outcome === "completed" ? (asked || asks(report) ? "asking" : "done") : outcome;
+    // a run that ended without a word did nothing anyone can check: failed, so it isn't taken for done (#244)
+    const status = unfinished ? "failed" : outcome === "completed" ? (asked || asks(report) ? "asking" : answer ? "done" : "failed") : outcome;
     await db.update(jobs).set({ status, report, finishedAt: new Date() }).where(eq(jobs.id, w.id));
     if (status === "done") cloud.onWork(w.workspaceId, w.userId, "agent");
     live.delete(w.id);

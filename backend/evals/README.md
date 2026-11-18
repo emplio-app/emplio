@@ -19,6 +19,8 @@ evals/
   skills/                   does it read the skill that fits, and save one when a job is repeatable (src/sandbox.ts)
   reader/                   what the reader notices in a finished chat (src/reader.ts)
   background-round/         where the background agent puts what the reader noticed (src/heartbeat.ts)
+  automation-outcome/       how an automation's run ends: failed when its work didn't get done, done otherwise
+                            (src/automations.ts runMessage, outcome)
 ```
 
 Each folder has `cases.ts` (the chats, and what should happen), `scorers.ts` (how an answer is marked),
