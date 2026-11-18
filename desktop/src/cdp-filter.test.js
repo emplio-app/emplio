@@ -59,3 +59,10 @@ test("a page size asked for goes to the app, which keeps the page that size", ()
   f.fromClient(msg({ id: 8, method: "Emulation.clearDeviceMetricsOverride" }));
   expect(seen).toEqual([{ width: 390, height: 844, mobile: true }, null]);
 });
+
+test("a worker of one of the agent's pages is told to the agent, or it would stay paused", () => {
+  const f = make();
+  const worker = msg({ method: "Target.attachedToTarget", sessionId: "PAGE", params: { sessionId: "w", targetInfo: { targetId: "W1", type: "worker" }, waitingForDebugger: true } });
+  expect(f.fromChrome(worker)).toBe(worker);
+  expect(f.fromChrome(msg({ method: "Target.attachedToTarget", params: { sessionId: "w", targetInfo: { targetId: "W1", type: "worker" } } }))).toBeNull();
+});

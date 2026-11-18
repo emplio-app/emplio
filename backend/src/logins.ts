@@ -15,6 +15,7 @@ import { DEFAULT_LOGIN_FIELDS, isSecretField, type Login, type LoginInput, type 
 import { record } from "./activity";
 import { context } from "./auth";
 import { devtools, openBrowser } from "./browser";
+import { isDeviceBrowser } from "./device-browser";
 import { db } from "./db";
 import { connections, logins } from "./db/schema";
 import { onepassword, onePasswordItems, onePasswordValues } from "./integrations/own/onepassword";
@@ -183,6 +184,44 @@ const FOCUS = (label: string | null) => `(() => {
   return true;
 })()`;
 
+type Cdp = Awaited<ReturnType<typeof devtools>>;
+// Where a login's boxes can be: the page and the frames in it on the same site (Apple's sign-in sits in an
+// idmsa.apple.com frame on appstoreconnect.apple.com). Frames of other sites never get a saved login typed into them.
+// Same-process frames are reached through a world of our own in them; frames in their own process (another site's
+// process, as the browser decides) through their own DevTools session.
+// ponytail: "same company" is the site's parent domain unless that looks like a country's suffix (co.uk); a public
+// suffix list would be exact if a login ever lands on a shared host
+const parentOf = (site: string) => {
+  const base = site.split(".").slice(1).join(".");
+  return base.includes(".") && !/^(co|com|net|org|gov|edu|ac|ne|or)\.[a-z]{2}$/.test(base) ? base : site;
+};
+async function framesOnSite(cdp: Cdp, sessionId: string, loginSite: string) {
+  const site = parentOf(loginSite);
+  const at = (session: string, contextId?: number) => ({
+    run: async (expression: string) => (await cdp.send("Runtime.evaluate", { expression, returnByValue: true, ...(contextId ? { contextId } : {}) }, session)).result?.value,
+  });
+  const frames = [at(sessionId)];
+  type Frame = { frame: { id: string; url: string; parentId?: string }; childFrames?: Frame[] };
+  const walk = (n: Frame): Frame["frame"][] => [n.frame, ...(n.childFrames ?? []).flatMap(walk)];
+  const { frameTree } = await cdp.send("Page.getFrameTree", {}, sessionId);
+  for (const f of walk(frameTree).filter((f) => f.parentId && onSite(siteOf(f.url), site))) {
+    const made = await cdp.send("Page.createIsolatedWorld", { frameId: f.id, worldName: "emplio-fill" }, sessionId).catch(() => null);
+    if (made) frames.push(at(sessionId, made.executionContextId));
+  }
+  const children: string[] = [];
+  cdp.on((method, p) => {
+    if (method === "Target.attachedToTarget" && p.targetInfo?.type === "iframe" && onSite(siteOf(p.targetInfo.url), site)) children.push(p.sessionId);
+  });
+  await cdp.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, sessionId).catch(() => {});
+  await Bun.sleep(300);
+  for (const child of children) frames.push(at(child));
+  return frames;
+}
+
+// The browser in the Mac app is refused by some sites' robot checks (GoDaddy: the button does nothing, or "your browser
+// is a bit unusual"); the real Chrome its toolbar opens is not. Retrying only makes the site surer it's a robot.
+const MAC_SIGN_IN = ` If the sign-in still doesn't go through after 2 tries (the button does nothing, it keeps loading, or the site says the browser is unusual or there were too many attempts), stop trying and ask the person to press "Take control", then "Sign in with Chrome" at the top of the browser, sign in in the Chrome window that opens, then press "Done signing in"; their sign-in comes back to this browser.`;
+
 // Fill a saved login into the chat's open tab on its site: each of its fields the page has a box for. Sites that
 // ask on two pages: fill, press Next, fill again. With `field`, only that one, typed into the box that has focus
 // (for a page whose boxes can't be told apart). A key is always typed into the focused box.
@@ -201,15 +240,21 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     const run = async (expression: string) => (await cdp.send("Runtime.evaluate", { expression, returnByValue: true }, sessionId)).result?.value;
     // the page itself, not just the tab's address: it could have moved on
     if (!onSite(String(await run("location.hostname")), row.site)) return `error: that tab has left ${row.site}`;
+    const frames = await framesOnSite(cdp, sessionId, row.site);
+    const inFrames = async (expression: string) => {
+      for (const f of frames) if (await f.run(expression).catch(() => false)) return true;
+      return false;
+    };
     const saved = await row.values().catch((error: Error) => error);
     if (saved instanceof Error) return `error: ${saved.message}`;
     const pick = field && Object.keys(saved).find((label) => label.toLowerCase() === field.toLowerCase());
     if (field && !pick) return `error: ${nameOf(name)} has no field "${field}"; it has ${Object.keys(saved).join(", ")}`;
     const filled: string[] = [];
-    await run(`document.querySelectorAll("[data-ez-filled]").forEach((e) => delete e.dataset.ezFilled)`);
+    await inFrames(`document.querySelectorAll("[data-ez-filled]").forEach((e) => delete e.dataset.ezFilled), false`);
     for (const [label, text] of Object.entries(saved)) {
       if (pick ? label !== pick : false) continue;
-      if (!(await run(FOCUS(row.kind === "key" || pick ? null : label)))) continue;
+      if (!(await inFrames(FOCUS(row.kind === "key" || pick ? null : label)))) continue;
+      // typed into whichever frame has focus, by the page's own keyboard
       await cdp.send("Input.insertText", { text }, sessionId);
       filled.push(label);
     }
@@ -218,7 +263,7 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
       return `error: found no box for ${row.kind === "key" || pick ? "it; click into the box first" : `${missed.join(", ")} on ${siteOf(tab.url)}; go to the sign-in page, or click into a box and use emplio logins fill ${nameOf(name)} "<field>"`}`;
     await row.used();
     record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "connection", summary: `Filled ${nameOf(name)} on ${row.site}` });
-    return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}. Now press the sign-in or next button yourself.`;
+    return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}. Now press the sign-in or next button yourself.${isDeviceBrowser(live.id) ? MAC_SIGN_IN : ""}`;
   } finally {
     cdp.close();
   }

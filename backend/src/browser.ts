@@ -169,11 +169,17 @@ const markUsed = (conversationId: string, page?: string) =>
     .where(eq(conversations.id, conversationId))
     .catch((e) => console.error("browser use not noted:", e));
 
+// Robot checks' own cookies (Akamai, Cloudflare, DataDome, PerimeterX): a verdict on one browser session, minutes long.
+// Put back into the next browser they mark it a robot again (GoDaddy: "Your browser is a bit unusual", every sign-in
+// refused), so they're never put back; the site hands out fresh ones.
+const ROBOT_CHECK = /^(_abck|bm_[a-z]+|ak_bmsc|akm_.*|__cf_bm|cf_clearance|datadome|_px.*)$/;
+export const keptCookies = <T extends { name: string }>(cookies: T[]) => cookies.filter((c) => !ROBOT_CHECK.test(c.name));
+
 // Put a kept state into a fresh browser: cookies, then each site's local storage and Indexed DB.
 export async function restoreState(cdpUrl: string, state: BrowserState) {
   const cdp = await devtools(cdpUrl);
   try {
-    await cdp.send("Storage.setCookies", { cookies: state.cookies });
+    await cdp.send("Storage.setCookies", { cookies: keptCookies(state.cookies) });
     const { targetInfos } = await cdp.send("Target.getTargets");
     const tab = (targetInfos as { targetId: string; type: string }[]).find((t) => t.type === "page");
     if (!tab) return;

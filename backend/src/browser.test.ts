@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { BrowserGone, canReopen, keepIndexedDb, signInPrint, signedInSites, sitesIn, socketUrl, stillRunning } from "./browser";
+import { BrowserGone, canReopen, keepIndexedDb, keptCookies, signInPrint, signedInSites, sitesIn, socketUrl, stillRunning } from "./browser";
 
 test("the Live browser button lasts 24 hours after the browser last ran", () => {
   const now = Date.now();
@@ -68,4 +68,9 @@ test("a browser that closed is reported gone, not an address of undefined", asyn
   answer = Response.json({ webSocketDebuggerUrl: "ws://x/devtools/browser/1" });
   expect(await socketUrl(url)).toBe("ws://x/devtools/browser/1");
   server.stop(true);
+});
+
+test("robot-check cookies are never put back into a new browser", () => {
+  const names = ["_abck", "bm_sv", "bm_mi", "ak_bmsc", "akm_lmprb", "__cf_bm", "cf_clearance", "datadome", "_px3", "session", "auth_idp", "_ga"];
+  expect(keptCookies(names.map((name) => ({ name }))).map((c) => c.name)).toEqual(["session", "auth_idp", "_ga"]);
 });
