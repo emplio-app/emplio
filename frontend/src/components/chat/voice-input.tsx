@@ -50,7 +50,12 @@ export function VoiceInput({ onText }: { onText: (text: string) => void }) {
   async function start() {
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Voice needs a secure (https) page on this device");
+      // browsers hide the mic on plain http pages (a phone on the wifi); otherwise the browser or app has no mic access
+      setError(
+        window.isSecureContext
+          ? "Voice can't start here. Update the Emplio app, or try Chrome or Safari"
+          : "Voice needs a secure (https) page. Open Emplio from its https address",
+      );
       return;
     }
     let stream: MediaStream;
