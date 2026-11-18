@@ -90,6 +90,7 @@ const textOf = (message: UIMessage) =>
     .map((p) => p.text)
     .join("\n\n");
 const filesOf = (message: UIMessage) => message.parts.filter((p): p is FileUIPart => p.type === "file");
+const commands = (message?: UIMessage) => message?.parts.filter((p) => p.type.startsWith("tool-") || p.type === "dynamic-tool").length ?? 0;
 
 // command: the / skill or app the text starts with, picked from the menu (kept with the message for highlighting)
 // steered: the running reply knows it's waiting, and ends after its current command so this goes in next
@@ -365,6 +366,31 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once for each ended reply
   }, [ended]);
+
+  // Following a reply that has gone quiet here while the server's saved copy has moved on (#56: after "Show Emplio how"
+  // the chat stopped at "Thinking…" while the work went on, until a reload): follow it again from where it is.
+  // The saved copy trails the live one by up to 2s, so it being ahead means this chat lost the thread.
+  useEffect(() => {
+    if (!busy) return;
+    const at = sends.current;
+    const t = setTimeout(async () => {
+      const d = await fetchChat().catch(() => null);
+      if (!d?.running || sends.current !== at) return;
+      const ours = messagesRef.current.at(-1);
+      const theirs = d.messages.at(-1);
+      // a message just sent and still waiting its turn isn't in the load: showing the load would wipe it
+      const sent = messagesRef.current.findLast((m) => m.role === "user");
+      if (sent && !d.messages.some((m) => m.id === sent.id)) return;
+      if (theirs?.role !== "assistant" || (ours?.id === theirs.id && commands(theirs) <= commands(ours))) return;
+      await stopRef.current(); // stops following only; the reply goes on at the server
+      if (sends.current !== at) return;
+      setMessages(d.messages);
+      setOlder(d.older);
+      void resumeStream();
+    }, 10_000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 10s after the last thing that came in
+  }, [busy && messages]);
   const empty = messages.length === 0;
   // a job's chat: its line in the sidebar spins while it replies
   useEffect(() => {
