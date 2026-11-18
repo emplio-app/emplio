@@ -39,12 +39,14 @@ const fits = (m: Raw) => {
 
 const perMillion = (price: string) => Math.round(Number(price) * 1e6 * 1000) / 1000;
 
-// models: the picker's list; tools: every OpenRouter model id, and whether it can use tools (a custom pick)
-let cached: { at: number; models: ModelOption[]; tools: Map<string, boolean> } | null = null;
+// models: the picker's list; images: the image model picker's; tools: every OpenRouter model id, and whether it can
+// use tools (a custom pick); painters: every one that makes pictures (a custom image pick)
+let cached: { at: number; models: ModelOption[]; images: ModelOption[]; tools: Map<string, boolean>; painters: Set<string> } | null = null;
 const FRESH_MS = 60 * 60 * 1000;
 
 // Newest first within each maker (OpenRouter lists newest first). A failed refresh keeps the last list.
 export const listModels = async () => (await catalogue()).models;
+export const listImageModels = async () => (await catalogue()).images;
 
 // A model typed in by name ("Custom" in the picker): any OpenRouter model, if it can use tools (the agent
 // works through them). null when it can; else why not.
@@ -53,21 +55,38 @@ export async function customModelProblem(id: string) {
   return tools === undefined ? "OpenRouter has no model by that name." : tools ? null : "that model can't use tools, which Emplio needs.";
 }
 
+// The same for the image model: any OpenRouter model that makes pictures.
+export async function customImageModelProblem(id: string) {
+  const c = await catalogue();
+  return c.painters.has(id) ? null : c.tools.has(id) ? "that model doesn't make pictures." : "OpenRouter has no model by that name.";
+}
+
+// a maker's model that takes words and makes pictures (and isn't a :free or :batch copy)
+const paints = (m: Raw) =>
+  m.architecture.input_modalities.includes("text") && m.architecture.output_modalities.includes("image") && !m.id.includes(":");
+
 async function catalogue() {
   if (cached && Date.now() - cached.at < FRESH_MS) return cached;
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`OpenRouter models: ${res.status}`);
     const { data } = (await res.json()) as { data: Raw[] };
-    const models = data.filter(fits).map((m) => ({
+    const option = (m: Raw): ModelOption => ({
       id: m.id,
       name: m.name.replace(/^[^:]+:\s*/, ""), // "OpenAI: GPT-5" → "GPT-5"
       provider: m.id.split("/")[0] as ModelOption["provider"],
       context: m.context_length,
       input: perMillion(m.pricing.prompt),
       output: perMillion(m.pricing.completion),
-    }));
-    cached = { at: Date.now(), models, tools: new Map(data.map((m) => [m.id, !!m.supported_parameters?.includes("tools")])) };
+    });
+    const painters = data.filter(paints);
+    cached = {
+      at: Date.now(),
+      models: data.filter(fits).map(option),
+      images: painters.filter((m) => MODEL_PROVIDERS.some((p) => p.key === m.id.split("/")[0])).map(option),
+      tools: new Map(data.map((m) => [m.id, !!m.supported_parameters?.includes("tools")])),
+      painters: new Set(painters.map((m) => m.id)),
+    };
   } catch (error) {
     if (!cached) throw error;
   }
@@ -123,8 +142,8 @@ export const modelForJob = <J extends ModelJob>(settings: Pick<Settings, "modelS
   model(settings, modelFor(settings, job), bill);
 
 export async function modelRoutes(app: FastifyInstance) {
-  app.get("/models", async (req, reply) => {
+  app.get<{ Querystring: { kind?: string } }>("/models", async (req, reply) => {
     if (!(await context(req, reply))) return;
-    return listModels();
+    return req.query.kind === "image" ? listImageModels() : listModels();
   });
 }
