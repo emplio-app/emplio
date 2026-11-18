@@ -67,7 +67,7 @@ function serial<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 // The bridge, the way out to the internet, and what computers may not reach: other computers (isolated ports),
-// the cloud's metadata address, and mail (spam gets the whole server locked). Again at every start, since a
+// the hosting provider's metadata address, and mail (spam gets the whole server locked). Again at every start, since a
 // reboot clears them.
 export async function ensureNetwork() {
   await sh(["ip", "link", "add", BRIDGE, "type", "bridge"], true);
