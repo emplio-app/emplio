@@ -20,8 +20,9 @@ case "$1" in
     kind=computer; [ "$2" = other123other ] && kind=other
     echo '[{"Id":"'$2'","State":{"Running":'"$( [ -f ${dir}/stopped ] && echo false || echo true )"'},"Config":{"Labels":{"emplio.kind":"'$kind'","emplio.employee0User":"u"}},"NetworkSettings":{"Networks":{"n":{"IPAddress":"10.88.0.2"}}}}]' ;;
   exec)
+    case "$*" in *resolv.conf*) exit 0 ;; esac
     shift
-    while [ "$1" != ${ID} ]; do case "$1" in -w) shift 2 ;; -e|-i) [ "$1" = -e ] && shift; shift ;; esac; done
+    while [ "$1" != ${ID} ]; do case "$1" in -w|-u) shift 2 ;; -e|-i) [ "$1" = -e ] && shift; shift ;; esac; done
     shift
     exec "$@" ;;
 esac
@@ -103,4 +104,27 @@ test("goes to sleep after the time it was given", async () => {
   await post(`/computers/${ID}/keep`, { ms: 100 });
   await Bun.sleep(400);
   expect(asked()).toContain(`stop -t 3 ${ID}`);
+});
+
+test("on a server that only holds computers: its runtime, name servers, no app to join, preview links", async () => {
+  const port = PORT + 1;
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNNER_TOKEN: TOKEN, PORT: String(port), APP_CONTAINER: "", COMPUTER_RUNTIME: "runsc", COMPUTER_DNS: "1.1.1.1,bad;rm", PREVIEW_DOMAIN: "box.test" };
+  const other = Bun.spawn(["bun", join(import.meta.dir, "runner.ts")], { env, stdout: "ignore", stderr: "ignore" });
+  try {
+    for (let i = 0; i < 50 && !(await fetch(`http://127.0.0.1:${port}/health`).then((r) => r.ok, () => false)); i++) await Bun.sleep(100);
+    writeFileSync(log, "");
+    await fetch(`http://127.0.0.1:${port}/computers`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ labels: { employee0User: "v" }, ms: 60_000 }) });
+    const lines = asked().split("\n");
+    expect(lines.find((l) => l.startsWith("run ") && l.includes("emplio.kind=computer"))).toContain("--runtime runsc");
+    expect(lines.some((l) => l.startsWith("network connect"))).toBe(false);
+    const dns = lines.find((l) => l.includes("resolv.conf"))!;
+    expect(dns).toContain("nameserver 1.1.1.1");
+    expect(dns).not.toContain("rm");
+    const ok = (host: string) => fetch(`http://127.0.0.1:${port}/preview-ok?domain=${host}`).then((r) => r.status);
+    expect(await ok(`3000-${ID}.box.test`)).toBe(200);
+    expect(await ok(`3000-${ID}.evil.test`)).toBe(404);
+    expect(await ok(`3000-other123other.box.test`)).toBe(404);
+  } finally {
+    other.kill();
+  }
 });

@@ -11,8 +11,17 @@ const TOKEN = process.env.RUNNER_TOKEN;
 if (!TOKEN || TOKEN.length < 32) throw new Error("RUNNER_TOKEN must be set, at least 32 characters");
 const COMPUTER_IMAGE = process.env.COMPUTER_IMAGE ?? "emplio-computer";
 const BROWSER_IMAGE = process.env.BROWSER_IMAGE ?? "emplio-browser";
+// Emplio's own container, joined to each person's network to reach the browsers; empty when Emplio runs on another
+// machine and only talks to this program (a server that only holds computers)
 const APP_CONTAINER = process.env.APP_CONTAINER ?? "emplio-app";
-const LIMITS = ["--memory", process.env.COMPUTER_MEMORY ?? "2g", "--cpus", process.env.COMPUTER_CPUS ?? "2", "--pids-limit", "1024"];
+// another runtime for the containers, like gVisor's runsc, which gives each one its own small kernel
+const RUNTIME = process.env.COMPUTER_RUNTIME ? ["--runtime", process.env.COMPUTER_RUNTIME] : [];
+const LIMITS = [...RUNTIME, "--memory", process.env.COMPUTER_MEMORY ?? "2g", "--cpus", process.env.COMPUTER_CPUS ?? "2", "--pids-limit", "1024"];
+// name servers written into a computer each time it starts, for runtimes that can't use Docker's own (gVisor on a
+// person's network): "1.1.1.1,8.8.8.8"
+const DNS = (process.env.COMPUTER_DNS ?? "").split(",").filter((ip) => /^[0-9a-f.:]+$/i.test(ip));
+// preview links: a server a computer runs on a port opens at https://<port>-<computer's 12-letter id>.<this domain>
+const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN ?? "";
 const BROWSER_HOURS = 4;
 const MAX_OUTPUT = 20 * 1024 * 1024;
 
@@ -99,9 +108,17 @@ async function networkOf(person: string) {
     }
     if (!made) throw new Error(`couldn't make a network: ${last.trim()}`);
   }
-  const joined = await docker(["network", "connect", name, APP_CONTAINER]);
-  if (joined.code && !/already exists|already attached/.test(joined.err)) throw new Error(`couldn't join the network: ${joined.err.trim()}`);
+  if (APP_CONTAINER) {
+    const joined = await docker(["network", "connect", name, APP_CONTAINER]);
+    if (joined.code && !/already exists|already attached/.test(joined.err)) throw new Error(`couldn't join the network: ${joined.err.trim()}`);
+  }
   return name;
+}
+
+// Docker writes /etc/resolv.conf again on every start, so this goes in after each one
+async function setDns(id: string) {
+  if (!DNS.length) return;
+  await must(["exec", "-u", "root", id, "sh", "-c", `printf '${DNS.map((ip) => `nameserver ${ip}\\n`).join("")}' > /etc/resolv.conf`]);
 }
 const personOf = (labels: Record<string, string>) => `${labels.employee0Workspace ?? ""}:${labels.employee0User ?? ""}`;
 
@@ -159,6 +176,7 @@ async function route(req: Request, url: URL): Promise<Response> {
       const ms = asMs(body.ms);
       const net = await networkOf(personOf(labels));
       const made = await must(["run", "-d", "--init", "--network", net, ...LIMITS, "--label", "emplio.kind=computer", ...Object.entries(labels).flatMap(([k, v]) => ["--label", `emplio.${k}=${v}`]), COMPUTER_IMAGE]);
+      await setDns(made);
       sleepAfter(made, ms);
       return Response.json({ id: made });
     }
@@ -174,6 +192,7 @@ async function route(req: Request, url: URL): Promise<Response> {
       if (!c.State.Running) {
         await networkOf(personOf(labelsOf(c)));
         await must(["start", c.Id]);
+        await setDns(c.Id);
       }
       sleepAfter(c.Id, ms);
       return Response.json({ ok: true });
@@ -247,14 +266,46 @@ const allowed = (given: string) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
+// A preview link's request, sent on to the computer it names. No token: the link itself is the key.
+const PREVIEW_HOST = /^(\d{1,5})-([a-f0-9]{12})\.(.+)$/;
+async function previewOf(host: string | null) {
+  const m = PREVIEW_DOMAIN ? PREVIEW_HOST.exec((host ?? "").split(":")[0]!.toLowerCase()) : null;
+  if (!m || m[3] !== PREVIEW_DOMAIN || Number(m[1]) > 65535) return null;
+  const c = await ours(m[2]!, "computer").catch(() => null);
+  const ip = c?.State.Running && Object.values(c.NetworkSettings.Networks)[0]?.IPAddress;
+  return ip ? `http://${ip}:${m[1]}` : null;
+}
+async function preview(req: Request, url: URL, to: string) {
+  const headers = new Headers(req.headers);
+  headers.delete("authorization");
+  try {
+    const r = await fetch(to + url.pathname + url.search, {
+      method: req.method,
+      headers,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+      redirect: "manual",
+      signal: req.signal,
+    });
+    return new Response(r.body, { status: r.status, headers: r.headers });
+  } catch {
+    return new Response("Nothing is answering on that port of the computer.", { status: 502 });
+  }
+}
+
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 4100),
+  // a server that only holds computers: listen on localhost, behind the HTTPS proxy
+  ...(process.env.HOST && { hostname: process.env.HOST }),
   // a command can run for a long time with nothing on the wire
   idleTimeout: 0,
   maxRequestBodySize: 200 * 1024 * 1024,
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
+    const to = await previewOf(req.headers.get("host"));
+    if (to) return preview(req, url, to);
+    // the HTTPS proxy asks before it gets a certificate for a preview name
+    if (url.pathname === "/preview-ok") return (await previewOf(url.searchParams.get("domain"))) ? new Response("ok") : new Response("no", { status: 404 });
     const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token") ?? "";
     if (!allowed(given)) return new Response("Unauthorized", { status: 401 });
     try {
