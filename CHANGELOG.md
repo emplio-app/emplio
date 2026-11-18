@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.74 (2026-11-18)
+
+### What's new
+
+- If the chat stops showing Emplio's progress while it's still working (it could happen after Show Emplio how), it catches up by itself within about 10 seconds, so you no longer need to refresh the page.
+
+### For developers
+
+- Chat view: while following a reply, 10 s with nothing new triggers a check of the saved chat; if the server is still replying and its saved copy is ahead (newer reply, or more commands), the chat stops following, loads the saved copy and follows again. Covers the part of #56 that #142 didn't: the reply is still running, not over.
+
 ## 1.2.73 (2026-11-18)
 
 ### What's new
