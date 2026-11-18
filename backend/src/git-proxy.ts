@@ -70,6 +70,38 @@ export function gitForCommand(s: Session) {
   return { token, proxy, env };
 }
 
+// The address GitHub keeps for an account (12345+asha@users.noreply.github.com), per login. It's tied to that account
+// whatever its email settings, so GitHub credits commits made with it, and pushes aren't refused for showing a private
+// email. A failed lookup is tried again after FAILED_MS.
+// ponytail: in memory, kept until a restart; a renamed GitHub account gets its new address then
+const addresses = new Map<string, { address: string | null; until: number }>();
+const FAILED_MS = 10 * 60_000;
+const keyOf = (secret: string) => new Bun.CryptoHasher("sha256").update(secret).digest("hex");
+
+// The person's GitHub address, for the commits plain git makes on Emplio's computer. Vercel won't deploy a commit whose
+// author no GitHub account has (COMMIT_AUTHOR_REQUIRED), as the computer's own BOX_EMAIL is. Null with no GitHub
+// account connected, or GitHub not answering.
+// ponytail: several accounts connected, the first one's; one per repo if people push to different accounts' repos
+export async function githubAddress(s: Session) {
+  const [login] = await gitLogins({ workspaceId: s.workspaceId, userId: s.user.id }, "github").catch(() => []);
+  if (!login) return null;
+  const key = keyOf(login.secret);
+  const known = addresses.get(key);
+  if (known && known.until > Date.now()) return known.address;
+  const r = await fetch("https://api.github.com/user", {
+    headers: { authorization: `Bearer ${login.secret}`, accept: "application/vnd.github+json", "user-agent": "Emplio" },
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => null);
+  const me = r?.ok ? ((await r.json().catch(() => null)) as { id?: number; login?: string } | null) : null;
+  const address = me?.id && me.login ? `${me.id}+${me.login}@users.noreply.github.com` : null;
+  addresses.set(key, { address, until: address ? Infinity : Date.now() + FAILED_MS });
+  return address;
+}
+
+// What a command's git signs its commits with: the person, at their GitHub address. Empty without one.
+export const gitAuthor = (s: Session, address: string | null): Record<string, string> =>
+  address ? { GIT_AUTHOR_NAME: s.user.name, GIT_AUTHOR_EMAIL: address, GIT_COMMITTER_NAME: s.user.name, GIT_COMMITTER_EMAIL: address } : {};
+
 // After the command, with the computer free: what git couldn't do, for Emplio to read. A Connect button when nothing
 // is connected, and the Allow card for a push (made by running the push again once it's allowed).
 export async function gitAfter(token: string, s: Session) {

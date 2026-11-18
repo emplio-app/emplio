@@ -21,8 +21,9 @@ async function gitea(path: string, init?: RequestInit) {
   });
 }
 
-// Who is saving, and (staff in company files) the only paths they may change.
-export type Pusher = { email: string; only?: RegExp };
+// Who is saving, the address GitHub keeps for them (what their own git commits name, git-proxy.ts githubAddress), and
+// (staff in company files) the only paths they may change.
+export type Pusher = { email: string; github?: string | null; only?: RegExp };
 
 export const orgFor = (workspaceId: string) => `ws-${workspaceId}`;
 
@@ -205,15 +206,16 @@ export const bundleFor = (workspaceId: string, repo: string, base: string | null
     }
   });
 
-// The name a box's own git uses for anything not saved through the server. Nobody can sign in as it, so an automation
-// it wrote has nobody to run as.
+// The name a box's own git uses for anything not saved through the server, when the person has no GitHub account
+// connected (their GitHub address otherwise). Nobody can sign in as it, so an automation it wrote has nobody to run as.
 export const BOX_EMAIL = "bot@emplio.local";
 
 // Why these commits can't go in, or null. A box is the agent's own computer, so nothing it says about itself counts:
 // automations run as whoever a commit names, and a box's own limits on what staff change can be undone from inside it.
 export async function refused(dir: string, base: string, who: Pusher) {
   const authors = await mustGit(dir, "log", "--format=%ae", `${base}..refs/incoming`);
-  const other = authors.split("\n").find((a) => a && ![who.email.toLowerCase(), BOX_EMAIL].includes(a.toLowerCase()));
+  const theirs = [who.email.toLowerCase(), who.github?.toLowerCase(), BOX_EMAIL];
+  const other = authors.split("\n").find((a) => a && !theirs.includes(a.toLowerCase()));
   if (other) return `a commit is signed ${other}`;
   if (!who.only) return null;
   const files = await mustGit(dir, "-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", base, "refs/incoming");

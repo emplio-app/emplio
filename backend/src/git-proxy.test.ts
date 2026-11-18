@@ -18,7 +18,7 @@ spyOn(approvals, "mustAsk").mockImplementation(async () => ask);
 spyOn(approvals, "approve").mockImplementation(async () => (asked++, null));
 spyOn(await import("./activity"), "record").mockImplementation(() => {});
 process.env.WEBHOOK_URL = "https://api.test";
-const { gitAfter, gitForCommand, gitProxyRoutes, pushedRefs } = await import("./git-proxy");
+const { gitAfter, gitAuthor, gitForCommand, githubAddress, gitProxyRoutes, pushedRefs } = await import("./git-proxy");
 
 const app = Fastify();
 const s = { conversationId: "c", workspaceId: "w", role: "owner", user: { id: "u", name: "Asha" } } as never;
@@ -32,6 +32,9 @@ beforeAll(async () => {
   globalThis.fetch = (async (url: string, init: { headers: Record<string, string>; body?: unknown }) => {
     const auth = init.headers.authorization;
     sent.push({ url, auth, body: init.body });
+    // GitHub's API: who a login is; "down" for GitHub not answering
+    if (url === "https://api.github.com/user")
+      return auth === "Bearer down" ? new Response("no", { status: 503 }) : Response.json({ id: 7, login: auth === "Bearer good" ? "asha" : "other" });
     const decoded = auth && Buffer.from(auth.split(" ")[1]!, "base64").toString();
     // private: only the "good" login; public/...: anyone
     const ok = url.includes("/public/") || decoded === "x-access-token:good";
@@ -108,4 +111,25 @@ test("a push waits for the OK, then goes once", async () => {
   const third = gitForCommand(s)!;
   await get(third.token, "me/private", "git-receive-pack");
   expect((await post(third.token, "me/private", push)).statusCode).toBe(403);
+});
+
+test("git signs commits as the person, at the address GitHub keeps for their account, looked up once", async () => {
+  logins = [{ label: "right", secret: "good" }];
+  const before = sent.length;
+  expect(await githubAddress(s)).toBe("7+asha@users.noreply.github.com");
+  expect(await githubAddress(s)).toBe("7+asha@users.noreply.github.com");
+  expect(sent.length).toBe(before + 1);
+  expect(gitAuthor(s, "7+asha@users.noreply.github.com")).toEqual({
+    GIT_AUTHOR_NAME: "Asha",
+    GIT_AUTHOR_EMAIL: "7+asha@users.noreply.github.com",
+    GIT_COMMITTER_NAME: "Asha",
+    GIT_COMMITTER_EMAIL: "7+asha@users.noreply.github.com",
+  });
+  // nothing connected, or GitHub not answering: the computer's own name, as before
+  logins = [];
+  expect(await githubAddress(s)).toBeNull();
+  logins = [{ label: "down", secret: "down" }];
+  expect(await githubAddress(s)).toBeNull();
+  expect(gitAuthor(s, null)).toEqual({});
+  logins = [{ label: "right", secret: "good" }];
 });

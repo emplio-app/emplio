@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.86 (2026-11-19)
+
+### What's new
+
+- Commits Emplio makes in your GitHub repositories now carry your name and your GitHub account, so Vercel and similar services deploy them instead of blocking them for an unknown author.
+
+### For developers
+
+- Commands on Emplio's computer get `GIT_AUTHOR_*`/`GIT_COMMITTER_*` set to the person's name and the noreply address GitHub keeps for their connected account (`<id>+<login>@users.noreply.github.com`, from `GET /user`, cached per login: `githubAddress` and `gitAuthor` in `git-proxy.ts`), instead of the box's `bot@emplio.local`, which no GitHub account has and which Vercel refused with `COMMIT_AUTHOR_REQUIRED`. With no GitHub account connected (or GitHub not answering) it stays `bot@emplio.local`. Saves to company, restricted and me also accept that address from the person's own git (`Pusher.github` in `refused`); it names nobody on the team, so like `BOX_EMAIL` it runs no automation as anyone (#210).
+
 ## 1.2.85 (2026-11-19)
 
 ### What's new
