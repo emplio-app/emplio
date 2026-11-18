@@ -161,7 +161,8 @@ export function KnowledgePage() {
                   ))}
                 </dl>
               )}
-              <MessageResponse>{note!.body}</MessageResponse>
+              {/* a tool, script or list: shown as the code it is */}
+              <MessageResponse>{open.path.endsWith(".md") ? note!.body : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
             </article>
           )}
         </main>
