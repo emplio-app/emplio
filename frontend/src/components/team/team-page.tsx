@@ -81,6 +81,12 @@ export function TeamPage() {
   const FEW = 6;
   const limit = (n: number) => (view === "all" ? Math.min(n, FEW) : n);
 
+  // who made an agent: "you", or a team member's name (none for someone who has left)
+  const makerOf = (id: string) => {
+    const m = team.data?.find((x) => x.id === id);
+    return id === me?.user.id ? "you" : m && label(m);
+  };
+
   const myRole = me?.workspaces[0]?.role;
   const canManage = myRole === "owner" || myRole === "admin";
 
@@ -260,10 +266,10 @@ export function TeamPage() {
               <div>
                 <h2 className="font-sans text-base font-medium tracking-normal">Emplio&apos;s agents</h2>
                 <p className="text-sm text-muted-foreground">
-                  Specialists Emplio hands work to. It sets them up and keeps them up to date; to change one, tell Emplio in the chat.
+                  Specialists Emplio hands work to. It sets them up and keeps them up to date; to change one, tell Emplio in the chat. A team agent can be changed by whoever made it or an owner or admin.
                 </p>
               </div>
-              <Agents list={agents.isPending ? undefined : agentsShown} searching={!!q} limit={limit(agentsShown.length)} />
+              <Agents list={agents.isPending ? undefined : agentsShown} searching={!!q} limit={limit(agentsShown.length)} makerOf={makerOf} />
               {agentsShown.length > limit(agentsShown.length) && (
                 <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => setView("agents")}>
                   Show all {agentsShown.length} agents
@@ -322,7 +328,7 @@ export function TeamPage() {
 
 // Emplio's agents: read-only rows, opened for what each does, its skills and what it has learned. Emplio
 // makes, improves and retires them as it works; changing one is a word in chat.
-function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; searching: boolean; limit: number }) {
+function Agents({ list, searching, limit, makerOf }: { list: AgentInfo[] | undefined; searching: boolean; limit: number; makerOf: (id: string) => string | undefined }) {
   const [shown, setShown] = useState<string | null>(null);
   if (!list)
     return (
@@ -351,6 +357,7 @@ function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; sea
     <ul className="divide-y rounded-xl border bg-card">
       {list.slice(0, limit).map((a) => {
         const open = shown === a.slug;
+        const maker = a.createdBy && makerOf(a.createdBy);
         return (
           <li key={a.slug}>
             <button
@@ -366,6 +373,7 @@ function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; sea
                 <span className="block truncate text-sm font-medium">
                   {a.name}
                   {a.bucket !== "company" && <span className="ml-2 text-xs font-normal text-muted-foreground">{a.bucket === "me" ? "Only you" : "Admins only"}</span>}
+                  {maker && maker !== "you" && <span className="ml-2 text-xs font-normal text-muted-foreground">Created by {maker}</span>}
                 </span>
                 <span className={cn("block text-xs text-muted-foreground", !open && "truncate")}>{a.description}</span>
               </span>
@@ -378,6 +386,12 @@ function Agents({ list, searching, limit }: { list: AgentInfo[] | undefined; sea
             </button>
             {open && (
               <div className="grid gap-3 px-4 pb-4 pl-16 text-xs text-muted-foreground">
+                {a.bucket === "company" && (
+                  <span>
+                    {maker ? `Created by ${maker}. ` : ""}
+                    {maker === "you" ? "You or an owner or admin can change it." : maker ? `${maker} or an owner or admin can change it.` : "An owner or admin can change it."}
+                  </span>
+                )}
                 {!!a.skills.length && (
                   <div className="grid gap-1.5">
                     <span className="font-medium text-foreground">Skills it uses</span>

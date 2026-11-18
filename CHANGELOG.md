@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.79 (2026-11-19)
+
+### What's new
+
+- The Team page shows who created each agent, and who can change it.
+- A team agent can now be changed, archived or removed only by the person who created it or an owner or admin. Agents made before this update can be changed by owners and admins.
+
+### For developers
+
+- `emplio agents add` writes `created_by: <user id>` in AGENT.md; `update`, `archive`, `restore` and `remove` on a company agent need its maker or an owner or admin (`agentsCommand`), and one without `created_by` needs an owner or admin. Lessons stay open to everyone. `GET /agents` returns `createdBy`, and the Team page names the maker (#158).
+
 ## 1.2.78 (2026-11-19)
 
 ### What's new

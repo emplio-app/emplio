@@ -96,3 +96,20 @@ test("a member adding an agent named like an admins-only one hears only that the
   const member = { workspaceId: "w", userId: "u1", admin: false, job: false, author };
   expect((await agentsCommand(member, ["add", "Payroll", "--description", "x"])).text).toBe("error: the name Payroll is taken; pick another");
 });
+
+test("a team agent keeps its maker, and only they or an owner or admin change it", async () => {
+  const files = fake({ company: { "agents/old/AGENT.md": md("Old") } });
+  const maker = { workspaceId: "w", userId: "u1", admin: false, job: false, author };
+  const other = { ...maker, userId: "u2" };
+  await agentsCommand(maker, ["add", "Web Helper", "--description", "web"]);
+  expect(files.company!["agents/web-helper/AGENT.md"]).toContain("created_by: u1");
+  expect((await findAgent("w", "web-helper"))?.createdBy).toBe("u1");
+  for (const sub of ["update", "archive", "remove"]) expect((await agentsCommand(other, [sub, "web-helper", "--level", "strong"])).text).toContain("only whoever made Web Helper");
+  expect((await agentsCommand(other, ["learn", "web-helper", "the login moved"])).text).toContain("noted");
+  expect((await agentsCommand(maker, ["update", "web-helper", "--level", "strong"])).text).toContain("updated");
+  expect(files.company!["agents/web-helper/AGENT.md"]).toContain("created_by: u1");
+  expect((await agentsCommand({ ...other, admin: true }, ["archive", "web-helper"])).text).toContain("archived");
+  // made before makers were kept: owners and admins only
+  expect((await agentsCommand(maker, ["archive", "old"])).text).toContain("made before Emplio kept track");
+  expect((await agentsCommand({ ...maker, admin: true }, ["archive", "old"])).text).toContain("archived");
+});
