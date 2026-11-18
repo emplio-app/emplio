@@ -2,6 +2,21 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.66 (2026-11-18)
+
+### What's new
+
+- Emplio's computer comes back exactly as it was after sleeping, with anything it left running still running.
+- A web page Emplio shows you from its computer keeps working: opening the link later wakes the computer up.
+- Emplio's computer now sleeps 5 minutes after it was last used, background work included.
+
+### For developers
+
+- The runner can run computers on gVisor directly (`COMPUTER_ENGINE=runsc`, `runner/gvisor.ts`): sleep saves the computer's memory to disk and waking restores it; a helper inside each computer (`docker/computer-helper.js`) runs commands and moves files.
+- Preview links go through a proxy that asks the runner where each host goes (`/preview-target`); `PREVIEW_DOMAIN` sets the domain.
+- Computers sleep after `IDLE_MS` (5 minutes) for background work too; `SERVE_MS` is gone.
+- The computer image builds from the repo root (`docker/computer.Dockerfile`).
+
 ## 1.2.65 (2026-11-18)
 
 ### What's new
