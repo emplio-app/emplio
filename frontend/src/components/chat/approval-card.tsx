@@ -6,6 +6,7 @@ import { CheckIcon, ChevronRightIcon, PaperclipIcon, XIcon } from "lucide-react"
 import { createContext, useContext, useState } from "react";
 import { ReplyContext } from "@/components/chat/ask-card";
 import { AppLogo } from "@/components/chat/connect-card";
+import { useConfirm } from "@/components/confirm";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
@@ -110,6 +111,8 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
     onMutate: (decision) => haptic(decision === "deny" ? "tap" : "success"),
     onSettled: () => queryClient.invalidateQueries({ queryKey: approvalsQueryKey }),
   });
+  // "Always allow" turns this card off for good, so a misclick could let an email or payment go out unchecked (#209)
+  const [confirmDialog, confirm] = useConfirm();
   return (
     <Card size="sm" className="gap-3 px-3 shadow-lg animate-in fade-in duration-200">
       <div className="flex shrink-0 items-center gap-3">
@@ -133,7 +136,19 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
             Allow
           </Button>
           {!approval.oneOff && (
-            <Button size="sm" variant="outline" onClick={() => answer.mutate("always")}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                confirm({
+                  title: "Always allow this?",
+                  description: `${titleOf(approval)} in ${approval.appName} will run without asking you from now on. You can undo this in Settings, under Always allowed.`,
+                  action: "Confirm",
+                  safe: true,
+                  onConfirm: () => answer.mutate("always"),
+                })
+              }
+            >
               Always allow
             </Button>
           )}
@@ -143,6 +158,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
           {answer.error && <span className="w-full text-xs text-destructive">{answer.error.message}</span>}
         </div>
       )}
+      {confirmDialog}
     </Card>
   );
 }
