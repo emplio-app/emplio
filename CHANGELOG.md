@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.65 (2026-11-18)
+
+### What's new
+
+- Someone made an admin after they started using Emplio no longer hits a "computer fault" on every command; their computer gets the admins-only files the next time it's used.
+
+### For developers
+
+- `catchUp` clones a repo that isn't on the box yet (e.g. `restricted` after a member is made admin) instead of failing with `fatal: cannot change to 'restricted'` and dropping the box.
+
 ## 1.2.64 (2026-11-18)
 
 ### What's new
