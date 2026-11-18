@@ -11,7 +11,7 @@ import { syncSkills } from "./skills";
 import { deviceFor, localBox, type Conn } from "./devices";
 import { browserKindFor, isDeviceBrowser } from "./device-browser";
 import { BrowserGone, browserFor, browserLocal, browserOpen, browserSize, connectionFor, forget, socketUrl, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
-import { gitAfter, gitForCommand } from "./git-proxy";
+import { gitAfter, gitAuthor, gitForCommand, githubAddress } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
 import { http, loginsCommand } from "./logins";
@@ -1793,7 +1793,7 @@ async function saveRepos(box: Box, s: Session, summary: string) {
       if (attempt && !(await catchUp(box, s, r))) break;
       const file = `${BUNDLES}/${r.dir}-out.bundle`;
       await exec(box, `git -C ${r.dir} bundle create -q ${file} refs/remotes/origin/main..main`);
-      pushed = await pushBundle(s.workspaceId, r.repo, await download(box, file), { email: s.user.email, only: r.dir === "company" && !isAdmin(s) ? MEMBER_WRITABLE : undefined });
+      pushed = await pushBundle(s.workspaceId, r.repo, await download(box, file), { email: s.user.email, github: await githubAddress(s), only: r.dir === "company" && !isAdmin(s) ? MEMBER_WRITABLE : undefined });
       if (pushed) await exec(box, `git -C ${r.dir} update-ref refs/remotes/origin/main main && rm ${file}`);
     }
     if (!pushed) failed.push(r.dir);
@@ -2477,6 +2477,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     // plain git reaches GitHub through this server, which holds the login (git-proxy.ts)
     const git = gitForCommand(s);
     if (git) env = { ...env, ...git.env };
+    // its commits name the person as GitHub knows them, not the computer's BOX_EMAIL, so a repo's deploys accept them
+    env = { ...env, ...gitAuthor(s, await githubAddress(s)) };
 
     if (background) {
       // code mode: its emplio calls are answered live for an hour (nothing collects them after)

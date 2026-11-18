@@ -118,6 +118,15 @@ test("a person's own saves go in, whatever the capitals; so does the box's own n
     expect(await refused(dir, base, { email: "staff@example.com" })).toBeNull();
   }));
 
+test("commits the person's own git signed with their GitHub address go in; another GitHub address doesn't", () =>
+  repo(async (git, dir, base) => {
+    const me = { email: "staff@example.com", github: "7+staff@users.noreply.github.com" };
+    await commit(git, dir, "a.md", "7+Staff@users.noreply.github.com");
+    expect(await refused(dir, base, me)).toBeNull();
+    await commit(git, dir, "b.md", "8+owner@users.noreply.github.com");
+    expect(await refused(dir, base, me)).toContain("8+owner@users.noreply.github.com");
+  }));
+
 test("staff can only change what's theirs in company files", () =>
   repo(async (git, dir, base) => {
     const staff = { email: "staff@example.com", only: /^inbox\// };
