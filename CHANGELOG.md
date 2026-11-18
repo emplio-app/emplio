@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.68 (2026-11-18)
+
+### What's new
+
+- Emplio can now make pictures: social posts, banners, product shots. Just ask in the chat, and send your logo or a photo to have it worked in. Pick which image model it uses in Settings, under Agent, Advanced. ![](frontend/public/whats-new/1.2.68-images.webp)
+
+### For developers
+
+- `emplio image <description> [--from <image>]... [--ratio <w:h>] [--out <file>]` (`emplio.image(..., from_=...)` in Python) calls OpenRouter with the `imageModel` setting (default `google/gemini-nano-banana-2.1`), saves to `/work/out/`, and views and shows the picture by itself. Cost is charged as AI usage.
+- New setting type `imageModel`: any OpenRouter model that outputs images, from `GET /models?kind=image`, picked by maker like the other models.
+
 ## 1.2.67 (2026-11-18)
 
 ### What's new

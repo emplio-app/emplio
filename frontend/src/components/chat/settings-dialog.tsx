@@ -83,7 +83,7 @@ const shown = (f: Field, v: Value, models: ModelOption[] = []) =>
       ? `${Number(v).toLocaleString()} ${f.unit}`
       : f.type === "key"
         ? v ? "Your key" : "Ours"
-      : f.type === "model"
+      : f.type === "model" || f.type === "imageModel"
         ? v === "auto" ? "Auto" : (models.find((m) => m.id === v)?.name ?? String(v))
         : (optionsOf(f, v).find((o) => o.value === v)?.label ?? String(v));
 
@@ -142,6 +142,12 @@ export function SettingsDialog({
   const models = useQuery({
     queryKey: ["models"],
     queryFn: () => api<ModelOption[]>("/models"),
+    enabled: open,
+    staleTime: 60 * 60 * 1000,
+  });
+  const imageModels = useQuery({
+    queryKey: ["models", "image"],
+    queryFn: () => api<ModelOption[]>("/models?kind=image"),
     enabled: open,
     staleTime: 60 * 60 * 1000,
   });
@@ -273,7 +279,7 @@ export function SettingsDialog({
                               value={f.key === "modelSet" && picked.length ? CUSTOM : (draft[f.key] ?? data.values[f.key])}
                               fallback={data.defaults[f.key]}
                               disabled={!data.canEdit}
-                              models={models.data}
+                              models={f.type === "imageModel" ? imageModels.data : models.data}
                               auto={autoModel(f, draft.modelSet ?? data.values.modelSet)}
                               note={
                                 f.key === "modelSet" && (
@@ -481,13 +487,14 @@ function SettingRow({
             disabled={disabled}
             onCheckedChange={onChange}
           />
-        ) : f.type === "model" ? (
+        ) : f.type === "model" || f.type === "imageModel" ? (
           // remounted when the value changes, so the maker follows "Use default"
           <ModelPicker
             key={String(value)}
             id={id}
             value={String(value)}
             auto={auto}
+            image={f.type === "imageModel"}
             models={models}
             disabled={disabled}
             onChange={onChange}
@@ -556,6 +563,7 @@ function ModelPicker({
   id,
   value,
   auto,
+  image = false,
   models,
   disabled,
   onChange,
@@ -564,6 +572,8 @@ function ModelPicker({
   value: string;
   // what Auto runs now
   auto?: string;
+  // the image model: no Auto, and only makers that have picture models
+  image?: boolean;
   models?: ModelOption[];
   disabled: boolean;
   onChange: (value: string) => void;
@@ -579,11 +589,14 @@ function ModelPicker({
     if (id && id !== value) onChange(id);
   };
   const list = models?.filter((m) => m.provider === provider) ?? [];
+  const items = image
+    ? PROVIDER_ITEMS.filter((p) => p.value === "custom" || models?.some((m) => m.provider === p.value))
+    : PROVIDER_ITEMS;
   const label = PROVIDER_ITEMS.find((p) => p.value === provider)?.label ?? provider;
   return (
     <div className="grid w-full gap-2">
       <Select
-        items={PROVIDER_ITEMS}
+        items={items}
         value={provider}
         disabled={disabled}
         onValueChange={(v) => {
@@ -596,7 +609,7 @@ function ModelPicker({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {PROVIDER_ITEMS.map((p) => (
+          {items.map((p) => (
             <SelectItem key={p.value} value={p.value}>
               {p.label}
             </SelectItem>
@@ -613,7 +626,7 @@ function ModelPicker({
             id={id}
             value={typed}
             disabled={disabled}
-            placeholder="e.g. deepseek/deepseek-chat-v3.1"
+            placeholder={image ? "e.g. google/gemini-3-pro-image" : "e.g. deepseek/deepseek-chat-v3.1"}
             autoComplete="off"
             spellCheck={false}
             onChange={(e) => setTyped(e.target.value)}
@@ -625,7 +638,7 @@ function ModelPicker({
             <a href="https://openrouter.ai/models" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">
               OpenRouter
             </a>{" "}
-            that can use tools, by its exact name.
+            {image ? "that makes pictures" : "that can use tools"}, by its exact name.
           </p>
         </div>
       ) : (

@@ -8,7 +8,7 @@ import { context } from "./auth";
 import { db } from "./db";
 import { record } from "./activity";
 import { users, workspaces } from "./db/schema";
-import { customModelProblem, listModels } from "./models";
+import { customImageModelProblem, customModelProblem, listImageModels, listModels } from "./models";
 import { decrypt, encrypt } from "./secrets";
 
 // the env vars these used to be still move the defaults, for every business
@@ -31,6 +31,7 @@ const check = (key: string, value: unknown): string | null => {
   if (f.type === "key") return typeof value === "string" && value.length <= 500 && !value.startsWith(KEY_MASK) ? null : `${f.label}: paste the whole key.`;
   // only the shape here: whether OpenRouter still offers it is checked on save (a model it drops later
   // fails that reply with OpenRouter's own error rather than silently switching brains)
+  if (f.type === "imageModel") return typeof value === "string" && /^[\w.-]+\/[\w.:-]+$/.test(value) ? null : `${f.label}: not a model.`;
   if (f.type === "model") return value === "auto" || (typeof value === "string" && /^[\w.-]+\/[\w.:-]+$/.test(value)) ? null : `${f.label}: not a model.`;
   // the env default may be a model not offered on the list
   return f.options.some((o) => o.value === value) || value === DEFAULTS[f.key] ? null : `${f.label}: not one of the choices.`;
@@ -91,6 +92,11 @@ export async function changeSettings(who: { workspaceId: string; userId: string 
       const problem = offered.has(id) ? null : await customModelProblem(id);
       if (problem) errors.push(`${f.label}: ${problem}`);
     }
+  }
+  for (const f of SETTING_FIELDS.filter((f) => f.type === "imageModel" && typeof body[f.key] === "string" && !errors.length)) {
+    const id = body[f.key] as string;
+    const problem = (await listImageModels()).some((m) => m.id === id) ? null : await customImageModelProblem(id);
+    if (problem) errors.push(`${f.label}: ${problem}`);
   }
   for (const k of KEYS)
     if (typeof body[k] === "string" && body[k] && !errors.length && !(await keyWorks((body[k] as string).trim())))
@@ -179,7 +185,7 @@ export async function settingsCommand(who: Who, args: string[], allow: Allow) {
     const s = forPeople(await savedSettings(who.workspaceId));
     const lock = s.openrouterKey ? null : await cloud.models.lock(who.workspaceId);
     const lines = SETTING_FIELDS.map((f) => {
-      const can = f.type === "choice" ? f.options.map((o) => (o.value === o.label.toLowerCase() ? o.value : `${o.value} (${o.label})`)).join(" | ") : f.type === "number" ? `${f.min}–${f.max} ${f.unit}` : f.type === "toggle" ? "on | off" : f.type === "model" ? "auto | <provider/model>" : "set in Settings only";
+      const can = f.type === "choice" ? f.options.map((o) => (o.value === o.label.toLowerCase() ? o.value : `${o.value} (${o.label})`)).join(" | ") : f.type === "number" ? `${f.min}–${f.max} ${f.unit}` : f.type === "toggle" ? "on | off" : f.type === "model" ? "auto | <provider/model>" : f.type === "imageModel" ? "<provider/model> that makes pictures" : "set in Settings only";
       return `${f.key}: ${shownValue(f.key, s[f.key as keyof Settings])}   ${f.label}. ${f.help} (${can})`;
     });
     return [

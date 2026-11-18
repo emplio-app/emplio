@@ -234,6 +234,8 @@ export type SettingField = {
   | { type: "toggle"; default: boolean }
   // any model from GET /models (picked by maker, then searched by name), or "auto": the one MODEL_SETS has for it
   | { type: "model"; default: string }
+  // any OpenRouter model that makes pictures, from GET /models?kind=image (no "auto")
+  | { type: "imageModel"; default: string }
   // a secret: stored encrypted, sent back only as KEY_MASK + its last 4 characters
   | { type: "key"; default: string; placeholder: string }
 );
@@ -281,6 +283,15 @@ export const SETTING_FIELDS = [
     help: "Runs the work Emplio hands off in a chat.",
     type: "model",
     default: "auto",
+  },
+  {
+    key: "imageModel",
+    section: "work",
+    advanced: true,
+    label: "Image model",
+    help: "Makes and edits pictures when asked.",
+    type: "imageModel",
+    default: "google/gemini-nano-banana-2.1",
   },
   {
     key: "openrouterKey",
@@ -468,7 +479,8 @@ export const MODEL_PROVIDERS = [
   { key: "meta-llama", label: "Meta (Llama)" },
 ] as const;
 
-// GET /models: models that read text, images and files, write text and can use tools. Prices per million tokens.
+// GET /models: models that read text, images and files, write text and can use tools; ?kind=image: models that make
+// pictures. Prices per million tokens.
 export type ModelOption = {
   id: string;
   name: string;

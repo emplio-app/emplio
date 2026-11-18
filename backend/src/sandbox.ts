@@ -29,6 +29,7 @@ import { EMPLIO, jobsCommand, type Caller } from "./jobs";
 import { reportProblem } from "./activity";
 import { planCommand } from "./plan";
 import { webCommand } from "./exa";
+import { imageCommand } from "./image";
 import { channelsCommand } from "./channels";
 import { tasksCommand } from "./tasks";
 import { previewSkill, skillsCommand } from "./skill-store";
@@ -587,6 +588,7 @@ usage() {
   echo "       emplio agents                                  your saved specialists: emplio agents help"
   echo "       emplio report <one line>                       tell Emplio's makers about a fault in Emplio itself; details on stdin"
   echo "       emplio web                                     search the web and read pages: emplio web help"
+  echo "       emplio image <description> [--from <img>]      make or edit a picture, saved in /work/out/: emplio image help"
 }
 case "$1" in
   media)
@@ -903,6 +905,14 @@ PY
   web)
     shift
     req WEB "$@" ;;
+  image)
+    # file paths as full ones: the server reads and writes them on this computer
+    shift; a=()
+    while [ $# -gt 0 ]; do
+      case "$1" in --out|--from) a+=("$1"); shift; case "$1" in /*|"["*) a+=("$1") ;; *) a+=("$PWD/$1") ;; esac ;; *) a+=("$1") ;; esac
+      shift
+    done
+    req IMAGE "\${a[@]}" ;;
   plan)
     # a new list comes on stdin, one step per line
     shift
@@ -1244,6 +1254,8 @@ Database: the business's SQLite database, \`emplio db\` (\`emplio db help\`). St
 Tasks: something to do or check later goes in \`emplio tasks add "<what>" --due <date> --to <email|ai|me>\` (\`emplio tasks help\`).
 
 Web: \`emplio web search <words>\`, \`emplio web read <url>\` (clean text), \`emplio web answer <question>\` (\`emplio web help\`). Use these, or curl, before the browser.
+
+Pictures: \`emplio image "<full description>" [--from <image>] [--ratio 1:1|16:9|9:16|4:5...]\` makes one with the business's image model and saves it in /work/out/, and you see it and it's shown in the chat by itself; \`--from\` edits a logo or photo (\`emplio image help\`). Use it for any picture asked for (posts, banners, product shots), never code drawing (Pillow, SVG); a real logo or photo to include goes in \`--from\` (\`from_=\` in Python). Not right: make it again with a better description.
 
 Browser: \`emplio browser\` drives ${browserKindFor(s.user.id, cloud.browser.BROWSER_KIND)} that stays open between commands. First use in a chat: read \`emplio browser skill\`.
 \`\`\`
@@ -2152,6 +2164,19 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
           s.data,
         ));
     }
+    else if (line.startsWith(`IMAGE:${key}\t`)) {
+      const args = Buffer.from(line.slice(`IMAGE:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
+      lines.push(await imageCommand(s.settings, args, {
+        read: (path) => download(box, path),
+        write: (path, bytes) => upload(box, path, bytes).then(() => {}),
+        spend: (usd, model) => cloud.credit.chargeQuietly({ workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId }, "ai", usd, `image · ${model}`, { ownKey: !!s.settings.openrouterKey }),
+        // looked at by Emplio and put in the chat, as emplio view + emplio files show would (a job's goes back to Emplio, not the person)
+        saved: (path) => {
+          views.push(path);
+          if (!job) showOut.push(path);
+        },
+      }, WORK));
+    }
     else if (line.startsWith(`PLAN:${key}\t`) && job)
       lines.push("error: the checklist is Emplio's, for the person; jobs don't use emplio plan. Just do your task and report.");
     else if (line.startsWith(`PLAN:${key}\t`)) {
@@ -2163,7 +2188,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.
