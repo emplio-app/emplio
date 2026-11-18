@@ -134,6 +134,34 @@ const BOX_VERSION = "2";
 // (emplio.browser.open(...)). ez: the old name, still in skills businesses saved before the rename
 export const usesBrowser = (command: string) => /\b(emplio|ez)["']?[\s,.]+["']?browser\b/.test(command);
 
+// Why this chat can't have its browser now, if it can't
+function browserRefused(s: Session) {
+  // background rounds never drive a browser: slow and costly, and nobody is there for a sign-in or code
+  if (s.background) return `error: background rounds don't use the browser. Add a task for it instead: \`emplio tasks add "<what to check on the site>" --to ai --due <when>\`.`;
+  // the person is showing Emplio something in this browser: hands off until it reaches Emplio
+  if (isShowing(s.conversationId)) return `${s.user.name} is using this browser to show you how to do something. Don't use the browser until what they did reaches you; say so in a line and end your reply.`;
+  return null;
+}
+
+// This chat's browser, started on first use, and what a command needs to drive it. text: the command's words, for
+// the connection a site needs (connectionFor)
+async function attachBrowser(s: Session, text: string) {
+  const owner = { workspaceId: s.workspaceId, userId: s.user.id };
+  let live = await browserFor(s.conversationId, owner);
+  // the person closed the Chrome their computer started: a fresh one
+  if (isDeviceBrowser(live.id) && !(await socketUrl(live.cdpUrl).then(() => true, (e) => (e instanceof BrowserGone ? false : Promise.reject(e))))) {
+    await forget(s.conversationId, live);
+    live = await browserFor(s.conversationId, owner);
+  }
+  await connectionFor(live, owner, text).catch((error) => console.error("browser connection not chosen:", error));
+  // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one. A computer's browser ids all
+  // start dev_<computer>, so its name comes from the browser's own key: chats on one computer must not share a session.
+  // the agent's tool drops the path of an http address, so a browser on someone's computer (its address has one) gets the socket's own
+  const cdp = isDeviceBrowser(live.id) ? await socketUrl(live.cdpUrl) : live.cdpUrl;
+  const env: Record<string, string> = { BROWSER_CDP_URL: cdp, BROWSER_SESSION: `chat-${isDeviceBrowser(live.id) ? `dev-${live.id.split("_")[2]}` : live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
+  return { id: live.id, env };
+}
+
 // Code mode (the default; CODE_MODE=0 turns it off): the AI writes Python, run in a session that stays open per chat like a notebook
 // (python/kernel.py), with Emplio's commands as a Python library (python/py/emplio) that gets answers straight back
 // (liveRoutes). Off: the bash tool, as before.
@@ -167,6 +195,8 @@ type Bag = {
   plan?: PlanStep[];
   viewed: unknown[];
   skill: string[];
+  // the chat's browser, when code got it mid-command (BROWSER below)
+  browserId?: string;
 };
 type Live = { s: Session; box: Box; key: string; job: boolean; bag: Bag };
 const lives = new Map<string, Live>();
@@ -191,6 +221,17 @@ export async function liveRoutes(app: FastifyInstance) {
     if (!l) return reply.code(404).send("");
     const tag = req.params.tag;
     if (!/^[A-Z]+$/.test(tag) || tag === "WORK") return reply.code(202).send("");
+    // `emplio browser` in a command whose code never said so (a saved tool, a function from an earlier step):
+    // this chat's browser, started now, as KEY=value lines the command keeps for the rest of this run
+    if (tag === "BROWSER") {
+      const no = browserRefused(l.s);
+      if (no) return reply.type("text/plain").send(no.startsWith("error:") ? no : `error: ${no}`);
+      const [words = ""] = Buffer.from(String(req.body ?? "").trim(), "base64").toString().split("\0");
+      const got = await attachBrowser(l.s, words).catch((error) => (console.error("browser not started:", error), null));
+      if (!got) return reply.type("text/plain").send("error: emplio browser: the browser didn't start. Try again in a moment.");
+      l.bag.browserId = got.id;
+      return reply.type("text/plain").send(Object.entries(got.env).map(([k, v]) => `${k}=${v}`).join("\n"));
+    }
     try {
       const r = await runEz(
         l.box,
@@ -629,6 +670,17 @@ case "$1" in
     # agent-browser, pointed at this chat's browser: the server starts it and sets BROWSER_CDP_URL
     # for any command that mentions emplio browser
     shift
+    # code mode: code that doesn't say so where it runs (a saved tool, a function from an earlier step) asks the server
+    # for the browser at its first browser command; kept in a file for the rest of this run (requestsTrailer removes it)
+    got="/tmp/emplio-browser.$EZ_KEY"
+    if [ -z "$BROWSER_CDP_URL" ] && [ -n "$EMPLIO_LIVE" ] && [ -n "$EZ_KEY" ]; then
+      if [ ! -s "$got" ]; then
+        a="$(req BROWSER "$*")" || { printf '%s\\n' "$a" >&2; exit 1; }
+        rm -f "/tmp/emplio-req.$EZ_KEY.BROWSER."*
+        (umask 077; printf '%s\\n' "$a" | grep '^BROWSER_' > "$got")
+      fi
+      while IFS= read -r l; do case "$l" in BROWSER_*=*) export "\${l%%=*}=\${l#*=}" ;; esac; done < "$got"
+    fi
     [ -n "$BROWSER_CDP_URL" ] || { echo "emplio browser: no browser attached; say emplio browser in the command itself. A script file: emplio browser run <script> [args]" >&2; exit 1; }
     [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting. Run this in your next command." >&2; exit 1; }
     [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser skill" >&2; exit 2; }
@@ -1855,7 +1907,7 @@ async function park(box: Box, name: string, text: string, ext = "json") {
 // keeping its exit code.
 export const requestsTrailer = (key: string) =>
   `\n__ez=$?; for f in $(ls -tr /tmp/emplio-req.${key}.* 2>/dev/null); do printf 'EZREQ:${key}\\t%s\\t%s\\n' "$f" "$(cat "$f")"; rm -f "$f"; done; ` +
-  `[ -z "$BROWSER_CDP_URL" ] || emplio browser calls --new 2>/dev/null; ` +
+  `{ [ -n "$BROWSER_CDP_URL" ] || [ -s /tmp/emplio-browser.${key} ]; } && emplio browser calls --new 2>/dev/null; rm -f /tmp/emplio-browser.${key}; ` +
   `if [ -s /tmp/emplio-failed.${key} ]; then printf '\\n[Browser steps that failed in this command, whatever the output above shows; check before carrying on:\\n'; cat /tmp/emplio-failed.${key}; printf ']\\n'; fi; rm -f /tmp/emplio-failed.${key}; exit $__ez`;
 
 // Puts each request's contents back in place of its marker. A marker a pipe dropped or cut short
@@ -2407,34 +2459,19 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     for (const f of takeShown(s.conversationId)) await upload(box, `${WORK}/tmp/${f.name}`, f.text);
     step("attachments");
 
-    // background rounds never drive a browser: slow and costly, and nobody is there for a sign-in or code
-    if (s.background && usesBrowser(command))
-      return { box, switched, browserId: undefined, result: { exitCode: 1, output: `error: background rounds don't use the browser. Add a task for it instead: \`emplio tasks add "<what to check on the site>" --to ai --due <when>\`.` } as BoxResult };
-
-    // the person is showing Emplio something in this browser: hands off until it reaches Emplio
-    if (usesBrowser(command) && isShowing(s.conversationId))
-      return { box, switched, browserId: undefined, result: { exitCode: 1, output: `${s.user.name} is using this browser to show you how to do something. Don't use the browser until what they did reaches you; say so in a line and end your reply.` } as BoxResult };
+    const refused = usesBrowser(command) && browserRefused(s);
+    if (refused) return { box, switched, browserId: undefined, result: { exitCode: 1, output: refused } as BoxResult };
 
     // a command that drives the browser gets this chat's browser, started on first use
     let env: Record<string, string> = { TZ: await timezoneOf(s.user.id), EMPLIO_WORK: WORK };
     let browserId: string | undefined;
     // code mode: a function an earlier step wrote that drives the browser doesn't say so when it's called, so while
     // this chat's browser is up every step gets it
+    // a function that isn't up and doesn't say so gets it when it first uses it instead (BROWSER in liveRoutes)
     if (usesBrowser(command) || (codeMode() && browserOpen(s.conversationId))) {
-      const owner = { workspaceId: s.workspaceId, userId: s.user.id };
-      let live = await browserFor(s.conversationId, owner);
-      // the person closed the Chrome their computer started: a fresh one
-      if (isDeviceBrowser(live.id) && !(await socketUrl(live.cdpUrl).then(() => true, (e) => (e instanceof BrowserGone ? false : Promise.reject(e))))) {
-        await forget(s.conversationId, live);
-        live = await browserFor(s.conversationId, owner);
-      }
-      await connectionFor(live, owner, command).catch((error) => console.error("browser connection not chosen:", error));
-      browserId = live.id;
-      // the tool's background process is per session: a new browser (after an idle stop) gets a fresh one. A computer's browser ids all
-      // start dev_<computer>, so its name comes from the browser's own key: chats on one computer must not share a session.
-      // the agent's tool drops the path of an http address, so a browser on someone's computer (its address has one) gets the socket's own
-      const cdp = isDeviceBrowser(live.id) ? await socketUrl(live.cdpUrl) : live.cdpUrl;
-      env = { ...env, BROWSER_CDP_URL: cdp, BROWSER_SESSION: `chat-${isDeviceBrowser(live.id) ? `dev-${live.id.split("_")[2]}` : live.id.slice(0, 8)}`, BROWSER_POINTER: POINTER_PATH, ...(live.paid && { BROWSER_PAID: "1" }) };
+      const got = await attachBrowser(s, command);
+      browserId = got.id;
+      env = { ...env, ...got.env };
     }
     used.add(boxKey(s));
     // plain git reaches GitHub through this server, which holds the login (git-proxy.ts)
@@ -2469,7 +2506,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   if (ready - asked > 5_000)
     console.warn(`slow command start in chat ${s.conversationId}: ${Math.round((inLine - asked) / 1000)}s waiting its turn (${commandsOn(boxKey(s))} running), ${Math.round((ready - inLine) / 1000)}s getting the computer ready (${ran?.box.id ?? "none"}${steps.length ? `: ${steps.join(", ")}` : ""})`);
   if (!ran) return { stopped: true };
-  const { box, browserId } = ran;
+  const { box } = ran;
+  let browserId = ran.browserId;
   let result = ran.result;
   const key = crypto.randomUUID();
   if (!result) {
@@ -2477,6 +2515,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     const done = await exec(box, `${command}${requestsTrailer(key)}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
     if (done.exitCode === 124 || done.exitCode === 125) console.warn(`command in chat ${s.conversationId} ended ${done.exitCode} on ${box.id} after ${Math.round((Date.now() - ready) / 1000)}s`);
     const bag = liveDone(answering?.token);
+    browserId ??= bag?.browserId;
     // Too much at once (two npm installs on 1 GB, say) can freeze a computer: then nothing answers, not even `true`.
     // Swapped now, not on the next reply, so this reply's next command gets a fresh one instead of failing too.
     if (done.exitCode === 124 && !signal?.aborted && (await exec(box, "true", undefined, ANSWER_S)).exitCode === 124) {

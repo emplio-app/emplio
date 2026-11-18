@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.82 (2026-11-19)
+
+### What's new
+
+- A saved tool that uses the browser now works the first time a chat calls it, without the browser having to be opened first.
+
+### For developers
+
+- `emplio browser` with no `BROWSER_CDP_URL` in code mode asks the server for the chat's browser over the live channel (`BROWSER` in `liveRoutes`) at its first browser command, and keeps it in `/tmp/emplio-browser.$EZ_KEY` for the rest of that run; the browser is then shown and its downloads copied after the command as usual. Attaching and the background/showing refusals are shared by the step start and the live request (`attachBrowser`, `browserRefused`) (#242).
+
 ## 1.2.81 (2026-11-19)
 
 ### What's new
