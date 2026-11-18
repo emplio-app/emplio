@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.75 (2026-11-18)
+
+### What's new
+
+- When Emplio tries a command that doesn't exist, it now hears so straight away and finds the right one sooner.
+
+### For developers
+
+- An unknown `emplio <command>` (or a guessed `emplio.<area>(...)` in Python) now fails with `error: emplio <command>: no such command` before the command list, and the list starts `usage: emplio <command> ..., one of:` so its first line no longer reads as `emplio view`'s usage (#222).
+
 ## 1.2.74 (2026-11-18)
 
 ### What's new

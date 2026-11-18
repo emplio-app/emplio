@@ -553,7 +553,8 @@ words() {
   done
 }
 usage() {
-  echo "usage: emplio view <file>...                          look at images (png, jpg, gif, webp) or PDFs yourself"
+  echo "usage: emplio <command> ..., one of:"
+  echo "       emplio view <file>...                          look at images (png, jpg, gif, webp) or PDFs yourself"
   echo "       emplio text <file>                             the words in a PDF, Word, Excel or PowerPoint file, as plain text"
   echo "       emplio media get <file.media>...                the real file a .media note points to, in /work/tmp/media/ from the next command"
   echo "       emplio browser <command>                       drive this chat's web browser: open, snapshot -i, click, fill... (emplio browser skill: how)"
@@ -949,7 +950,9 @@ PY
     shift
     case "$1" in add|update) words "$@"; { [ "$1 $n" = "add 2" ] || [ "$last" = - ]; } && set -- "$@" "$(cat)" ;; esac
     req AGENTS "$@" ;;
-  *) usage; [ "$1" = --help ] || [ "$1" = help ] ;;
+  ""|help|--help) usage; [ -n "$1" ] ;;
+  # a guessed command (emplio skill, emplio.skill(...) in Python): say so first, not a list that reads as view's usage
+  *) { echo "error: emplio $1: no such command"; usage; } >&2; exit 2 ;;
 esac
 `;
 const VIEW_TYPES: Record<string, string> = {

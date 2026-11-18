@@ -375,6 +375,10 @@ test("emplio hand and report read what's on stdin, and old emplio jobs points to
   const old = await run(`./emplio jobs start x <<'EOF'\nbrief\nEOF`);
   expect(old.args).toEqual([]);
   expect(old.err).toContain("emplio hand");
+  // a guessed command says it doesn't exist before the list, not a list that reads as emplio view's usage
+  const guessed = await run(`./emplio skill github-issues`);
+  expect(guessed.code).toBe(2);
+  expect(guessed.err).toStartWith("error: emplio skill: no such command\nusage: emplio <command>");
 });
 
 test("a browser size Emplio set is put back before each later command, for that browser only", async () => {
