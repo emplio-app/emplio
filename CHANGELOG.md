@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.76 (2026-11-18)
+
+### What's new
+
+- Voice input works in the iPhone app once you update it: the app now has permission to use the microphone.
+- When voice input can't start, the message now says why: the page needs its https address, or the app or browser can't record voice.
+
+### For developers
+
+- The iPhone app's web view hides `navigator.mediaDevices` when the app has no microphone or camera usage text, which is what showed "Voice needs a secure (https) page" there. The text landed in #205, but no iPhone build has shipped since build 3 (2026-11-09); the build number is now 4, so archive and upload it to fix #156.
+- `voice-input.tsx` checks `window.isSecureContext` before blaming https when `getUserMedia` is missing.
+
 ## 1.2.75 (2026-11-18)
 
 ### What's new
