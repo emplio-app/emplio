@@ -111,7 +111,7 @@ def _parse(text):
     t = text.strip()
     if not t:
         return ""
-    if t[0] in "[{" or t in ("null", "true", "false") or re.fullmatch(r"-?\d+(\.\d+)?", t):
+    if t[0] in '[{"' or t in ("null", "true", "false") or re.fullmatch(r"-?\d+(\.\d+)?", t):
         try:
             return json.loads(t)
         except ValueError:

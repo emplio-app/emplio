@@ -509,6 +509,8 @@ with contextlib.redirect_stdout(out):
     T.Tools().show("mail.mark_read")
 check("show: the tool in full without its code", out.getvalue().splitlines()[0], "tools.mail.mark_read(thread_id) -> bool  [changes things, company/toolset/mail.py]")
 
+check("a string answer comes back unquoted (#243)", repr([emplio._parse(x) for x in ('""', '"abc"', '"a" b')]), "['', 'abc', '\"a\" b']")
+
 print(f"\n{'all passed' if not FAILED else f'{len(FAILED)} failed'}")
 for f in FAILED:
     print("  ", f)

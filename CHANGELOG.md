@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.84 (2026-11-19)
+
+### What's new
+
+- A saved tool that reads text from a web page now gets that text exactly, so an empty answer counts as empty (a sign-in with no error is no longer taken as refused).
+
+### For developers
+
+- `_parse` in `backend/src/python/py/emplio/__init__.py` also decodes a JSON string answer (`"..."`), so `emplio.browser.eval("''")` returns `''` not `'""'`. Checked in `test_toolset.py` (#243).
+
 ## 1.2.83 (2026-11-19)
 
 ### What's new
