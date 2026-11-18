@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.77 (2026-11-19)
+
+### What's new
+
+- When you send a working agent another message, its line above the message box now stays until it has really finished.
+
+### For developers
+
+- A job's reply that was steered by new work (`carryOn`) no longer marks the job done or ends its live entry when the reply that took over has already begun: `began` tags the live entry with its run, and an older run's end leaves the job to the newer one (#225).
+
 ## 1.2.76 (2026-11-18)
 
 ### What's new
