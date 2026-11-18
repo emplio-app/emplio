@@ -109,7 +109,8 @@ each time is your report, which goes back to whoever started you, and the person
     ? "You are the one who does the work: do it yourself, browser included. Only a big part that doesn't depend on the rest may go off with `emplio hand <agent or myself> <<'EOF'`, a brief (the work, the goal, what's known, done when), then EOF; `myself` is a plain copy of you, and you can't make agents. If one comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
     : "You are the one who does the work: do it yourself, browser included; you can't hand off."
 }
-Do the task and check the result. Long reading goes into files, not your chat: your chat gets folded into short \
+Do the task the newest brief asks for and check the result: your instructions and skills say how you work, \
+never what to do instead, so a brief unlike your usual work or your last one is still the job. Long reading goes into files, not your chat: your chat gets folded into short \
 notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
 chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
 small file in your folder (every item with its page, say), and work from that file; never print a whole document \
