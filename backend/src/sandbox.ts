@@ -1417,19 +1417,20 @@ async function findOrCreate(s: Session, fromLocal = false): Promise<Box> {
   }
   const listed = await cloud.computer.findBoxes({ employee0User: s.user.id, employee0Workspace: s.workspaceId });
   const found = listed.find((b) => b.labels.employee0Env === BOX_ENV);
-  if (found) {
-    const box = await cloud.computer.wakeBox(found.id, IDLE_MS);
+  // one that can't wake is swapped for a fresh one, like a frozen one below (the runner removes it when it can't start)
+  const woken = found && (await cloud.computer.wakeBox(found.id, IDLE_MS).catch((error) => void console.warn(`box ${found.id} wouldn't wake; starting a fresh one`, error)));
+  if (found && woken) {
     // A box can freeze (seen after a restart cut a command off): "running", but not even `true` answers, and
     // sleeping and waking it doesn't help. It's swapped for a fresh one; what wasn't saved in it is lost, but a
     // frozen box can't give that back anyway.
-    if ((await exec(box, "true", undefined, ANSWER_S)).exitCode === 124) console.warn(`box ${found.id} froze; starting a fresh one`);
+    if ((await exec(woken, "true", undefined, ANSWER_S)).exitCode === 124) console.warn(`box ${found.id} froze; starting a fresh one`);
     // a box from an older template is swapped for a new one, but only once nothing in it is waiting to be saved
-    else if (found.labels.employee0Box === BOX_VERSION || !(await nothingUnsaved(box, s))) {
+    else if (found.labels.employee0Box === BOX_VERSION || !(await nothingUnsaved(woken, s))) {
       // other chats may have pushed while this one slept
-      if (found.asleep || fromLocal) for (const r of reposFor(s)) await catchUp(box, s, r);
-      return box;
+      if (found.asleep || fromLocal) for (const r of reposFor(s)) await catchUp(woken, s, r);
+      return woken;
     }
-    await box.kill().catch(() => {});
+    await woken.kill().catch(() => {});
   }
   const box = await cloud.computer.createBox({ employee0User: s.user.id, employee0Workspace: s.workspaceId, employee0Box: BOX_VERSION, ...(BOX_ENV && { employee0Env: BOX_ENV }) }, IDLE_MS);
   try {

@@ -51,7 +51,8 @@ const app = Fastify({ logger: true, trustProxy: process.env.TRUST_PROXY ?? "loop
 const MINUTE = 60_000;
 app.addHook("onRequest", async (req, reply) => {
   const path = req.url.split("?")[0]!;
-  if (path.startsWith("/webhooks/") || /^(::1|127\.|::ffff:127\.)/.test(req.ip)) return;
+  // and not for computers' own calls (/live, /git), which carry their own keys: all of a server's computers share its one address
+  if (path.startsWith("/webhooks/") || path.startsWith("/live/") || path.startsWith("/git/") || /^(::1|127\.|::ffff:127\.)/.test(req.ip)) return;
   const upload = req.method === "POST" && (path === "/uploads" || path === "/imports" || path === "/transcribe");
   if (tooMany(`ip:${req.ip}`, 1000, MINUTE) || (upload && tooMany(`upload:${req.ip}`, 30, MINUTE)))
     return reply.code(429).send({ error: "Too many requests. Wait a minute and try again." });

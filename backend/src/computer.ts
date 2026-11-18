@@ -38,7 +38,14 @@ const fileAt = (id: string, path: string) => `/computers/${id}/file?${new URLSea
 const boxOf = (id: string): Box => ({
   id,
   async run(command, { cwd, env, timeoutMs, signal }) {
-    return (await post(`/computers/${id}/run`, { command, cwd, env, timeoutMs }, signal).then((r) => r.json())) as { exitCode: number; result: string };
+    // a hung computer (or Docker) never answers: given up on a little after the command's own limit, as a timeout
+    const late = AbortSignal.timeout(timeoutMs + 30_000);
+    try {
+      return (await post(`/computers/${id}/run`, { command, cwd, env, timeoutMs }, signal ? AbortSignal.any([signal, late]) : late).then((r) => r.json())) as { exitCode: number; result: string };
+    } catch (error) {
+      if (late.aborted && !signal?.aborted) return { exitCode: 124, result: `The computer didn't answer within ${Math.round(timeoutMs / 1000) + 30}s` };
+      throw error;
+    }
   },
   write: (path, bytes) => runner(fileAt(id, path), { method: "PUT", body: typeof bytes === "string" ? new TextEncoder().encode(bytes) : new Uint8Array(bytes) }),
   read: async (path) => new Uint8Array(await (await runner(fileAt(id, path))).arrayBuffer()),
@@ -63,6 +70,6 @@ export async function createBox(labels: Record<string, string>, idleMs: number) 
   return boxOf(id);
 }
 
-// ponytail: no public preview links; add a proxy on this server if people need to open what the agent starts
+// ponytail: no public preview links here; the cloud's own computer servers have them (cloud/backend/own-computers.ts)
 export const previewNote = (name: string) =>
   `Previews: a server you start can only be reached from this computer, not by ${name}. Check it with \`curl -sI localhost:<port>\`, and to show ${name} the result send files or screenshots instead of a link. Servers stop when this computer goes to sleep, about 15 minutes after the last command.`;

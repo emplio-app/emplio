@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
 const log = join(dir, "log");
+// what `ps` in the computer shows; empty is a computer with nothing running
+const busyFile = join(dir, "busy");
 const ID = "abc123abc123";
 writeFileSync(
   join(dir, "docker"),
@@ -20,7 +22,7 @@ case "$1" in
     kind=computer; [ "$2" = other123other ] && kind=other
     echo '[{"Id":"'$2'","State":{"Running":'"$( [ -f ${dir}/stopped ] && echo false || echo true )"'},"Config":{"Labels":{"emplio.kind":"'$kind'","emplio.employee0User":"u"}},"NetworkSettings":{"Networks":{"n":{"IPAddress":"10.88.0.2"}}}}]' ;;
   exec)
-    case "$*" in *resolv.conf*) exit 0 ;; esac
+    case "$*" in *resolv.conf*) exit 0 ;; *"ps -eo args="*) cat "${'$'}{BUSY:-/dev/null}" 2>/dev/null; exit 0 ;; esac
     shift
     while [ "$1" != ${ID} ]; do case "$1" in -w|-u) shift 2 ;; -e|-i) [ "$1" = -e ] && shift; shift ;; esac; done
     shift
@@ -35,7 +37,7 @@ chmodSync(join(dir, "timeout"), 0o755);
 
 const TOKEN = "t".repeat(40);
 const PORT = 41873;
-const server = Bun.spawn(["bun", join(import.meta.dir, "runner.ts")], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNNER_TOKEN: TOKEN, PORT: String(PORT) }, stdout: "ignore", stderr: "ignore" });
+const server = Bun.spawn(["bun", join(import.meta.dir, "runner.ts")], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNNER_TOKEN: TOKEN, PORT: String(PORT), BUSY: busyFile }, stdout: "ignore", stderr: "ignore" });
 const call = (path: string, init: RequestInit = {}, token = TOKEN) => fetch(`http://127.0.0.1:${PORT}${path}`, { ...init, headers: { authorization: `Bearer ${token}` } });
 for (let i = 0; i < 50 && !(await fetch(`http://127.0.0.1:${PORT}/health`).then((r) => r.ok, () => false)); i++) await Bun.sleep(100);
 const post = (path: string, body: unknown) => call(path, { method: "POST", body: JSON.stringify(body) });
@@ -104,6 +106,18 @@ test("goes to sleep after the time it was given", async () => {
   await post(`/computers/${ID}/keep`, { ms: 100 });
   await Bun.sleep(400);
   expect(asked()).toContain(`stop -t 3 ${ID}`);
+});
+
+test("stays awake while something still runs in it", async () => {
+  writeFileSync(busyFile, "sleep infinity\npython3 -m http.server 8000\n");
+  try {
+    writeFileSync(log, "");
+    await post(`/computers/${ID}/keep`, { ms: 100 });
+    await Bun.sleep(400);
+    expect(asked()).not.toContain(`stop -t 3 ${ID}`);
+  } finally {
+    writeFileSync(busyFile, "");
+  }
 });
 
 test("on a server that only holds computers: its runtime, name servers, no app to join, preview links", async () => {

@@ -40,16 +40,18 @@ function checkLabels(labels: unknown): Record<string, string> {
   return labels as Record<string, string>;
 }
 
-type Done = { code: number; out: Uint8Array; err: string };
-async function docker(args: string[], o: { stdin?: Uint8Array; env?: Record<string, string> } = {}): Promise<Done> {
+type Done = { code: number; out: Uint8Array; err: string; late?: boolean };
+async function docker(args: string[], o: { stdin?: Uint8Array; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<Done> {
   const p = Bun.spawn(["docker", ...args], {
+    ...(o.timeoutMs && { timeout: o.timeoutMs }),
     stdin: o.stdin ? new Blob([o.stdin]) : "ignore",
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, ...o.env },
   });
+  const started = Date.now();
   const [out, err, code] = await Promise.all([new Response(p.stdout).bytes(), new Response(p.stderr).text(), p.exited]);
-  return { code, out, err };
+  return { code, out, err, late: !!o.timeoutMs && Date.now() - started >= o.timeoutMs };
 }
 const text = (d: Done) => new TextDecoder().decode(d.out).trim();
 async function must(args: string[]) {
@@ -75,7 +77,9 @@ async function list(kind: string, labels: Record<string, string>) {
   return Promise.all(ids.map(inspect));
 }
 
-const SUBNETS = 250;
+// /28s in 10.88.0.0/16: room for 4096 people's networks (a computer and a few browsers each)
+const SUBNETS = 4096;
+const subnet = (i: number) => `10.88.${i >> 4}.${(i & 15) * 16}/28`;
 
 // A rule on the machine itself, since a container can't be trusted with its own: nothing in those networks reaches the
 // clouds' metadata addresses. It takes one short-lived container with the machine's network, running only this.
@@ -101,10 +105,10 @@ async function networkOf(person: string) {
   await blockMetadata();
   const name = `emplio-net-${createHash("sha256").update(person).digest("hex").slice(0, 16)}`;
   if ((await docker(["network", "inspect", name])).code) {
-    const start = parseInt(name.slice(-4), 16) % SUBNETS;
+    const start = parseInt(name.slice(-3), 16) % SUBNETS;
     let made = false, last = "";
     for (let i = 0; i < SUBNETS && !made; i++) {
-      const d = await docker(["network", "create", "--label", "emplio.kind=network", "--subnet", `10.88.${(start + i) % SUBNETS}.0/24`, name]);
+      const d = await docker(["network", "create", "--label", "emplio.kind=network", "--subnet", subnet((start + i) % SUBNETS), name]);
       made = !d.code || /already exists/.test(d.err);
       last = d.err;
     }
@@ -125,17 +129,49 @@ async function setDns(id: string) {
 const personOf = (labels: Record<string, string>) => `${labels.employee0Workspace ?? ""}:${labels.employee0User ?? ""}`;
 
 // Asleep after this long unless told again. Stopped rather than paused, so a sleeping computer frees its memory;
-// its files stay, what was running doesn't.
-// ponytail: in memory; a runner restart leaves computers awake until their next command
-const sleepers = new Map<string, Timer>();
-function sleepAfter(id: string, ms: number) {
-  clearTimeout(sleepers.get(id));
-  sleepers.set(id, setTimeout(() => void docker(["stop", "-t", "3", id]).finally(() => sleepers.delete(id)), ms));
+// its files stay, what was running doesn't. So while something still runs in it (a background job, a preview's
+// server) it stays awake, for up to BUSY_HOURS after Emplio last asked.
+const BUSY_HOURS = 3;
+const IDLE_MS = 5 * 60_000;
+const sleepers = new Map<string, { timer: Timer; asked: number }>();
+// what's always there: init, the container's own `sleep infinity`, this check, and the agent's Python session
+// (kernel.py), which ends itself when idle
+const RESTING = /^(\/sbin\/docker-init|\/dev\/init|sleep infinity|ps -eo args=|.*\/kernel\.py\b)/;
+const busy = async (id: string) => {
+  const d = await docker(["exec", id, "ps", "-eo", "args="]);
+  return !d.code && text(d).split("\n").some((line) => line.trim() && !RESTING.test(line.trim()));
+};
+function sleepAfter(id: string, ms: number, asked = Date.now()) {
+  clearTimeout(sleepers.get(id)?.timer);
+  const timer = setTimeout(async () => {
+    if (Date.now() - asked < BUSY_HOURS * 3_600_000 && (await busy(id))) return sleepAfter(id, IDLE_MS, asked);
+    if (sleepers.get(id)?.timer !== timer) return;
+    sleepers.delete(id);
+    await docker(["stop", "-t", "3", id]);
+  }, ms);
+  sleepers.set(id, { timer, asked });
 }
+// timers live in memory: after a restart, every computer still awake gets one again
+void docker(["ps", "-q", "--no-trunc", "--filter", "label=emplio.kind=computer"]).then((d) => text(d).split("\n").filter(Boolean).forEach((id) => sleepAfter(id, IDLE_MS)));
 const asMs = (ms: unknown) => {
   if (typeof ms !== "number" || !(ms > 0) || ms > 7 * 86_400_000) throw new Refused("bad ms");
   return ms;
 };
+
+// Always started, even when it looks awake: it may be on its way to sleep. One that won't start is removed, so
+// Emplio makes a fresh one (its work is saved elsewhere).
+async function wake(c: Inspected, ms: number) {
+  clearTimeout(sleepers.get(c.Id)?.timer);
+  await networkOf(personOf(labelsOf(c)));
+  const d = await docker(["start", c.Id]);
+  if (d.code) {
+    sleepers.delete(c.Id);
+    await docker(["rm", "-f", c.Id]);
+    throw new Error(`the computer wouldn't start, so it was removed: ${d.err.trim()}`);
+  }
+  await setDns(c.Id);
+  sleepAfter(c.Id, ms);
+}
 
 const labelsOf = (c: Inspected) => Object.fromEntries(Object.entries(c.Config.Labels ?? {}).filter(([k]) => k.startsWith("emplio.")).map(([k, v]) => [k.slice("emplio.".length), v]));
 
@@ -151,11 +187,13 @@ async function runIn(id: string, body: { command?: unknown; cwd?: unknown; env?:
   const args = ["exec", ...(typeof body.cwd === "string" ? ["-w", body.cwd] : []), ...Object.keys(env).flatMap((k) => ["-e", k]), id];
   // $$ stays timeout's own pid after exec: it leads the command's process group, and passes a TERM on to all of it
   const script = `echo $$ > /tmp/.run-${run}; exec timeout -k 5 ${seconds} bash -c "$0"`;
-  const d = await docker([...args, "bash", "-c", script, body.command], { env }).finally(() => signal.removeEventListener("abort", kill));
+  // and from outside too, in case the computer itself hangs
+  const d = await docker([...args, "bash", "-c", script, body.command], { env, timeoutMs: (seconds + 20) * 1000 }).finally(() => signal.removeEventListener("abort", kill));
+  if (d.late) return Response.json({ exitCode: 124, result: `The computer didn't answer within ${seconds}s` });
   void docker(["exec", id, "rm", "-f", `/tmp/.run-${run}`]);
   const out = new TextDecoder().decode(d.out.slice(0, MAX_OUTPUT)) + d.err;
   // gVisor stops the whole computer when it goes over its memory, while Docker still calls it running: start it again
-  if (d.code === 128 && /WaitPID"? failed|in state stopped/.test(out)) {
+  if (d.code === 128 && /WaitPID"? failed|in state stopped/.test(d.err)) {
     await must(["restart", "-t", "1", id]);
     await setDns(id);
     return Response.json({ exitCode: 137, result: `The computer ran out of memory (${MEMORY}) and restarted: files are kept, programs that were running stopped. Use less memory at once (smaller batches, streaming instead of loading whole files).` });
@@ -190,19 +228,13 @@ async function route(req: Request, url: URL): Promise<Response> {
     }
     const c = await ours(id!, "computer");
     if (!what && req.method === "DELETE") {
-      clearTimeout(sleepers.get(c.Id));
+      clearTimeout(sleepers.get(c.Id)?.timer);
       sleepers.delete(c.Id);
       await must(["rm", "-f", c.Id]);
       return Response.json({ ok: true });
     }
     if (what === "wake" && req.method === "POST") {
-      const ms = asMs((await json()).ms);
-      if (!c.State.Running) {
-        await networkOf(personOf(labelsOf(c)));
-        await must(["start", c.Id]);
-        await setDns(c.Id);
-      }
-      sleepAfter(c.Id, ms);
+      await wake(c, asMs((await json()).ms));
       return Response.json({ ok: true });
     }
     if (what === "keep" && req.method === "POST") {
@@ -274,30 +306,29 @@ const allowed = (given: string) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-// A preview link's request, sent on to the computer it names. No token: the link itself is the key.
+// Preview links: Caddy, in front, asks here which computer and port a link's address means (forward_auth), and
+// passes the request on itself (websockets, compression and all). No token: the link itself is the key. A sleeping
+// computer is woken, but what served the page stopped when it slept.
 const PREVIEW_HOST = /^(\d{1,5})-([a-f0-9]{12})\.(.+)$/;
 async function previewOf(host: string | null) {
   const m = PREVIEW_DOMAIN ? PREVIEW_HOST.exec((host ?? "").split(":")[0]!.toLowerCase()) : null;
   if (!m || m[3] !== PREVIEW_DOMAIN || Number(m[1]) > 65535) return null;
   const c = await ours(m[2]!, "computer").catch(() => null);
-  const ip = c?.State.Running && Object.values(c.NetworkSettings.Networks)[0]?.IPAddress;
-  return ip ? `http://${ip}:${m[1]}` : null;
+  return c && { c, port: m[1]! };
 }
-async function preview(req: Request, url: URL, to: string) {
-  const headers = new Headers(req.headers);
-  headers.delete("authorization");
-  try {
-    const r = await fetch(to + url.pathname + url.search, {
-      method: req.method,
-      headers,
-      body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
-      redirect: "manual",
-      signal: req.signal,
-    });
-    return new Response(r.body, { status: r.status, headers: r.headers });
-  } catch {
-    return new Response("Nothing is answering on that port of the computer.", { status: 502 });
+const ASLEEP = `<!doctype html><meta name="viewport" content="width=device-width"><title>Asleep</title>
+<body style="font:16px system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem">
+<h1 style="font-size:1.25rem">This preview was asleep</h1>
+<p>Its computer just woke up, but what showed this page stopped while it slept. Ask Emplio to start it again, then reload.</p>`;
+async function previewTarget(host: string | null) {
+  const p = await previewOf(host);
+  if (!p) return new Response("Not found", { status: 404 });
+  if (!p.c.State.Running) {
+    await wake(p.c, 15 * 60_000);
+    return new Response(ASLEEP, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "retry-after": "30" } });
   }
+  const ip = Object.values(p.c.NetworkSettings.Networks)[0]?.IPAddress;
+  return new Response(null, { status: 204, headers: { "x-preview-to": `${ip}:${p.port}` } });
 }
 
 // Computers asleep this many days are deleted, to free their disk; Emplio makes a fresh one if that person comes back
@@ -310,8 +341,9 @@ async function forgetOld() {
     const finished = Date.parse(text(await docker(["inspect", "-f", "{{.State.FinishedAt}}", id])));
     if (finished && finished < cutoff) await docker(["rm", id]);
   }
-  // the networks of people with no computer left
-  await docker(["network", "prune", "-f", "--filter", "label=emplio.kind=network"]);
+  // and the network of anyone left with nothing on it (a sleeping computer still needs its own)
+  const nets = text(await docker(["network", "ls", "-q", "--filter", "label=emplio.kind=network"])).split("\n").filter(Boolean);
+  for (const net of nets) if (!text(await docker(["ps", "-aq", "--filter", `network=${net}`]))) await docker(["network", "rm", net]);
 }
 if (FORGET_DAYS > 0) {
   setInterval(() => void forgetOld().catch((error) => console.error("forgetting old computers failed", error)), 3_600_000);
@@ -328,15 +360,14 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
-    const to = await previewOf(req.headers.get("host"));
-    if (to) return preview(req, url, to);
-    // the HTTPS proxy asks before it gets a certificate for a preview name
-    // (and for runner.<domain>, this program's own address behind it, which sits under the same wildcard)
+    // Caddy asks these two: where a preview link goes, and whether to get a certificate for a name (also for
+    // runner.<domain>, this program's own address, which sits under the same wildcard)
+    if (url.pathname === "/preview-target") return previewTarget(req.headers.get("x-forwarded-host"));
     if (url.pathname === "/preview-ok") {
       const domain = url.searchParams.get("domain");
       return domain === `runner.${PREVIEW_DOMAIN}` || (await previewOf(domain)) ? new Response("ok") : new Response("no", { status: 404 });
     }
-    const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? url.searchParams.get("token") ?? "";
+    const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
     if (!allowed(given)) return new Response("Unauthorized", { status: 401 });
     try {
       return await route(req, url);
