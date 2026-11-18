@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.83 (2026-11-19)
+
+### What's new
+
+- Select text in a file open beside the chat, such as a PDF, a Markdown file or a spreadsheet, and press Reply to answer just that part. On a phone you're taken back to the chat to write your answer.
+- PDFs now open in Emplio's own viewer on every screen, so their words can be selected and copied.
+
+### For developers
+
+- `QuoteButton` also takes selections inside `[data-quotable]` (the `FilePanel` preview) and tells `onQuote` whether the text came from a file. `PdfFrame` always draws pages with pdf.js, now with its `TextLayer` over each page (styled by `.pdf-words` in `globals.css`), instead of the browser's PDF viewer on desktop, whose text can't be read by the page (#200).
 ## 1.2.82 (2026-11-19)
 
 ### What's new

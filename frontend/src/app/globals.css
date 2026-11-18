@@ -635,3 +635,33 @@ html[data-desktop]:not([data-desktop="darwin"]) [data-slot="sidebar-inset"] head
 /* coloured code in a step's details (tool-calls.tsx Coloured): shiki writes both themes' colours, this picks one */
 .shiki-tokens span { color: var(--shiki-light); }
 .dark .shiki-tokens span { color: var(--shiki-dark); }
+
+/* a PDF page's words, unseen over its picture so they can be selected (file-viewer.tsx PdfPage): the parts of pdf.js's
+   own text layer styles that this needs, its variables filled in per page and per word by pdf.js */
+.pdf-words {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size-inv: calc(1 / var(--min-font-size, 1));
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size, 1));
+}
+.pdf-words :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-words > :not(.markedContent),
+.pdf-words .markedContent span:not(.markedContent) {
+  font-size: calc(var(--text-scale-factor) * var(--font-height, 0px));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1)) scale(var(--min-font-size-inv));
+}
+.pdf-words .markedContent { display: contents; }
+.pdf-words ::selection { background: color-mix(in oklab, var(--color-primary, #2563eb) 30%, transparent); }
+.pdf-words br::selection { background: transparent; }

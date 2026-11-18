@@ -1361,11 +1361,13 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 >
                   <QuoteButton
                     area={scrollRef}
-                    onQuote={(text) => {
+                    onQuote={(text, file) => {
                       const next = addQuote(quotes, text);
                       // the second quote: what was typed answered the first, so it moves into the first's own box
                       // drawn now, not on the next frame: a phone only brings up its keyboard for a field focused during the tap
                       flushSync(() => {
+                        // a file covers the chat on a phone: back to the chat, to write the answer
+                        if (file && !matchMedia("(min-width: 1024px)").matches) setOpenFile(null);
                         if (quotes.length === 1 && next.length === 2 && input.trim()) {
                           next[0] = { ...next[0]!, note: input };
                           setInput("");
