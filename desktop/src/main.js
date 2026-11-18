@@ -17,13 +17,19 @@ import { Updater } from "./update.js";
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 const DEFAULT_URL = "https://emplio.app";
 
-if (!app.requestSingleInstanceLock()) app.quit();
+const first = app.requestSingleInstanceLock();
+if (!first) app.quit();
 
 // The agent's browser is inside this window (pane.js) and reached over the app's own DevTools port, on this computer only.
-// The port is picked by the system and written to a file in the app's folder.
-app.commandLine.appendSwitch("remote-debugging-port", "0");
+// The port is picked by the system and written to a file in the app's folder. Only by the copy that stays: a second
+// copy opened while this one runs would write its own port there on its way out, and the agent's browser would then
+// never be found (Emplio falls back to the separate Chrome every time).
+if (first) app.commandLine.appendSwitch("remote-debugging-port", "0");
 // the DevTools port would make navigator.webdriver true, which some sites take for a robot
 app.commandLine.appendSwitch("disable-blink-features", "AutomationControlled");
+// looks like Chrome to the sites: no "Electron" or "Emplio" in it. App-wide, not just the browser's session: the agent's
+// browser tool copies the DevTools port's own (this) into every page, and GoDaddy then calls the browser unusual.
+app.userAgentFallback = app.userAgentFallback.replace(/\s?(Electron|Emplio)\/\S+/g, "");
 let quitting = false;
 // Cmd+Q puts the app in the background (no window, no Dock icon, still in the menu bar and still connected) unless this is set
 let fullQuit = false;

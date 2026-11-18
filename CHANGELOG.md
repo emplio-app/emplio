@@ -2,6 +2,21 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.70 (2026-11-18)
+
+### What's new
+
+- Signing in on the Mac app's browser works on more sites: App Store Connect no longer spins forever after you press Sign in, and Emplio can fill your saved login on pages where the sign-in box sits in a frame of the same company's site, like Apple's.
+- When a site still refuses the Mac app's browser (GoDaddy can), Emplio stops after two tries and asks you to press Take control, then Sign in with Chrome, instead of retrying.
+- Needs Mac app 0.2.5, which installs itself.
+
+### For developers
+
+- desktop 0.2.5: `cdp-filter.js` passes `Target.attachedToTarget` for children of a session the client holds; hidden, auto-attach (`waitForDebuggerOnStart`) left workers paused for good (Apple's SRP worker).
+- desktop: `app.userAgentFallback` drops `Electron/` and `Emplio/` app-wide (agent-browser copies `/json/version`'s UA into pages); only the instance holding the single-instance lock opens the DevTools port, so a second launch no longer overwrites `DevToolsActivePort`.
+- `logins.fill` also fills same-site frames (isolated worlds for in-process frames, auto-attached sessions for out-of-process ones) and, on a device browser, tells the agent when to hand over to Sign in with Chrome.
+- `restoreState` never puts back robot-check cookies (`_abck`, `bm_*`, `ak_bmsc`, `akm_*`, `__cf_bm`, `cf_clearance`, `datadome`, `_px*`).
+
 ## 1.2.69 (2026-11-18)
 
 ### What's new

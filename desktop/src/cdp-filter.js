@@ -66,9 +66,12 @@ export function createFilter({ allowed, createTarget, closeTarget, activate, emu
         return JSON.stringify({ ...m, result: { ...m.result, targetInfos: m.result.targetInfos.filter(mine) } });
       }
       switch (m.method) {
+        case "Target.attachedToTarget":
+          // inside a session the client already holds (a worker or frame of one of its pages): always its own. Hidden, a
+          // worker that waits for the client to say go (auto-attach) would wait forever: Apple's sign-in spins for good.
+          return m.sessionId || mine(m.params?.targetInfo) ? text : null;
         case "Target.targetCreated":
         case "Target.targetInfoChanged":
-        case "Target.attachedToTarget":
           return mine(m.params?.targetInfo) ? text : null;
         case "Target.targetDestroyed":
         case "Target.targetCrashed":
