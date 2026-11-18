@@ -529,6 +529,13 @@ def save(fn, area, risk=None, bucket=None, replace=False):
     return f"Saved tool {area}.{name} ({RISKS[risk]}) in {bucket}/toolset/{area}.py" + (f", {'; '.join(note)}" if note else "") + f". Use it: from tools.{area} import {name}"
 
 
+class _Said(str):
+    """What save printed: still the text to check, but printing it again shows nothing, so it isn't there twice."""
+
+    def __str__(self):
+        return ""
+
+
 class Tools:
     """The tools kept so far: one file per area in the toolset folders. `from tools.gmail import send`, or
     emplio.tools.gmail.send(...). emplio.tools.list() shows them all, emplio.tools.search("words") finds some,
@@ -542,10 +549,10 @@ class Tools:
         import importlib
         return importlib.import_module(f"tools.{area}")
 
-    def save(self, fn, area, risk="reads", bucket=None, replace=False):
+    def save(self, fn, area, risk=None, bucket=None, replace=False):
         msg = save(fn, area, risk, bucket, replace)
         print(msg)
-        return msg
+        return _Said(msg)
 
     def list(self, area=None):
         """Every tool, with what it takes, what it's for and what calling it does."""

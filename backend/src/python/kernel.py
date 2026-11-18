@@ -6,7 +6,7 @@
 # Standard library only: it runs on the cloud computer, a Mac and Windows alike.
 import ast, builtins, json, linecache, os, re, signal, socket, subprocess, sys, threading, time, traceback, _thread
 
-VERSION = "2"  # 2: sessions remember what they define, for emplio.tools.save
+VERSION = "3"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("EMPLIO_WORK") or "/work"
 SESSIONS = os.path.join(W, "tmp", ".emplio", "sessions")
@@ -63,11 +63,12 @@ def fresh_namespace():
     return {"__name__": "__main__", "__builtins__": builtins, "emplio": emplio, "sh": sh, "help": help, "json": json, "os": os, "re": re, "sys": sys, "Path": Path}
 
 
-# saved functions: the toolset/ files, checked when a run changes them
+# saved functions: the toolset/ files, checked when a run changes them; an old-style skills/<name>/functions.py or
+# lib/<name>.py is caught too, since nothing loads those any more
 def saved_files():
     found = {}
     for top in ("company", "me", "restricted"):
-        for pattern_dir, name in ((os.path.join(W, top, "toolset"), None),):
+        for pattern_dir, name in ((os.path.join(W, top, "toolset"), None), (os.path.join(W, top, "skills"), "functions.py"), (os.path.join(W, top, "lib"), None)):
             if not os.path.isdir(pattern_dir):
                 continue
             for entry in os.listdir(pattern_dir):
@@ -82,6 +83,10 @@ def saved_files():
 
 def check_saved(path):
     rel = "/work" + path[len(W):] if path.startswith(W) else path
+    if "/toolset/" not in path.replace("\\", "/"):
+        return (f"{rel}: skills hold no code any more and nothing loads this file. Keep each function a job would call "
+                f"again as a tool, emplio.tools.save(fn, area=\"<area>\", risk=\"reads|changes|spends\"), name the tools in "
+                f"the skill's SKILL.md (from tools.<area> import <name>), then delete this file.")
     # on a person's own computer /work is a folder in their home: a saved file says /work, never that folder, so it
     # works on the cloud computer too (emplio._load swaps it back here)
     if W != "/work":
@@ -98,7 +103,7 @@ def check_saved(path):
         return f"{rel} has a mistake on line {e.lineno}: {e.msg}. It can't be used until it's fixed."
     bare = [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("_") and not ast.get_docstring(n)]
     try:
-        done = subprocess.run([sys.executable, "-c", "import runpy,sys; sys.path.insert(0, sys.argv[2]); runpy.run_path(sys.argv[1])", path, os.path.join(HERE, "py")], capture_output=True, text=True, timeout=60)
+        done = subprocess.run([sys.executable, "-c", "import runpy,sys; sys.path.insert(0, sys.argv[2]); import emplio; runpy.run_path(sys.argv[1])", path, os.path.join(HERE, "py")], capture_output=True, text=True, timeout=60)
         if done.returncode:
             last = (done.stderr or done.stdout).strip().splitlines()[-1:] or ["(no message)"]
             return f"{rel} doesn't load: {last[0]}. Fix it before you finish."

@@ -112,8 +112,9 @@ async function migrate(w: typeof workspaces.$inferSelect) {
       taken.add(area);
       moves.push({ repo: r, path: p.path, kind: p.path.startsWith("lib/") ? "lib" : "skill", name: m[1]!, area });
     }
+  const junk = repos.flatMap((r) => trees.get(r)!.filter((p) => /^(skills\/[^/]+|lib)\/__pycache__\//.test(p.path)).map((p) => ({ repo: r, path: p.path })));
   const lessonsFix = repos.flatMap((r) => trees.get(r)!.filter((p) => /^agents\/[^/]+\/LESSONS\.md$/.test(p.path)).map((p) => ({ repo: r, path: p.path })));
-  if (!moves.length && !lessonsFix.length) return;
+  if (!moves.length && !lessonsFix.length && !junk.length) return;
 
   for (const r of repos) {
     const mine = moves.filter((m) => m.repo === r);
@@ -142,14 +143,19 @@ async function migrate(w: typeof workspaces.$inferSelect) {
       if (!TEXT.test(p.path) || gone.includes(p.path) || p.path.startsWith("toolset/")) continue;
       if (!moves.length) break;
       const own = /^skills\/([^/]+)\/SKILL\.md$/.exec(p.path)?.[1];
-      const moved = own ? mine.find((m) => m.kind === "skill" && m.name === own && gone.includes(m.path)) : undefined;
+      // its functions moved now, or on an earlier run (the tools file is there)
+      const moved = own
+        ? (mine.find((m) => m.kind === "skill" && m.name === own && gone.includes(m.path)) ??
+          (trees.get(r)!.some((x) => x.path === `toolset/${areaOf(own)}.py`) ? { area: areaOf(own) } : undefined))
+        : undefined;
       const text = await readFile(w.id, r, p.path);
-      if (!text || (!moved && !/emplio\.(skill|lib)\(|functions\.py|lib\//.test(text))) continue;
+      if (!text || !/emplio\.(skill|lib)\(|functions\.py|lib\//.test(text)) continue;
       let next = pointed(text, area);
       if (moved) {
         // the skill's own page: its "functions.py" is that area's tools now, and it says how to use them
-        const names = toolsIn(moved.area, files.find((f) => f.path === `toolset/${moved.area}.py`)?.content ?? "").map((x) => x.name.split(".")[1]);
-        next = next.replace(/\bfunctions\.py\b/g, `tools.${moved.area}`);
+        const src = files.find((f) => f.path === `toolset/${moved.area}.py`)?.content ?? (await readFile(w.id, r, `toolset/${moved.area}.py`)) ?? "";
+        const names = [...new Set(toolsIn(moved.area, src).map((x) => x.name.split(".")[1]))];
+        next = next.replace(/\bfunctions\.py\b/g, `tools.${moved.area}`).replace(/emplio\.skill\(\.\.\.\)/g, `from tools.${moved.area} import ...`);
         if (names.length && !next.includes(`from tools.${moved.area} import`))
           next = `${next.trimEnd()}\n\nIts tools: \`from tools.${moved.area} import ${names.join(", ")}\`.\n`;
       }
@@ -171,12 +177,17 @@ async function migrate(w: typeof workspaces.$inferSelect) {
     }
     for (const l of lessonsFix.filter((l) => l.repo === r)) {
       const text = (await readFile(w.id, r, l.path)) ?? "";
-      const next = text.replace(/^- (\d{4}-\d{2}-\d{2}): \d{4}-\d{2}-\d{2}:\s*/gm, "- $1: ");
-      if (next !== text) files.push({ path: l.path, content: next }), console.log(`  ${r}/${l.path}: dates written twice fixed`);
+      // a lesson about the old way (a skill's functions.py, emplio.skill) no longer applies
+      const next = text
+        .replace(/^- (\d{4}-\d{2}-\d{2}): \d{4}-\d{2}-\d{2}:\s*/gm, "- $1: ")
+        .replace(/^-.*(functions\.py|emplio\.(skill|lib)\().*\n?/gm, "");
+      if (next !== text) files.push({ path: l.path, content: next }), console.log(`  ${r}/${l.path}: tidied`);
     }
-    if (!APPLY || !files.length) continue;
-    await writeFiles(w.id, r, files, "Saved functions moved into tools (toolset/)", AUTHOR);
+    for (const j of junk.filter((j) => j.repo === r)) console.log(`  ${r}/${j.path}: cache file removed`);
+    if (!APPLY || (!files.length && !junk.some((j) => j.repo === r))) continue;
+    if (files.length) await writeFiles(w.id, r, files, "Saved functions moved into tools (toolset/)", AUTHOR);
     for (const path of gone) await writeFile(w.id, r, path, null, `Moved ${path} into tools`, AUTHOR);
+    for (const j of junk.filter((j) => j.repo === r)) await writeFile(w.id, r, j.path, null, "Removed Python's cache file", AUTHOR);
   }
 }
 

@@ -408,6 +408,7 @@ def pay(amount):
     return amount * 1
 ''')
 check("saved again without a risk keeps spends", save("pay", area="money"), "Saved tool money.pay (spends money)")
+check("emplio.tools.save without a risk keeps it too", str(T.Tools().save("pay", area="money").startswith("Saved tool money.pay (spends money)")), "True")
 T.save("pay", area="money", bucket="company")
 os.makedirs(os.path.join(WORK, "me", "toolset"), exist_ok=True)
 check("an area can't be in two buckets", save("pay", area="money", bucket="me"), "REFUSED money is already an area in company/toolset/")
