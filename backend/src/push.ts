@@ -30,14 +30,15 @@ function providerToken(keyId: string, teamId: string, key: string) {
   return provider.token;
 }
 
-// What a lock screen can show of a markdown message.
+// What a lock screen can show of a markdown message. The device shortens it to fit; the cut here only keeps the whole
+// notification under the 4 KB Apple and browsers accept (1000 characters is at most 3000 bytes of UTF-8).
 export const plain = (markdown: string) =>
   markdown
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/[*_#`>]/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 180);
+    .slice(0, 1000);
 
 export type Note = { title: string; body: string; path: string };
 export type Senders = {
