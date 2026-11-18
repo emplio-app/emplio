@@ -6,6 +6,7 @@
 // each network to reach the browsers. Those networks can't reach Postgres, Gitea or this program, or the cloud
 // metadata address where a server's own credentials are handed out (blockMetadata).
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import * as gvisor from "./gvisor";
 
 const TOKEN = process.env.RUNNER_TOKEN;
 if (!TOKEN || TOKEN.length < 32) throw new Error("RUNNER_TOKEN must be set, at least 32 characters");
@@ -24,6 +25,8 @@ const LIMITS = [...RUNTIME, "--memory", MEMORY, "--memory-swap", MEMORY, "--cpus
 const DNS = (process.env.COMPUTER_DNS ?? "").split(",").filter((ip) => /^[0-9a-f.:]+$/i.test(ip));
 // preview links: a server a computer runs on a port opens at https://<port>-<computer's 12-letter id>.<this domain>
 const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN ?? "";
+// runsc: computers run by gVisor directly (gvisor.ts), which can bring a sleeping one back with everything running
+const GVISOR = process.env.COMPUTER_ENGINE === "runsc";
 const BROWSER_HOURS = 4;
 const MAX_OUTPUT = 20 * 1024 * 1024;
 
@@ -129,30 +132,20 @@ async function setDns(id: string) {
 const personOf = (labels: Record<string, string>) => `${labels.employee0Workspace ?? ""}:${labels.employee0User ?? ""}`;
 
 // Asleep after this long unless told again. Stopped rather than paused, so a sleeping computer frees its memory;
-// its files stay, what was running doesn't. So while something still runs in it (a background job, a preview's
-// server) it stays awake, for up to BUSY_HOURS after Emplio last asked.
-const BUSY_HOURS = 3;
+// its files stay, what was running doesn't (gvisor.ts keeps that too).
 const IDLE_MS = 5 * 60_000;
-const sleepers = new Map<string, { timer: Timer; asked: number }>();
-// what's always there: init, the container's own `sleep infinity`, this check, and the agent's Python session
-// (kernel.py), which ends itself when idle
-const RESTING = /^(\/sbin\/docker-init|\/dev\/init|sleep infinity|ps -eo args=|.*\/kernel\.py\b)/;
-const busy = async (id: string) => {
-  const d = await docker(["exec", id, "ps", "-eo", "args="]);
-  return !d.code && text(d).split("\n").some((line) => line.trim() && !RESTING.test(line.trim()));
-};
-function sleepAfter(id: string, ms: number, asked = Date.now()) {
-  clearTimeout(sleepers.get(id)?.timer);
-  const timer = setTimeout(async () => {
-    if (Date.now() - asked < BUSY_HOURS * 3_600_000 && (await busy(id))) return sleepAfter(id, IDLE_MS, asked);
-    if (sleepers.get(id)?.timer !== timer) return;
+const sleepers = new Map<string, Timer>();
+function sleepAfter(id: string, ms: number) {
+  clearTimeout(sleepers.get(id));
+  const timer = setTimeout(() => {
+    if (sleepers.get(id) !== timer) return;
     sleepers.delete(id);
-    await docker(["stop", "-t", "3", id]);
+    void docker(["stop", "-t", "3", id]);
   }, ms);
-  sleepers.set(id, { timer, asked });
+  sleepers.set(id, timer);
 }
 // timers live in memory: after a restart, every computer still awake gets one again
-void docker(["ps", "-q", "--no-trunc", "--filter", "label=emplio.kind=computer"]).then((d) => text(d).split("\n").filter(Boolean).forEach((id) => sleepAfter(id, IDLE_MS)));
+if (!GVISOR) void docker(["ps", "-q", "--no-trunc", "--filter", "label=emplio.kind=computer"]).then((d) => text(d).split("\n").filter(Boolean).forEach((id) => sleepAfter(id, IDLE_MS)));
 const asMs = (ms: unknown) => {
   if (typeof ms !== "number" || !(ms > 0) || ms > 7 * 86_400_000) throw new Refused("bad ms");
   return ms;
@@ -161,7 +154,7 @@ const asMs = (ms: unknown) => {
 // Always started, even when it looks awake: it may be on its way to sleep. One that won't start is removed, so
 // Emplio makes a fresh one (its work is saved elsewhere).
 async function wake(c: Inspected, ms: number) {
-  clearTimeout(sleepers.get(c.Id)?.timer);
+  clearTimeout(sleepers.get(c.Id));
   await networkOf(personOf(labelsOf(c)));
   const d = await docker(["start", c.Id]);
   if (d.code) {
@@ -211,6 +204,28 @@ async function route(req: Request, url: URL): Promise<Response> {
   const [, kind, id, what] = url.pathname.split("/");
   const json = () => req.json().catch(() => ({})) as Promise<Record<string, unknown>>;
 
+  if (kind === "computers" && GVISOR) {
+    if (!id && req.method === "GET") return Response.json(await gvisor.list(checkLabels(JSON.parse(url.searchParams.get("labels") ?? "{}"))));
+    if (!id && req.method === "POST") {
+      const body = await json();
+      return Response.json({ id: await gvisor.create(checkLabels(body.labels), asMs(body.ms)) });
+    }
+    const m = gvisor.find(id!);
+    if (!m) throw new Refused("no such container");
+    if (!what && req.method === "DELETE") return gvisor.remove(m.id).then(() => Response.json({ ok: true }));
+    if (what === "wake" && req.method === "POST") return gvisor.wake(m, asMs((await json()).ms)).then(() => Response.json({ ok: true }));
+    if (what === "keep" && req.method === "POST") return (await gvisor.keep(m, asMs((await json()).ms))) ? Response.json({ ok: true }) : new Response("asleep", { status: 409 });
+    if (what === "run" && req.method === "POST") {
+      const body = await json();
+      asMs(body.timeoutMs);
+      return gvisor.run(m, body, req.signal);
+    }
+    if (what === "file") {
+      const path = url.searchParams.get("path");
+      if (!path) throw new Refused("path needed");
+      if (["GET", "PUT", "DELETE"].includes(req.method)) return gvisor.file(m, req.method, path, req.method === "PUT" ? await req.arrayBuffer() : undefined);
+    }
+  }
   if (kind === "computers") {
     if (!id && req.method === "GET") {
       const found = await list("computer", checkLabels(JSON.parse(url.searchParams.get("labels") ?? "{}")));
@@ -228,7 +243,7 @@ async function route(req: Request, url: URL): Promise<Response> {
     }
     const c = await ours(id!, "computer");
     if (!what && req.method === "DELETE") {
-      clearTimeout(sleepers.get(c.Id)?.timer);
+      clearTimeout(sleepers.get(c.Id));
       sleepers.delete(c.Id);
       await must(["rm", "-f", c.Id]);
       return Response.json({ ok: true });
@@ -310,19 +325,29 @@ const allowed = (given: string) => {
 // passes the request on itself (websockets, compression and all). No token: the link itself is the key. A sleeping
 // computer is woken, but what served the page stopped when it slept.
 const PREVIEW_HOST = /^(\d{1,5})-([a-f0-9]{12})\.(.+)$/;
-async function previewOf(host: string | null) {
+function previewName(host: string | null) {
   const m = PREVIEW_DOMAIN ? PREVIEW_HOST.exec((host ?? "").split(":")[0]!.toLowerCase()) : null;
-  if (!m || m[3] !== PREVIEW_DOMAIN || Number(m[1]) > 65535) return null;
-  const c = await ours(m[2]!, "computer").catch(() => null);
-  return c && { c, port: m[1]! };
+  return m && m[3] === PREVIEW_DOMAIN && Number(m[1]) <= 65535 ? { id: m[2]!, port: m[1]! } : null;
+}
+async function previewOf(host: string | null) {
+  const n = previewName(host);
+  if (!n) return null;
+  if (GVISOR) return gvisor.find(n.id) ? { c: null, port: n.port } : null;
+  const c = await ours(n.id, "computer").catch(() => null);
+  return c && { c, port: n.port };
 }
 const ASLEEP = `<!doctype html><meta name="viewport" content="width=device-width"><title>Asleep</title>
 <body style="font:16px system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem">
 <h1 style="font-size:1.25rem">This preview was asleep</h1>
 <p>Its computer just woke up, but what showed this page stopped while it slept. Ask Emplio to start it again, then reload.</p>`;
 async function previewTarget(host: string | null) {
+  if (GVISOR) {
+    const n = previewName(host);
+    const to = n && (await gvisor.previewTarget(n.id, n.port));
+    return to ? new Response(null, { status: 204, headers: { "x-preview-to": to } }) : new Response("Not found", { status: 404 });
+  }
   const p = await previewOf(host);
-  if (!p) return new Response("Not found", { status: 404 });
+  if (!p?.c) return new Response("Not found", { status: 404 });
   if (!p.c.State.Running) {
     await wake(p.c, 15 * 60_000);
     return new Response(ASLEEP, { status: 503, headers: { "content-type": "text/html; charset=utf-8", "retry-after": "30" } });
@@ -345,9 +370,11 @@ async function forgetOld() {
   const nets = text(await docker(["network", "ls", "-q", "--filter", "label=emplio.kind=network"])).split("\n").filter(Boolean);
   for (const net of nets) if (!text(await docker(["ps", "-aq", "--filter", `network=${net}`]))) await docker(["network", "rm", net]);
 }
+if (GVISOR) await gvisor.resume();
 if (FORGET_DAYS > 0) {
-  setInterval(() => void forgetOld().catch((error) => console.error("forgetting old computers failed", error)), 3_600_000);
-  void forgetOld().catch(() => {});
+  const forget = () => (GVISOR ? gvisor.forgetOld(FORGET_DAYS) : forgetOld());
+  setInterval(() => void forget().catch((error) => console.error("forgetting old computers failed", error)), 3_600_000);
+  void forget().catch(() => {});
 }
 
 const server = Bun.serve({
