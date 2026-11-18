@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ask, collectOut, commandEnded, commandStarted, EZ, LIST_OUT, MAX_COMMANDS, outPath, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
@@ -184,6 +184,46 @@ test("a failed browser step shows at the end of the result even when the command
   const called = await run(`./emplio browser eval ok`);
   expect(called.out).toContain('"200"');
   expect(called.out).not.toContain("failed");
+  rmSync(home, { recursive: true });
+});
+
+test("code that doesn't say emplio browser (a saved tool) gets the chat's browser at its first browser command", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  // stands in for agent-browser: says which browser it was pointed at
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "on $2 as $4: \${@:5}"\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const asked: string[] = [];
+  let answer = "BROWSER_CDP_URL=wss://b.test/x?t=a=\nBROWSER_SESSION=chat-1\nBROWSER_POINTER=p";
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (r) => {
+      asked.push(`${new URL(r.url).pathname} ${atob(await r.text())}`);
+      return new Response(answer);
+    },
+  });
+  const run = async (command: string, key: string) => {
+    const p = Bun.spawn(["bash", "-c", command + requestsTrailer(key)], {
+      env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: key, EMPLIO_LIVE: `http://localhost:${server.port}/live/t` },
+      cwd: home,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { out: await new Response(p.stdout).text(), err: await new Response(p.stderr).text(), code: await p.exited };
+  };
+  const first = await run(`./emplio browser open https://a.com && ./emplio browser snapshot`, `t1${Date.now()}`);
+  expect(first.out).toContain("on wss://b.test/x?t=a= as chat-1: open https://a.com");
+  expect(first.out).toContain("snapshot");
+  // asked once for the run, with what it was about to do (the site picks the connection)
+  expect(asked.filter((a) => a.startsWith("/live/t/BROWSER"))).toEqual(["/live/t/BROWSER open https://a.com\0"]);
+  expect(readdirSync("/tmp").filter((f) => f.startsWith("emplio-browser.t1"))).toEqual([]);
+  // refused (a background round, the person showing something): the reason, and nothing driven
+  answer = "error: background rounds don't use the browser.";
+  const no = await run(`./emplio browser open https://a.com`, `t2${Date.now()}`);
+  expect(no.code).toBe(1);
+  expect(no.err).toContain("background rounds don't use the browser");
+  expect(no.out).not.toContain("on ");
+  server.stop();
   rmSync(home, { recursive: true });
 });
 
