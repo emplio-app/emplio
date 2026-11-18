@@ -63,8 +63,6 @@ export class Panes {
   #session() {
     if (this.session) return this.session;
     const ses = (this.session = session.defaultSession);
-    // looks like Chrome to the sites: no "Electron" or app name in it
-    ses.setUserAgent(ses.getUserAgent().replace(/\s?Electron\/\S+/, "").replace(/\s?Emplio\/\S+/, ""));
     ses.setPermissionRequestHandler((_wc, _permission, done) => done(false));
     ses.on("will-download", (_event, item) => {
       const b = [...this.browsers.values()].at(-1);
