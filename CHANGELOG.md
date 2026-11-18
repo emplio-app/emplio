@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.61 (2026-11-18)
+
+### What's new
+
+- Agents reuse the tools they already have instead of copying them, and a tool that spends money keeps asking first after it's fixed.
+- Agents stick to what you asked, even when it isn't their usual kind of work.
+
+### For developers
+
+- The after-run check imports emplio first, so a tool that uses another tool no longer reads as "doesn't load" (kernel version 3).
+- `emplio.tools.save` without `risk` keeps the tool's label; `emplio.skill()`/`lib()` raise an error naming `tools.<area>`; a run writing `skills/*/functions.py` or `lib/*.py` gets a note to save tools (#223).
+- `migrate-toolset.ts` also drops lesson lines about the old way and committed `__pycache__` files.
+
 ## 1.2.60 (2026-11-18)
 
 ### What's new
