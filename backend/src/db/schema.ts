@@ -308,7 +308,7 @@ export const automations = pgTable(
   (t) => [uniqueIndex().on(t.workspaceId, t.name), index().on(t.externalId)],
 );
 
-// The skills in git (company/skills/<name>/SKILL.md, and each person's me/skills/<name>/SKILL.md), mirrored so
+// The skills in git (company/skillset/<name>/SKILL.md, and each person's me/skillset/<name>/SKILL.md), mirrored so
 // the chat box can offer them as /commands and the prompt can list them without reading every file each message.
 export const skills = pgTable(
   "skills",

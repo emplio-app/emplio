@@ -16,11 +16,11 @@ export const readOf = (commands: string[]) =>
   commands.flatMap((c) =>
     /\bemplio hand\b/.test(c)
       ? LISTED.filter((n) => c.includes(n))
-      : [...c.matchAll(/emplio skills use\s+["']?([\w-]+)|(?:cat|head|less)\s+\S*skills\/([\w-]+)\/SKILL\.md/g)].map((m) => (m[1] ?? m[2])!),
+      : [...c.matchAll(/emplio skills use\s+["']?([\w-]+)|(?:cat|head|less)\s+\S*skill(?:set|s)\/([\w-]+)\/SKILL\.md/g)].map((m) => (m[1] ?? m[2])!),
   );
-// a SKILL.md written or changed: by its full path, or from inside its folder (`cd .../skills/<name> && cat > SKILL.md`)
+// a SKILL.md written or changed: by its full path, or from inside its folder (`cd .../skillset/<name> && cat > SKILL.md`)
 export const savedOf = (commands: string[]) =>
-  commands.flatMap((c) => (/(>|\btee)\s*\S*SKILL\.md|SKILL\.md'?\s*<</.test(c) ? [/skills\/([\w-]+)/.exec(c)?.[1] ?? "(unnamed)"] : []));
+  commands.flatMap((c) => (/(>|\btee)\s*\S*SKILL\.md|SKILL\.md'?\s*<</.test(c) ? [/skill(?:set|s)\/([\w-]+)/.exec(c)?.[1] ?? "(unnamed)"] : []));
 
 // The main number: it read the skill that fits (and no other) when there was one, and saved one exactly when the job called for it.
 export function rightCall({ output, expected }: Args): Score {

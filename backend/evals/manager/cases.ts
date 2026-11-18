@@ -365,7 +365,7 @@ export const cases = (): Case[] => [
     source: "real",
     business: {
       agents: [...AGENTS, "- Issue Filer (agents/issue-filer, light): Files bug reports on the shop's website repo. Skills: website-issues."],
-      skills: ["- company/skills/website-issues: File a bug on the shop website's repo; check for duplicates first"],
+      skills: ["- company/skillset/website-issues: File a bug on the shop website's repo; check for duplicates first"],
       threads: THREADS,
     },
     chat: [person("file an issue: the checkout page doesn't scroll on phones")],

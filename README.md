@@ -99,7 +99,7 @@ You get diff, history and revert for free, and "who can see this note" is a repo
 
 ### Skills it writes itself
 
-A skill is a folder with a `SKILL.md` and any scripts it needs, in `company/skills/` or `me/skills/`. Emplio writes and fixes them as it works. You can also record yourself doing a task in its browser, with or without talking it through, and it turns the recording into a skill. Passwords aren't recorded. It can install skills from [skills.sh](https://skills.sh) too, after reading them and asking you.
+A skill is a folder with a `SKILL.md` and any scripts it needs, in `company/skillset/` or `me/skillset/`. Emplio writes and fixes them as it works. You can also record yourself doing a task in its browser, with or without talking it through, and it turns the recording into a skill. Passwords aren't recorded. It can install skills from [skills.sh](https://skills.sh) too, after reading them and asking you.
 
 ### Approvals, records, background work
 

@@ -6,7 +6,7 @@
 # Standard library only: it runs on the cloud computer, a Mac and Windows alike.
 import ast, builtins, json, linecache, os, re, signal, socket, subprocess, sys, threading, time, traceback, _thread
 
-VERSION = "3"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check
+VERSION = "4"  # 2: sessions remember what they define, for emplio.tools.save; 3: tools that use tools pass the check; 4: skills in skillset/
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = os.environ.get("EMPLIO_WORK") or "/work"
 SESSIONS = os.path.join(W, "tmp", ".emplio", "sessions")
@@ -63,12 +63,12 @@ def fresh_namespace():
     return {"__name__": "__main__", "__builtins__": builtins, "emplio": emplio, "sh": sh, "help": help, "json": json, "os": os, "re": re, "sys": sys, "Path": Path}
 
 
-# saved functions: the toolset/ files, checked when a run changes them; an old-style skills/<name>/functions.py or
+# saved functions: the toolset/ files, checked when a run changes them; an old-style skillset/<name>/functions.py or
 # lib/<name>.py is caught too, since nothing loads those any more
 def saved_files():
     found = {}
     for top in ("company", "me", "restricted"):
-        for pattern_dir, name in ((os.path.join(W, top, "toolset"), None), (os.path.join(W, top, "skills"), "functions.py"), (os.path.join(W, top, "lib"), None)):
+        for pattern_dir, name in ((os.path.join(W, top, "toolset"), None), (os.path.join(W, top, "skillset"), "functions.py"), (os.path.join(W, top, "lib"), None)):
             if not os.path.isdir(pattern_dir):
                 continue
             for entry in os.listdir(pattern_dir):

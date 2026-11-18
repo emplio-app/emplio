@@ -7,7 +7,7 @@ import type { Said } from "../emplio";
 import type { Case } from "./cases";
 import { readOf, savedOf, scorers, type Input } from "./scorers";
 
-const SKILL = (name: string) => `---\nname: ${name}\ndescription: How we do this job\n---\n1. Run /work/company/skills/${name}/run.py with the details.\n2. Check the result, then send it.`;
+const SKILL = (name: string) => `---\nname: ${name}\ndescription: How we do this job\n---\n1. Run /work/company/skillset/${name}/run.py with the details.\n2. Check the result, then send it.`;
 
 Eval<Input, Said, Case["expect"]>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "skills",

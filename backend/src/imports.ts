@@ -278,7 +278,7 @@ Sort it the way you sort anything you learn:
 - About ${ctx.userName}: me/profile.md; how they like things done (including tone and rules from persona or instruction files like SOUL.md, AGENTS.md or custom instructions): me/preferences.md. Never company/AGENT.md.
 - Their private life (family, health, personal money): me/notes/, never company files.
 - Finance, HR or owner-only matters: restricted/ if you can see it, me/notes/ if not.
-- Written procedures and skills: me/skills/<name>/SKILL.md (frontmatter name and description), fixed up to work here.
+- Written procedures and skills: me/skillset/<name>/SKILL.md (frontmatter name and description), fixed up to work here.
 - Scheduled jobs: don't make automations; list them for ${ctx.userName} as suggestions.
 - Anything you're unsure about: me/notes/, marked unsure.
 Old facts can be out of date: keep their dates; what the company files already say wins, and a real conflict goes to the owner.
