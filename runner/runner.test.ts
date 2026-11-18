@@ -120,8 +120,8 @@ test("on a server that only holds computers: its runtime, name servers, no app t
     const dns = lines.find((l) => l.includes("resolv.conf"))!;
     expect(dns).toContain("nameserver 1.1.1.1");
     expect(dns).not.toContain("rm");
-    const ok = (host: string) => fetch(`http://127.0.0.1:${port}/preview-ok?domain=${host}`).then((r) => r.status);
-    expect(await ok(`3000-${ID}.box.test`)).toBe(200);
+    const ok = (host: string) => fetch(`http://127.0.0.1:${port}/preview-target`, { headers: { "x-forwarded-host": host } }).then((r) => r.status);
+    expect(await ok(`3000-${ID}.box.test`)).not.toBe(404);
     expect(await ok(`3000-${ID}.evil.test`)).toBe(404);
     expect(await ok(`3000-other123other.box.test`)).toBe(404);
   } finally {

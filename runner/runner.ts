@@ -387,13 +387,8 @@ const server = Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
-    // Caddy asks these two: where a preview link goes, and whether to get a certificate for a name (also for
-    // runner.<domain>, this program's own address, which sits under the same wildcard)
+    // Caddy asks where a preview link goes
     if (url.pathname === "/preview-target") return previewTarget(req.headers.get("x-forwarded-host"));
-    if (url.pathname === "/preview-ok") {
-      const domain = url.searchParams.get("domain");
-      return domain === `runner.${PREVIEW_DOMAIN}` || (await previewOf(domain)) ? new Response("ok") : new Response("no", { status: 404 });
-    }
     const given = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
     if (!allowed(given)) return new Response("Unauthorized", { status: 401 });
     try {
