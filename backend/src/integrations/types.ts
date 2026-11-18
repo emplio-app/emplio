@@ -67,9 +67,10 @@ export async function mapDeep(v: unknown, f: (v: unknown) => Promise<unknown>): 
   return v;
 }
 
-// A failure to tell the person about, not a server bug. `expired`: only signing in again fixes it.
+// A failure to tell the person about, not a server bug. `expired`: looks like only signing in again fixes it (checked
+// with the provider before the connection is marked). `reason`: the app's own words, when the message adds advice to them.
 export class AppsError extends Error {
-  constructor(message: string, readonly expired = false) {
+  constructor(message: string, readonly expired = false, readonly reason?: string) {
     super(message);
   }
 }

@@ -25,8 +25,12 @@ async function call(method: string, path: string, body?: unknown): Promise<Json>
   // a bad API key is our problem, not the person's sign-in
   if (res.status === 401 || res.status === 403) throw new Error(`Composio: ${message}`);
   if (/no connected account/i.test(message)) throw new AppsError("not connected");
-  throw new AppsError(message, /expired|inactive|revoked/i.test(message));
+  throw new AppsError(message, mayBeSignedOut(message));
 }
+
+// Words that may mean the login is gone. Only a hint: the connection is marked expired only once Composio's own
+// status for it says so (runAction), since "the file may have expired" or a 401 from one call says nothing about the login.
+const mayBeSignedOut = (message: string) => /expired|inactive|revoked|unauthori[sz]ed|invalid.{0,20}(credential|token|grant|auth)|\b401\b/i.test(message);
 
 const toSlug = (action: string) => action.replace(".", "_").toUpperCase();
 
@@ -151,7 +155,7 @@ export const composio: Provider = {
       ...(externalId && { connected_account_id: externalId }),
       arguments: await uploadFiles(input, action),
     });
-    if (!out.successful) throw new AppsError(String(out.error ?? "the action failed"));
+    if (!out.successful) throw new AppsError(String(out.error ?? "the action failed"), mayBeSignedOut(String(out.error ?? "")));
     return downloadFiles(out.data);
   },
 

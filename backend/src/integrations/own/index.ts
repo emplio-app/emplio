@@ -3,7 +3,7 @@
 // indiamart.ts, list it in APPS, and add it to catalog.ts with provider "own".
 import { actionTitle, type ActionDetail, type KeyField } from "@emplio/shared";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { connections } from "../../db/schema";
@@ -123,6 +123,8 @@ export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fl
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
 const callbackUrl = (app: string, back: string) => `${new URL(back).origin}/oauth/${app}/callback`;
+// how long a sign-in on an app's own page has to finish
+const SIGN_IN_MS = 15 * 60_000;
 const stateSig = (payload: string) => createHmac("sha256", process.env.ENCRYPTION_KEY!).update(`oauth:${payload}`).digest("base64url");
 
 // a login with less than this left is renewed before it's used
@@ -130,27 +132,42 @@ const MARGIN_MS = 60_000;
 const untilExpiry = (t: OAuthTokens) => (t.expiresIn ? new Date(Date.now() + t.expiresIn * 1000) : null);
 
 type Stored = { id: string; app: string; secret: string | null; refreshToken: string | null; expiresAt: Date | null };
-const saveRenewed = async (id: string, values: Pick<Stored, "secret" | "refreshToken" | "expiresAt">) => {
-  await db.update(connections).set({ ...values, updatedAt: new Date() }).where(eq(connections.id, id));
+type Renewed = Pick<Stored, "secret" | "refreshToken" | "expiresAt">;
+// Where renewals happen: `fn` gets the connection as stored now and a way to save the new login. The database's runs
+// it under a lock on the connection, so two servers (or two calls holding an older copy) never spend one refresh
+// token twice: some apps cancel it the moment it's used, which logs the person out.
+export type RenewalStore = { renew<T>(id: string, fn: (now: Stored | undefined, save: (v: Renewed) => Promise<void>) => Promise<T>): Promise<T> };
+const inDatabase: RenewalStore = {
+  renew: (id, fn) =>
+    db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`renew:${id}`}))`);
+      const now = await tx.query.connections.findFirst({ where: eq(connections.id, id) });
+      return fn(now, async (v) => void (await tx.update(connections).set({ ...v, updatedAt: new Date() }).where(eq(connections.id, id))));
+    }),
 };
 
-// One renewal per connection at a time: some apps cancel a refresh token the moment it's used, so a second call would log the person out.
-// ponytail: per process; a lock in Postgres if the API ever runs on more than one machine
+const runningOut = (c: Stored) => Boolean(c.expiresAt && c.expiresAt.getTime() - Date.now() <= MARGIN_MS);
+
+// One renewal per connection at a time in this process too, so calls at the same moment share it.
 const renewing = new Map<string, Promise<string>>();
 
-// A connection's login, decrypted, renewed first if it's about to run out.
-export function freshSecret(c: Stored, save = saveRenewed): Promise<string | null> {
+// A connection's login, decrypted, renewed first if it's about to run out. force: renew it anyway (the app just
+// turned it down), unless it was renewed since `c` was read.
+export function freshSecret(c: Stored, store = inDatabase, force = false): Promise<string | null> {
   const oauth = APPS[c.app]?.oauth;
   if (!c.secret) return Promise.resolve(null);
-  if (!c.expiresAt || c.expiresAt.getTime() - Date.now() > MARGIN_MS || !c.refreshToken || !oauth?.refresh) return Promise.resolve(decrypt(c.secret));
+  if (!(force || runningOut(c)) || !c.refreshToken || !oauth?.refresh) return Promise.resolve(decrypt(c.secret));
   const ongoing = renewing.get(c.id);
   if (ongoing) return ongoing;
-  const refreshToken = decrypt(c.refreshToken);
-  const renew = oauth
-    .refresh(refreshToken)
-    .then(async (t) => {
+  const renew = store
+    .renew(c.id, async (now, save) => {
+      const cur = now ?? c;
+      // someone renewed it while we waited for the lock
+      if (cur.secret && (force ? cur.secret !== c.secret : !runningOut(cur))) return decrypt(cur.secret);
+      const refreshToken = decrypt(cur.refreshToken ?? c.refreshToken!);
+      const t = await oauth.refresh!(refreshToken);
       // apps that don't send a new refresh token mean the old one stays good
-      await save(c.id, { secret: encrypt(t.token), refreshToken: encrypt(t.refreshToken ?? refreshToken), expiresAt: untilExpiry(t) });
+      await save({ secret: encrypt(t.token), refreshToken: encrypt(t.refreshToken ?? refreshToken), expiresAt: untilExpiry(t) });
       return t.token;
     })
     .finally(() => renewing.delete(c.id));
@@ -205,8 +222,10 @@ export const own: Provider = {
   async startSignIn(app, _owner, back) {
     const oauth = APPS[app]?.oauth;
     if (!oauth?.ready()) throw new AppsError(`${app} is connected with a key, in the app`);
-    const nonce = crypto.randomUUID();
-    const payload = Buffer.from(JSON.stringify({ app, n: nonce, back, e: Date.now() + 15 * 60_000 })).toString("base64url");
+    // when it can no longer finish, in the waiting connection's id too, so signInStatus can tell
+    const e = Date.now() + SIGN_IN_MS;
+    const nonce = `${crypto.randomUUID()}_${e}`;
+    const payload = Buffer.from(JSON.stringify({ app, n: nonce, back, e })).toString("base64url");
     return { externalId: `${PENDING}${nonce}`, url: oauth.authorizeUrl(callbackUrl(app, back), `${payload}.${stateSig(payload)}`) };
   },
 
@@ -235,8 +254,13 @@ export const own: Provider = {
     return { secret: trimmed, ...(label && { label }) };
   },
 
-  // the key is in our database, so a connection is good until a call says otherwise
-  signInStatus: async (externalId) => (externalId.startsWith(PENDING) ? "pending" : "active"),
+  // the key is in our database, so a connection is good until a call says otherwise; a sign-in not finished in time
+  // can't be any more (its page's state has run out), so it's given up on, like Composio's after ten minutes
+  signInStatus: async (externalId) => {
+    if (!externalId.startsWith(PENDING)) return "active";
+    const until = Number(/_(\d+)$/.exec(externalId)?.[1] ?? 0);
+    return until > Date.now() ? "pending" : "expired";
+  },
   removeSignIn: async () => {},
 
   async run(name, input, login) {

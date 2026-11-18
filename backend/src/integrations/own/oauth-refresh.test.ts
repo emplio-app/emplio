@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { decrypt, encrypt } from "../../secrets";
 import { AppsError } from "../types";
-import { APPS, freshSecret, own, type OAuthTokens, type OwnApp } from "./index";
+import { APPS, freshSecret, own, type OAuthTokens, type OwnApp, type RenewalStore } from "./index";
 
 beforeAll(() => {
   process.env.ENCRYPTION_KEY = randomBytes(32).toString("base64");
@@ -31,9 +31,11 @@ const row = (over: Partial<{ secret: string | null; refreshToken: string | null;
   ...over,
 });
 type Saved = { secret: string | null; refreshToken: string | null; expiresAt: Date | null };
+// a store with nothing stored: renewals run straight away, and what they save is kept here
 const recorder = () => {
   const saves: Saved[] = [];
-  return { saves, save: async (_id: string, v: Saved) => void saves.push(v) };
+  const save: RenewalStore = { renew: (_id, fn) => fn(undefined, async (v) => void saves.push(v)) };
+  return { saves, save };
 };
 
 test("a sign-in keeps the refresh token and when the login ends; a plain string never runs out", async () => {
@@ -107,4 +109,38 @@ test("a key, or an old login with no way to renew, is decrypted and left alone",
   expect(await freshSecret(row({ refreshToken: null, expiresAt: null }), save)).toBe("old");
   expect(await freshSecret(row({ secret: null }), save)).toBeNull();
   expect(saves).toEqual([]);
+});
+
+test("a renewal waits its turn, and one already done by someone else is used instead of spending the refresh token again", async () => {
+  let asked = 0;
+  app(async () => (asked++, { token: "mine", expiresIn: 3600 }));
+  const c = row();
+  // another server renewed it while this one waited for the lock: the stored login has time left
+  const renewed = { ...c, secret: encrypt("theirs"), refreshToken: encrypt("r2"), expiresAt: new Date(Date.now() + 3_600_000) };
+  const store: RenewalStore = { renew: (_id, fn) => fn(renewed, async () => {}) };
+  expect(await freshSecret(c, store)).toBe("theirs");
+  expect(asked).toBe(0);
+});
+
+test("a login the app turned down is renewed even with time left, unless it was renewed since", async () => {
+  const seen: string[] = [];
+  app(async (r) => (seen.push(r), { token: "new", expiresIn: 3600 }));
+  const c = row({ expiresAt: new Date(Date.now() + 600_000) });
+  const { save, saves } = recorder();
+  expect(await freshSecret(c, save, true)).toBe("new");
+  expect(seen).toEqual(["r1"]);
+  expect(saves).toHaveLength(1);
+  const since: RenewalStore = { renew: (_id, fn) => fn({ ...c, secret: encrypt("newer") }, async () => {}) };
+  expect(await freshSecret(c, since, true)).toBe("newer");
+  expect(seen).toEqual(["r1"]);
+});
+
+test("a sign-in on an app's own page is given up on once it can no longer finish", async () => {
+  app(async () => ({ token: "n" }));
+  const { externalId } = await own.startSignIn("fakeoauth", "o", "https://api.test/connections/x/done");
+  expect(await own.signInStatus(externalId)).toBe("pending");
+  expect(await own.signInStatus("oauth-pending:abc_1000")).toBe("expired");
+  // made before the time was kept in it
+  expect(await own.signInStatus("oauth-pending:3f1c2b9e-1111-4222-8333-444455556666")).toBe("expired");
+  expect(await own.signInStatus("some-connection-id")).toBe("active");
 });

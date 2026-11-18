@@ -208,15 +208,16 @@ function YourApps({
               )}
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span
-                  className={`size-1.5 shrink-0 rounded-full ${STATUS[c.status].dot}`}
+                  className={`size-1.5 shrink-0 rounded-full ${c.problem ? "bg-destructive" : STATUS[c.status].dot}`}
                 />
-                <span className="truncate">
-                  {STATUS[c.status].label}
-                  {c.status === "active" && ` · since ${since(c.createdAt)}`}
+                {/* why it isn't working, when known: permissions left out, a sign-in that stopped working */}
+                <span className={c.problem ? "line-clamp-2 text-destructive" : "truncate"}>
+                  {c.problem ?? STATUS[c.status].label}
+                  {c.status === "active" && !c.problem && ` · since ${since(c.createdAt)}`}
                 </span>
               </div>
             </div>
-            {c.status !== "active" && (
+            {(c.status !== "active" || c.problem) && (
               <ConnectButton
                 busy={connecting === c.id}
                 onClick={() => connect({ ...c, connection: c.id })}
@@ -245,7 +246,7 @@ function YourApps({
                 >
                   Rename
                 </DropdownMenuItem>
-                {c.status === "active" && (
+                {c.status === "active" && !c.problem && (
                   <DropdownMenuItem onClick={() => connect({ ...c, connection: c.id })}>
                     Reconnect
                   </DropdownMenuItem>

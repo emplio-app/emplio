@@ -6,7 +6,7 @@
 // ponytail: connections are per person; company-wide ones (for routines) need a null userId and a rule for who may use them.
 // ponytail: an expired login is noticed when an action fails; wire Composio's expiry webhook to flag it sooner.
 // ponytail: the four gated actions (money out, messages to customers, deletes) aren't enforced here yet, only asked for in the prompt.
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { record } from "../activity";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { APP_CATEGORIES, type ActionRun, type AppCategory, type AppInfo, type ConnectCard, type Connection } from "@emplio/shared";
@@ -16,7 +16,7 @@ import { db } from "../db";
 import { actionRuns, connections } from "../db/schema";
 import { composio } from "./composio";
 import { APPS, freshSecret, own } from "./own";
-import { GOOGLE_SCOPES } from "./own/google-login";
+import { GOOGLE_SCOPES, googleCheck } from "./own/google-login";
 import { listPolls, pollConfig, pollDetail, pollTrigger } from "./polls";
 import { decrypt, encrypt } from "../secrets";
 import { basename } from "node:path";
@@ -102,6 +102,7 @@ const toConnection = async (c: Row): Promise<Connection> => ({
   label: c.label ?? appName(c.app),
   ...(await providerApp(c.app).then((p) => ({ logo: p?.logo, keyField: p?.keyField, signIn: p?.signIn }))),
   status: moved(c) ? "expired" : c.status,
+  ...(c.problem && !moved(c) && { problem: c.problem }),
   createdAt: c.createdAt.toISOString(),
 });
 
@@ -136,7 +137,8 @@ async function findConnection(who: Who, app: string, account?: string) {
   }
   const current = rows.filter((r) => !moved(r));
   const usable = current.length ? current : rows;
-  if (usable.length > 1) throw new AppsError(`several ${app} accounts are connected (${usable.map((r) => `"${labelOf(r)}"`).join(", ")}); say which with --account "<name>"`);
+  const shown = (r: Row) => `"${labelOf(r)}"${r.status !== "active" ? ` (${r.status})` : r.problem ? " (missing permissions)" : ""}`;
+  if (usable.length > 1) throw new AppsError(`several ${app} accounts are connected (${usable.map(shown).join(", ")}); say which with --account "<name>"`);
   return usable[0];
 }
 
@@ -148,10 +150,33 @@ export async function gitLogins(who: Who, app: string) {
 
 const loginOf = async (c: Row) => ({ externalId: c.externalId, secret: await freshSecret(c) });
 
+// What a sign-in check means for a connection. Not finished (the provider gave up on it after a few minutes,
+// or it was refused): a reconnect goes back to its old login, and a new account (no label: never signed in) goes,
+// instead of either showing as expired. Done: the old login of a reconnect can go.
+export function afterCheck(c: Pick<Row, "status" | "label" | "oldExternalId">, status: Row["status"]) {
+  const unfinished = c.status === "pending" && (status === "expired" || status === "failed");
+  if (unfinished && c.oldExternalId) return "restore";
+  if ((unfinished || status === "expired" || status === "failed") && !c.label) return "drop";
+  if (status === "active" && c.oldExternalId) return "finish";
+  return "store";
+}
+
 // Ask the provider how a sign-in went and store it. Kept as is when the provider can't be reached.
 // Once it's signed in, it gets its label: the account's name (an email address) or the app's name.
-async function refresh(c: Row) {
+// Null: it was a new account whose sign-in was never finished, now removed.
+async function refresh(c: Row): Promise<Row | null> {
   const status = await providerOf(c).signInStatus(c.externalId).catch(() => c.status);
+  let next = afterCheck(c, status);
+  // one stored as expired before (no name only because nobody listed it while it worked): kept if it was ever used
+  if (next === "drop" && c.status !== "pending" && (await db.query.actionRuns.findFirst({ where: and(eq(actionRuns.connectionId, c.id), eq(actionRuns.ok, true)), columns: { id: true } })))
+    next = "store";
+  if (next === "restore" || next === "drop") await providerOf(c).removeSignIn(c.externalId).catch(() => {});
+  if (next === "drop") return (await db.delete(connections).where(eq(connections.id, c.id)), null);
+  if (next === "restore") {
+    const [back] = await db.update(connections).set({ externalId: c.oldExternalId!, oldExternalId: null, status: "active", updatedAt: new Date() }).where(eq(connections.id, c.id)).returning();
+    return back ?? c;
+  }
+  if (next === "finish") await providerOf(c).removeSignIn(c.oldExternalId!).catch((error) => console.warn("removing the old sign-in failed", error));
   const label =
     status === "active" && !c.label
       ? uniqueLabel(
@@ -159,10 +184,53 @@ async function refresh(c: Row) {
           (await accounts(c, c.app)).filter((o) => o.id !== c.id),
         )
       : c.label;
-  if (status === c.status && label === c.label) return c;
-  const [updated] = await db.update(connections).set({ status, label, updatedAt: new Date() }).where(eq(connections.id, c.id)).returning();
+  if (status === c.status && label === c.label && next !== "finish") return c;
+  // a sign-in just finished: whatever was wrong with the old one is gone with it
+  const signedIn = c.status === "pending" && status === "active";
+  const [updated] = await db
+    .update(connections)
+    .set({ status, label, ...(next === "finish" && { oldExternalId: null }), ...(signedIn && { problem: null }), updatedAt: new Date() })
+    .where(eq(connections.id, c.id))
+    .returning();
   return updated ?? c;
 }
+
+// Whether a connection's login still works, asked of whoever holds it: Composio its status for the login (it renews
+// Google's and others' itself); ours the app's own "whose account is this" call, with the login renewed first. Null:
+// couldn't tell (the app or provider didn't answer), so nothing is changed on a guess.
+async function loginWorks(c: Row): Promise<boolean | null> {
+  if (c.provider !== own.name) {
+    const status = await providerOf(c).signInStatus(c.externalId).catch(() => null);
+    return status === "active" ? true : status === "expired" || status === "failed" ? false : null;
+  }
+  const app = APPS[c.app];
+  if (!app) return null;
+  try {
+    const key = await freshSecret(c, undefined, true);
+    if (!key) return false;
+    await app.check(key);
+    return true;
+  } catch (error) {
+    return error instanceof AppsError && error.expired ? false : null;
+  }
+}
+
+// An expired connection, asked again (at most every few minutes each): a login that works after all (an app that
+// was down, a call that needed more than the login could give) goes back to active, by itself.
+// ponytail: per process, like the renewal lock's map; fine on one API process
+const RECHECK_MS = 5 * 60_000;
+const rechecked = new Map<string, number>();
+async function recheck(c: Row): Promise<Row> {
+  if (c.status !== "expired" || moved(c) || Date.now() - (rechecked.get(c.id) ?? 0) < RECHECK_MS) return c;
+  rechecked.set(c.id, Date.now());
+  if ((await loginWorks(c)) !== true) return c;
+  const [back] = await db.update(connections).set({ status: "active", problem: null, updatedAt: new Date() }).where(eq(connections.id, c.id)).returning();
+  return back ?? c;
+}
+
+// Google's answer when the person left a permission box unticked on its sign-in page; other apps say it alike.
+// Not "insufficientFilePermissions": that's a file the account can't open, which a new sign-in doesn't change.
+export const MISSING_SCOPE = /insufficient.{0,40}scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT|missing.{0,20}scope|scope.{0,30}(missing|not granted|required)/i;
 
 // Offered apps matching every word (name, app name, description) and the category, if given.
 export async function searchApps(words: string, category?: AppCategory, who?: Workspace) {
@@ -211,7 +279,8 @@ export async function listConnections(who: Who): Promise<Connection[]> {
     .from(connections)
     .where(and(eq(connections.workspaceId, who.workspaceId), eq(connections.userId, who.userId)))
     .orderBy(connections.app, connections.createdAt);
-  return Promise.all(rows.map(async (c) => toConnection(c.status === "pending" || !c.label ? await refresh(c) : c)));
+  const checked = await Promise.all(rows.map((c) => (c.status === "pending" || !c.label ? refresh(c) : recheck(c))));
+  return Promise.all(checked.filter((c) => c !== null).map(toConnection));
 }
 
 // One of this person's connections by id (the app's routes), or a reason.
@@ -256,8 +325,10 @@ export async function connect(
   if (conversationId) back.searchParams.set("chat", conversationId);
   if (popup) back.searchParams.set("popup", "1");
   const { externalId, url } = await provider.startSignIn(app, owner(who), back.href);
-  if (existing) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
-  const values = { provider: provider.name, externalId, status: "pending" as const, updatedAt: new Date() };
+  // a working login stays until the new sign-in is done (refresh), so a reconnect given up halfway loses nothing
+  const keep = existing?.status === "pending" ? existing.oldExternalId : existing?.status === "active" && !moved(existing) ? existing.externalId : null;
+  if (existing && existing.externalId !== keep) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
+  const values = { provider: provider.name, externalId, oldExternalId: keep, status: "pending" as const, updatedAt: new Date() };
   const [row] = existing
     ? await db.update(connections).set(values).where(eq(connections.id, id)).returning()
     : await db.insert(connections).values({ id, workspaceId: who.workspaceId, userId: who.userId, app, ...values }).returning();
@@ -274,8 +345,9 @@ export async function connectWithKey(who: Who, app: string, key: string, connect
   const { secret, label } = await provider.connectWithKey!(app, key);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   if (existing && existing.provider !== provider.name) await providerOf(existing).removeSignIn(existing.externalId).catch(() => {});
+  if (existing?.oldExternalId) await providerOf(existing).removeSignIn(existing.oldExternalId).catch(() => {});
   const id = existing?.id ?? crypto.randomUUID();
-  const values = { provider: provider.name, externalId: id, secret: encrypt(secret), refreshToken: null, expiresAt: null, status: "active" as const, updatedAt: new Date() };
+  const values = { provider: provider.name, externalId: id, oldExternalId: null, problem: null, secret: encrypt(secret), refreshToken: null, expiresAt: null, status: "active" as const, updatedAt: new Date() };
   const [row] = existing
     ? await db.update(connections).set(values).where(eq(connections.id, id)).returning()
     : await db
@@ -286,13 +358,30 @@ export async function connectWithKey(who: Who, app: string, key: string, connect
   return toConnection(row!);
 }
 
+// Our Google apps share one grant per Google account: revoking it for one (Docs) would log the person's others out
+// (Calendar, Sheets...) on that account too. True when another of theirs is on the same account, or that can't be told.
+async function sharesGoogleGrant(c: Row) {
+  if (!(c.app in GOOGLE_SCOPES)) return false;
+  const others = await db
+    .select()
+    .from(connections)
+    .where(and(eq(connections.userId, c.userId), eq(connections.provider, own.name), inArray(connections.app, Object.keys(GOOGLE_SCOPES)), ne(connections.id, c.id)));
+  if (!others.length) return false;
+  const whose = async (r: Row) => googleCheck((await freshSecret(r)) ?? "").catch(() => null);
+  const mine = await whose(c);
+  if (!mine) return true;
+  for (const o of others) if ((await whose(o)) === mine) return true;
+  return false;
+}
+
 // account: which one, by label (needed when there are several); connectionId: by id, from the app
 export async function disconnect(who: Who, app: string, account?: string, connectionId?: string) {
   const existing = connectionId ? await ownConnection(who, connectionId) : await findConnection(who, app, account);
   if (!existing) throw new AppsError(`${app} isn't connected`);
   // best effort: a provider outage mustn't block removing it here
   await providerOf(existing).removeSignIn(existing.externalId).catch((error) => console.warn("removing sign-in failed", error));
-  const revoke = existing.provider === own.name ? APPS[existing.app]?.oauth?.revoke : undefined;
+  if (existing.oldExternalId) await providerOf(existing).removeSignIn(existing.oldExternalId).catch((error) => console.warn("removing sign-in failed", error));
+  const revoke = existing.provider === own.name && !(await sharesGoogleGrant(existing)) ? APPS[existing.app]?.oauth?.revoke : undefined;
   const token = existing.refreshToken ?? existing.secret;
   if (revoke && token) await revoke(decrypt(token)).catch((error) => console.warn("revoking access failed", existing.app, error));
   await db.delete(connections).where(eq(connections.id, existing.id));
@@ -335,10 +424,11 @@ export async function runAction(
   if (!ACTION.test(action)) throw new AppsError(`"${action}" isn't an action name (they look like gmail.send_email)`);
   const app = appOf(action);
   await offered(app, who);
-  let connection = await findConnection(who, app, account);
+  let connection: Row | undefined = await findConnection(who, app, account);
   // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
   if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
-  if (connection?.status === "pending") connection = await refresh(connection);
+  if (connection?.status === "pending") connection = (await refresh(connection)) ?? undefined;
+  if (connection?.status === "expired") connection = await recheck(connection);
   if (connection && connection.status !== "active")
     throw new AppsError(
       connection.status === "pending" ? `${app} sign-in isn't finished yet` : `${app} needs signing in again (${connection.status})`,
@@ -375,8 +465,27 @@ export async function runAction(
   });
   if (run.ok && !quiet) cloud.onWork(who.workspaceId, who.userId, "app");
   if (run.ok) return run.output;
-  if (run.error instanceof AppsError && run.error.expired && connection)
-    await db.update(connections).set({ status: "expired", updatedAt: new Date() }).where(eq(connections.id, connection.id));
+  // A call that looks like the login is gone: marked expired only when whoever holds the login agrees. Otherwise the
+  // login is fine and only this call was turned down (an OpenRouter call needing its management key, a Composio file
+  // that "may have expired"), so it says that, and reconnecting isn't suggested.
+  if (run.error instanceof AppsError && run.error.expired && connection) {
+    const works = await loginWorks(connection);
+    if (works === false) {
+      await db.update(connections).set({ status: "expired", problem: `The sign-in stopped working (${run.error.reason ?? run.error.message}). Reconnect it.`, updatedAt: new Date() }).where(eq(connections.id, connection.id));
+      rechecked.set(connection.id, Date.now());
+    } else if (works === true)
+      throw new AppsError(`${appName(app)} turned this down, though this account's sign-in still works, so reconnecting won't help: ${run.error.reason ?? run.error.message}. It may need a different kind of key or more access than this account has.`);
+  }
+  // signed in with a permission box left unticked: it stays connected for what it can do, says why the rest fails
+  if (run.error instanceof AppsError && connection && MISSING_SCOPE.test(run.error.message)) {
+    const problem = "Some permissions weren't given when it was connected. Reconnect it and tick every box on the sign-in page.";
+    if (connection.problem !== problem) await db.update(connections).set({ problem, updatedAt: new Date() }).where(eq(connections.id, connection.id));
+    const others = (await accounts(who, app)).filter((o) => o.id !== connection.id && o.status === "active" && !o.problem).map((o) => `"${labelOf(o)}"`);
+    throw new AppsError(
+      `this ${appName(app)} account ("${labelOf(connection)}") was connected without the permissions this needs (a box left unticked on the sign-in page). ` +
+        `Reconnect it (emplio apps reconnect ${app} --account "${labelOf(connection)}") and tick every box${others.length ? `, or use ${others.join(" or ")} with --account` : ""}`,
+    );
+  }
   if (run.error instanceof AppsError && run.error.message === "not connected") throw new AppsError(`${app} isn't connected`);
   // a guessed action name: point at the real ones instead of leaving the agent to guess again
   if (message && /^Tool \S+ not found/.test(message)) {
@@ -409,10 +518,10 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   const detail = await getTrigger(trigger, who);
   if (!detail) throw new AppsError(`no trigger ${trigger}; list them with emplio automations triggers <app>`);
   const app = appOf(trigger);
-  let connection = await findConnection(who, app, account);
+  let connection: Row | undefined = await findConnection(who, app, account);
   // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
   if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
-  if (connection?.status === "pending") connection = await refresh(connection);
+  if (connection?.status === "pending") connection = (await refresh(connection)) ?? undefined;
   if (connection?.status !== "active") throw new AppsError(`${app} isn't connected for the person who saved it`);
   const polled = pollsRun(appOf(trigger), who) ? pollTrigger(trigger) : undefined;
   if (polled) {
@@ -505,7 +614,7 @@ export async function appsCommand(
         const list = await listConnections(who);
         if (!list.length) return "No apps connected. Find one with emplio apps search <words>, connect with emplio apps add <app>.";
         const label = { pending: "waiting for sign-in", active: "connected", expired: "expired: reconnect", failed: "failed: reconnect" };
-        return list.map((c) => `${c.app}\t"${c.label}"\t${label[c.status]}\tsince ${c.createdAt.slice(0, 10)}`).join("\n");
+        return list.map((c) => `${c.app}\t"${c.label}"\t${label[c.status]}${c.problem ? ` (${c.problem})` : ""}\tsince ${c.createdAt.slice(0, 10)}`).join("\n");
       }
       case "search": {
         const apps = await searchApps([first, ...rest].join(" "), undefined, who);
@@ -653,7 +762,7 @@ ul{padding-left:20px;margin:6px 0 14px}.m{color:#555;font-size:13px}a{color:inhe
 @media(prefers-color-scheme:dark){body{background:#111;color:#eee}.b{background:#eee;color:#111}.m{color:#aaa}}</style>
 <h1>${logo ? `<img src="${esc(new URL(logo, FRONTEND_URL()).href)}" alt="">` : ""}Connect ${esc(name)}</h1>
 <p>Emplio will be able to:</p><ul>${li}</ul>
-<p class="m">Your Google data is used only to do what you or your team ask Emplio. To do it, the AI model doing the work reads it; that model isn't allowed to keep it or train on it. Emplio never sells it, never uses it for ads, and never uses it to train AI models. Disconnect any time in Integrations, which also removes Emplio's access in your Google account. <a href="https://emplio.app/privacy#google" target="_blank" rel="noopener">How Emplio handles Google data</a></p>
+<p class="m">Your Google data is used only to do what you or your team ask Emplio. To do it, the AI model doing the work reads it; that model isn't allowed to keep it or train on it. Emplio never sells it, never uses it for ads, and never uses it to train AI models. Disconnect any time in Integrations; disconnecting the last Google app on an account also removes Emplio's access in your Google account. <a href="https://emplio.app/privacy#google" target="_blank" rel="noopener">How Emplio handles Google data</a></p>
 <a class="b" href="${esc(next)}">I agree, continue to Google</a>`;
 }
 
@@ -811,7 +920,7 @@ export async function integrationRoutes(app: FastifyInstance) {
     if (provider.mustStartHere?.(name) && !startedHere(req.headers.cookie, row.id)) return reply.type("text/html").send(await keyPage(name, null, "This sign-in was started somewhere else. Connect again from the chat."));
     // said no on the app's page: a new connection goes, a working one is left as it was
     if (!req.query.code) {
-      if (row.secret) await db.update(connections).set({ externalId: row.id, status: "active", updatedAt: new Date() }).where(eq(connections.id, row.id));
+      if (row.secret) await db.update(connections).set({ externalId: row.id, oldExternalId: null, status: "active", updatedAt: new Date() }).where(eq(connections.id, row.id));
       else await db.delete(connections).where(eq(connections.id, row.id));
       return reply.redirect(s.back);
     }
@@ -819,7 +928,7 @@ export async function integrationRoutes(app: FastifyInstance) {
       const { secret, label, refreshToken, expiresAt } = await provider.finishSignIn!(name, req.query.code, s.back, req.query);
       const others = (await accounts(row, name)).filter((o) => o.id !== row.id);
       const named = row.label ?? uniqueLabel(label ?? appName(name), others);
-      await db.update(connections).set({ externalId: row.id, secret: encrypt(secret), refreshToken: refreshToken ? encrypt(refreshToken) : null, expiresAt: expiresAt ?? null, status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
+      await db.update(connections).set({ externalId: row.id, oldExternalId: null, problem: null, secret: encrypt(secret), refreshToken: refreshToken ? encrypt(refreshToken) : null, expiresAt: expiresAt ?? null, status: "active", label: named, updatedAt: new Date() }).where(eq(connections.id, row.id));
       record({ workspaceId: row.workspaceId, userId: row.userId, kind: "connection", summary: `Connected ${appName(name)} (${named})` });
       return reply.redirect(s.back);
     } catch (error) {

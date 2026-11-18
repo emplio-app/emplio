@@ -33,7 +33,8 @@ export type AddMemberRequest = { email: string; name?: string; role?: "admin" | 
 export type UpdateMemberRequest = { role?: "admin" | "member"; reportsTo?: string | null };
 
 // label: which account (the Gmail address, or a name the person gave it); tells several of one app apart
-export type Connection = { id: string; app: string; name: string; label: string; logo?: string; keyField?: KeyField; signIn?: boolean; status: "pending" | "active" | "expired" | "failed"; createdAt: string };
+// problem: why it isn't (fully) working, said to the person, such as permissions left out when it was connected
+export type Connection = { id: string; app: string; name: string; label: string; logo?: string; keyField?: KeyField; signIn?: boolean; status: "pending" | "active" | "expired" | "failed"; problem?: string; createdAt: string };
 // keyField: the app is connected by pasting a key (shown as a form), not by signing in on its page
 export type KeyField = { label: string; help: string; placeholder?: string };
 // signIn: besides the key, can be signed in to on the app's own page

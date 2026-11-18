@@ -137,7 +137,7 @@ export async function call(api: Api, key: string, send: Send, input: Record<stri
       ? Object.entries(j.errors).map(([k, v]) => `${k}: ${[v].flat().join(", ")}`).join("; ")
       : "";
     if (api.deadToken ? api.deadToken(res.status, j) : res.status === 401)
-      throw new AppsError(`${api.name} rejected the token; make a new one (${api.tokenHelp}) and reconnect`, true);
+      throw new AppsError(`${api.name} rejected the token; make a new one (${api.tokenHelp}) and reconnect`, true, `${why || res.statusText} (${res.status})`);
     throw new AppsError(`${api.name}: ${why || res.statusText}${fields ? ` (${fields})` : ""} (${res.status})`);
   }
   if (/stream\+json|ndjson/.test(type)) return readStream(res);

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { CATALOG } from "./catalog";
-import { availableApps, providerFor } from "./index";
+import { afterCheck, availableApps, MISSING_SCOPE, providerFor } from "./index";
 import { own } from "./own";
 
 // sign-in only: not connectable until this server has their client id and secret
@@ -39,4 +39,26 @@ test("an app held back stays on Composio, except for the workspaces testing ours
     delete process.env.OWN_APP_TESTERS;
   }
   expect(providerFor("slack", { workspaceId: "customer" }).name).toBe("own");
+});
+
+test("a sign-in given up on never shows as expired: a reconnect gets its old login back, a new account goes", () => {
+  const reconnecting = { status: "pending" as const, label: "me@work.com", oldExternalId: "ca_old" };
+  const adding = { status: "pending" as const, label: null, oldExternalId: null };
+  expect(afterCheck(reconnecting, "expired")).toBe("restore");
+  expect(afterCheck(reconnecting, "failed")).toBe("restore");
+  expect(afterCheck(reconnecting, "pending")).toBe("store");
+  expect(afterCheck(reconnecting, "active")).toBe("finish");
+  expect(afterCheck(adding, "expired")).toBe("drop");
+  expect(afterCheck(adding, "active")).toBe("store");
+  // left over from before: never signed in, already stored as expired
+  expect(afterCheck({ status: "expired", label: null, oldExternalId: null }, "expired")).toBe("drop");
+  // a reconnect of an account that had already stopped working: expired is the truth
+  expect(afterCheck({ status: "pending", label: "me@work.com", oldExternalId: null }, "expired")).toBe("store");
+});
+
+test("permissions left out at sign-in are told apart from a file the account can't open", () => {
+  // what Google Drive said, through Composio, to an account signed in with its box unticked
+  expect(MISSING_SCOPE.test('Error finding files: 403. { "error": { "code": 403, "message": "Request had insufficient authentication scopes."')).toBe(true);
+  expect(MISSING_SCOPE.test("ACCESS_TOKEN_SCOPE_INSUFFICIENT")).toBe(true);
+  expect(MISSING_SCOPE.test('"reason": "insufficientFilePermissions", "message": "The user does not have sufficient permissions for this file."')).toBe(false);
 });
