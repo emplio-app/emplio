@@ -300,6 +300,24 @@ async function preview(req: Request, url: URL, to: string) {
   }
 }
 
+// Computers asleep this many days are deleted, to free their disk; Emplio makes a fresh one if that person comes back
+// (their work is saved elsewhere). Unset keeps them forever.
+const FORGET_DAYS = Number(process.env.COMPUTER_FORGET_DAYS ?? 0);
+async function forgetOld() {
+  const cutoff = Date.now() - FORGET_DAYS * 86_400_000;
+  const ids = text(await docker(["ps", "-aq", "--no-trunc", "--filter", "label=emplio.kind=computer", "--filter", "status=exited"])).split("\n").filter(Boolean);
+  for (const id of ids) {
+    const finished = Date.parse(text(await docker(["inspect", "-f", "{{.State.FinishedAt}}", id])));
+    if (finished && finished < cutoff) await docker(["rm", id]);
+  }
+  // the networks of people with no computer left
+  await docker(["network", "prune", "-f", "--filter", "label=emplio.kind=network"]);
+}
+if (FORGET_DAYS > 0) {
+  setInterval(() => void forgetOld().catch((error) => console.error("forgetting old computers failed", error)), 3_600_000);
+  void forgetOld().catch(() => {});
+}
+
 const server = Bun.serve({
   port: Number(process.env.PORT ?? 4100),
   // a server that only holds computers: listen on localhost, behind the HTTPS proxy
