@@ -1365,7 +1365,14 @@ type Repo = ReturnType<typeof reposFor>[number];
 
 // Bring a box's clone up to Gitea's main, replaying any local commits on top. False on a real conflict.
 async function catchUp(box: Box, s: Session, r: Repo) {
-  const at = await exec(box, `git -C ${r.dir} rev-parse -q --verify refs/remotes/origin/main`);
+  const at = await exec(box, `test -d ${r.dir}/.git || exit 3; git -C ${r.dir} rev-parse -q --verify refs/remotes/origin/main`);
+  // not on this computer yet: someone made admin after it was set up gets restricted/ now
+  if (at.exitCode === 3) {
+    await ensureRepo(s.workspaceId, r.repo, r.about);
+    await upload(box, `${BUNDLES}/${r.dir}.bundle`, (await bundleFor(s.workspaceId, r.repo, null))!);
+    await mustExec(box, `rm -rf ${r.dir} && git clone -q -b main ${BUNDLES}/${r.dir}.bundle ${r.dir} && rm ${BUNDLES}/${r.dir}.bundle`);
+    return true;
+  }
   // a box that didn't answer (timed out) must not be taken for one with no history yet
   if (at.exitCode && at.exitCode !== 1) {
     // looked up again next time, which swaps it if it froze (findOrCreate)
