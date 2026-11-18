@@ -16,7 +16,9 @@ const BROWSER_IMAGE = process.env.BROWSER_IMAGE ?? "emplio-browser";
 const APP_CONTAINER = process.env.APP_CONTAINER ?? "emplio-app";
 // another runtime for the containers, like gVisor's runsc, which gives each one its own small kernel
 const RUNTIME = process.env.COMPUTER_RUNTIME ? ["--runtime", process.env.COMPUTER_RUNTIME] : [];
-const LIMITS = [...RUNTIME, "--memory", process.env.COMPUTER_MEMORY ?? "2g", "--cpus", process.env.COMPUTER_CPUS ?? "2", "--pids-limit", "1024"];
+// memory-swap the same as memory: no spilling into the machine's swap, which would let one computer use far more
+const MEMORY = process.env.COMPUTER_MEMORY ?? "2g";
+const LIMITS = [...RUNTIME, "--memory", MEMORY, "--memory-swap", MEMORY, "--cpus", process.env.COMPUTER_CPUS ?? "2", "--pids-limit", "1024"];
 // name servers written into a computer each time it starts, for runtimes that can't use Docker's own (gVisor on a
 // person's network): "1.1.1.1,8.8.8.8"
 const DNS = (process.env.COMPUTER_DNS ?? "").split(",").filter((ip) => /^[0-9a-f.:]+$/i.test(ip));
@@ -152,6 +154,12 @@ async function runIn(id: string, body: { command?: unknown; cwd?: unknown; env?:
   const d = await docker([...args, "bash", "-c", script, body.command], { env }).finally(() => signal.removeEventListener("abort", kill));
   void docker(["exec", id, "rm", "-f", `/tmp/.run-${run}`]);
   const out = new TextDecoder().decode(d.out.slice(0, MAX_OUTPUT)) + d.err;
+  // gVisor stops the whole computer when it goes over its memory, while Docker still calls it running: start it again
+  if (d.code === 128 && /WaitPID"? failed|in state stopped/.test(out)) {
+    await must(["restart", "-t", "1", id]);
+    await setDns(id);
+    return Response.json({ exitCode: 137, result: `The computer ran out of memory (${MEMORY}) and restarted: files are kept, programs that were running stopped. Use less memory at once (smaller batches, streaming instead of loading whole files).` });
+  }
   return Response.json(d.code === 124 ? { exitCode: 124, result: `Command timed out after ${seconds}s` } : { exitCode: d.code, result: out });
 }
 
