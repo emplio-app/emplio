@@ -14,7 +14,7 @@ import { isReplying, notify } from "./live";
 import { settingsFor } from "./settings";
 import { chase, line, listTasks } from "./tasks";
 import { notesWithNames, readChats, SILENT } from "./reader";
-import { at, dayIn as day, hourIn, timezoneOf, when as time } from "./time";
+import { at, dayIn as day, hourIn, minuteIn, timezoneOf, when as time } from "./time";
 
 // Check-ins (on by default): every few hours in the working day the agent looks around on
 // its own, as the owner, in one hidden "Check-ins" chat per business (kind background); a note that needs them is
@@ -233,6 +233,10 @@ export const workingDay = (s: Pick<Settings, "briefHour" | "reportHour">) => {
   return { start: Number(s.briefHour) || 9, end: report === null ? 20 : report + 1, report };
 };
 
+// A business's or person's own minute in the first quarter hour of the working day, the same every day (from its id)
+export const startMinute = (id: string) => (parseInt(id.replace(/[^0-9a-f]/gi, "").slice(-4), 16) || 0) % 15;
+const waitsToStart = (id: string, hour: number, start: number, tz: string) => hour === start && minuteIn(tz) < startMinute(id);
+
 async function tick() {
   // readers run at any hour; the rounds they feed only in the working day
   await readChats().catch((error) => console.error("reading chats failed", error));
@@ -258,6 +262,8 @@ async function tick() {
     // business's very first round is one only in the morning (set up at 2pm: a check-in, tomorrow the brief)
     const brief = w.heartbeatAt ? w.heartbeatAt < at(today, `${String(hours.start).padStart(2, "0")}:00`, tz) : hour < 12;
     if (!report && !brief && w.heartbeatAt && Date.now() - w.heartbeatAt.getTime() < every * 3_600_000 - 60_000 && !(await urgentSince(w.id, w.heartbeatAt))) continue;
+    // the day's first rounds start spread over its first quarter hour, not all in its first minute (computers are capped)
+    if (brief && !report && waitsToStart(w.id, hour, hours.start, tz)) continue;
     const kind: Kind = report ? "report" : brief ? "brief" : "check-in";
     // not awaited: a check-in takes minutes; the claim in checkIn keeps the next tick from starting another
     void checkIn(w, kind).catch((error) => console.error("check-in failed", w.id, error));
@@ -273,7 +279,7 @@ async function tick() {
     const hour = hourIn(tz);
     const last = hour < 12 ? m.briefAt : m.reportAt;
     if (last && day(last, tz) === day(new Date(), tz)) continue;
-    if (hour < 12 && hour >= hours.start) void briefFor(m, "brief").catch((error) => console.error("staff brief failed", m.workspaceId, m.userId, error));
+    if (hour < 12 && hour >= hours.start && !waitsToStart(m.userId, hour, hours.start, tz)) void briefFor(m, "brief").catch((error) => console.error("staff brief failed", m.workspaceId, m.userId, error));
     else if (hour >= 12 && hours.report !== null && hour >= hours.report && hour < hours.end) void briefFor(m, "report").catch((error) => console.error("staff report failed", m.workspaceId, m.userId, error));
   }
 }

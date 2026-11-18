@@ -490,7 +490,7 @@ export type AgentInfo = { slug: string; name: string; description: string; skill
 // GET /jobs/:id: a piece of work Emplio handed off (emplio hand), shown live in the chat.
 // GET /jobs: the person's latest jobs (Emplio's own, not theirs), nested under Chat in the sidebar
 // startedIn: the chat it nests under in the sidebar, through any jobs that started it
-export type JobSummary = Pick<JobInfo, "id" | "name" | "agent" | "status" | "chatId"> & { startedIn: string };
+export type JobSummary = Pick<JobInfo, "id" | "name" | "agent" | "status" | "chatId"> & { startedIn: string; updatedAt: string; running: boolean };
 
 // A hand-off's card, in a command's output: the job and the run its prompt started (`job/run`, the prompt's message
 // id in the job's chat). Each prompt is its own run, so an earlier card stays finished. Older ones: the job alone.

@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type WorkingJob } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type JobSummary, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -265,7 +265,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
 
   // A message or reply that came from elsewhere while this chat is open (Telegram, a task, a check-in): the
   // chat list's nudge shows it changed, so load what's new and follow a reply still being written.
-  const summary = conversations?.find((c) => c.id === id);
+  // a job's chat isn't in the chat list: its line in the jobs list (the sidebar's query) says the same
+  const { data: jobList } = useQuery({ queryKey: ["jobs"], queryFn: () => api<JobSummary[]>("/jobs"), enabled: !!job });
+  const summary = job ? jobList?.find((j) => j.chatId === id) : conversations?.find((c) => c.id === id);
   const change = summary && `${summary.updatedAt}|${summary.running}`;
   const seen = useRef(change);
   // bumped on every send: a load that started before it would wipe the sent message off the screen (a queued
@@ -799,13 +801,19 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the card arrives
   }, [cardRoom]);
 
+  // Following the end while a reply streams, like the thinking box: reaching the end sticks to it, and only moving
+  // up lets go. A reply growing below doesn't, so a long one keeps coming into view while they're at the end, and
+  // stays put once they've scrolled up to read. After a send the turn is a screen tall, so the end is the prompt's
+  // place at the top until the reply outgrows it.
+  const lastTop = useRef(0);
   const checkBottom = () => {
     const el = scrollRef.current;
     if (!el || el.clientHeight !== viewHeight.current) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAtBottom(gap < 80 + cardRoom);
-    // after a send the reply fills in below the prompt instead (pinLatest)
-    stuck.current = !pinLatest && gap < 2;
+    if (gap < 2) stuck.current = true;
+    else if (el.scrollTop < lastTop.current) stuck.current = false;
+    lastTop.current = el.scrollTop;
     // two screens ahead, so a pause in scrolling has them ready before the top is reached
     if (el.scrollTop >= el.clientHeight * 2 || drawingEarlier.current) return;
     drawingEarlier.current = true;

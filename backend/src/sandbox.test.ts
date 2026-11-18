@@ -363,6 +363,9 @@ test("emplio hand and report read what's on stdin, and old emplio jobs points to
   };
   expect((await run(`./emplio hand "Book Keeper" <<'EOF'\nOctober fixes\nEOF`)).args).toEqual(["hand", "Book Keeper", "October fixes\n".trimEnd()]);
   expect((await run(`./emplio hand "Book Keeper" --description "Keeps books" <<'EOF'\nthe brief\nEOF`)).args).toEqual(["hand", "Book Keeper", "--description", "Keeps books", "the brief"]);
+  // a fresh job: --new after the agent (emplio.hand(..., new=True, input=...) puts it there) still reads the brief
+  expect((await run(`./emplio hand "Book Keeper" --new <<'EOF'\nthe brief\nEOF`)).args).toEqual(["hand", "Book Keeper", "--new", "the brief"]);
+  expect((await run(`./emplio hand "Book Keeper" --new --level strong <<'EOF'\nthe brief\nEOF`)).args).toEqual(["hand", "Book Keeper", "--new", "--level", "strong", "the brief"]);
   expect((await run(`./emplio hand a1b2c3d4 "carry on"`)).args).toEqual(["hand", "a1b2c3d4", "carry on"]);
   expect((await run(`./emplio hand help`)).args).toEqual(["hand", "help"]);
   expect((await run(`./emplio threads list`)).args).toEqual(["list"]);

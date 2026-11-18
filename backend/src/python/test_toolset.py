@@ -11,6 +11,7 @@ import kernel  # noqa: E402
 import emplio  # noqa: E402
 
 T = emplio._toolset
+T.NEED_RETURNS = False  # the examples below are about saving; what a tool returns is checked at the end
 FAILED = []
 
 
@@ -469,6 +470,44 @@ if os.path.exists(os.path.join(fake, "asked")):
 out = call("allowed", "from tools.acct import grant_all; print(grant_all(['a', 'b', 'c']))")
 check("emplio.map inside an allowed tool asks once, not per item", str(open(os.path.join(fake, "asked")).read().count("tools allow")) + " " + out[-30:], "1 " + out[-30:])
 check("Emplio's own run once allowed doesn't ask again", call("error: no", "import os; os.environ['EMPLIO_TOOL_OK'] = 'acct.grant'\n    from tools.acct import grant; print(grant('z@z.z'))"), "granted z@z.z 1")
+
+# a person's own computer: /work is a folder in their home, and a path Emplio answers with must open there too
+os.makedirs(os.path.join(WORK, "tmp", "apps", "files"), exist_ok=True)
+open(os.path.join(WORK, "tmp", "apps", "files", "shot.png"), "w").write("png")
+check("a path in Emplio's answer is this computer's", call('{"file": "/work/tmp/apps/files/shot.png"}', "p = emplio.apps.run('x')['file']; print(open(p).read(), p == emplio.W + '/tmp/apps/files/shot.png')"), "png True")
+check("…and a shell command built from one runs", call("/work/tmp/apps/files/shot.png", "print(emplio.sh('cat ' + emplio.apps.run('x')))"), "png")
+check("…a path built at run time too", call("x", "print(emplio.sh('cat ' + '/wo' + 'rk/tmp/apps/files/shot.png'))"), "png")
+check("…but not /workspace or ~/work", emplio._local("/workspace ~/work a/work"), "/workspace ~/work a/work")
+
+# what a tool gives back is said where it's listed, so the next job needn't read its code
+T.NEED_RETURNS = True
+ns = session()
+run(ns, """
+def thread_msgs(thread_id):
+    \"\"\"Messages in a mail thread.\"\"\"
+    return [{"from": "a", "text": thread_id}]
+def thread_msgs2(thread_id):
+    \"\"\"Messages in a mail thread.
+
+    Returns a list of dicts with from and text, oldest first.\"\"\"
+    return [{"from": "a", "text": thread_id}]
+def mark_read(thread_id) -> bool:
+    \"\"\"Mark a thread read.\"\"\"
+    return True
+def archive(thread_id):
+    \"\"\"Archive a thread.\"\"\"
+    print(thread_id)
+""")
+check("a tool that returns something must say what", save("thread_msgs", area="mail")[:60], "REFUSED say in thread_msgs's docstring what it returns (\"Re")
+check("…said in the docstring", save("thread_msgs2", area="mail"), "Saved tool mail.thread_msgs2 (only reads) in company/toolset/mail.py. Use it: from tools.mail import thread_msgs2")
+check("…or as -> annotation", save("mark_read", area="mail", risk="changes")[:31], "Saved tool mail.mark_read (chan")
+check("…and one returning nothing needn't", save("archive", area="mail", risk="changes")[:28], "Saved tool mail.archive (cha")
+check("search shows what it returns", T.listing("thread")[0], "  tools.mail.thread_msgs2(thread_id): Messages in a mail thread. Returns a list of dicts with from and text, oldest first. [only reads]")
+import io, contextlib
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    T.Tools().show("mail.mark_read")
+check("show: the tool in full without its code", out.getvalue().splitlines()[0], "tools.mail.mark_read(thread_id) -> bool  [changes things, company/toolset/mail.py]")
 
 print(f"\n{'all passed' if not FAILED else f'{len(FAILED)} failed'}")
 for f in FAILED:

@@ -18,6 +18,14 @@ from concurrent.futures import ThreadPoolExecutor
 __all__ = ["EmplioError", "ShellError", "Failed", "sh", "map", "help", "tools"]
 
 W = os.environ.get("EMPLIO_WORK") or "/work"
+# "/work" as a word of its own (not a/work, ~/work, /workspace): the same rule as the desktop app's (desktop/src/paths.js)
+_WORK_WORD = re.compile(r"(?<![\w.~/-])/work(?=$|[\s/\"';:)|&<>,}\]])", re.M)
+
+
+def _local(text):
+    """On a person's own computer /work is a folder in their home: the app swaps it in the code it's sent, but not in a
+    path that turns up while the code runs (an answer of Emplio's, a command built from one), so that's swapped here."""
+    return _WORK_WORD.sub(lambda _: W, text) if W != "/work" and isinstance(text, str) else text
 
 
 class EmplioError(Exception):
@@ -51,7 +59,7 @@ def sh(command, check=True, timeout=None, input=None):
         if check and code:
             raise ShellError(f"exit {code}: {out.strip() or '(no output)'}\n(command: {command[:300]})")
         return out
-    done = subprocess.run([_bash(), "-c", command], input=input, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    done = subprocess.run([_bash(), "-c", _local(command)], input=input, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     out = done.stdout[:-1] if done.stdout.endswith("\n") else done.stdout
     if check and done.returncode:
         raise ShellError(f"exit {done.returncode}: {out.strip() or '(no output)'}\n(command: {command[:300]})")
@@ -110,12 +118,10 @@ def _parse(text):
             pass
     m = re.match(r"Result is [\d,]+ characters, saved in full to (\S+?)\s", t)
     if m:
-        path = m.group(1).rstrip(".")
-        if W != "/work" and path.startswith("/work/"):
-            path = W + path[5:]
+        path = m.group(1).rstrip(".")  # already this computer's own (_run)
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                return json.loads(_local(f.read()))
         except (OSError, ValueError):
             pass
     return text
@@ -136,7 +142,7 @@ def _run(words, input=None):
     if later:
         # finished by the server once this run ends: the marker goes in the output for it to fill in
         print("\n".join(later), flush=True)
-    text = "\n".join(kept).strip("\n")
+    text = _local("\n".join(kept).strip("\n"))
     err = done.stderr.strip()
     asked = words[-1:] == ["help"]  # help asked for is an answer, not a mistake
     if (done.returncode and not asked) or text.lstrip().startswith("error:") or (text.lstrip().startswith("usage:") and not asked):

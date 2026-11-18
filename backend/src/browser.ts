@@ -37,21 +37,40 @@ onGone((deviceId) => {
   for (const [chat, pending] of open) {
     void pending.then(
       (live) => {
-        if (live?.id.startsWith(`dev_${deviceId}_`) && open.get(chat) === pending) {
-          clearTimeout(live.timer);
-          clearInterval(live.keeper);
-          open.delete(chat);
-        }
+        if (live?.id.startsWith(`dev_${deviceId}_`)) void forget(chat, live);
       },
       () => {},
     );
   }
 });
 
+// The chat's browser is gone: the next command starts one again
+export async function forget(conversationId: string, live: LiveBrowser) {
+  const pending = open.get(conversationId);
+  if ((await pending?.catch(() => null)) !== live || open.get(conversationId) !== pending) return;
+  clearTimeout(live.timer);
+  clearInterval(live.keeper);
+  open.delete(conversationId);
+}
+
+// A browser that closed (the person quit the Chrome their computer started) while their computer stayed online
+export class BrowserGone extends Error {
+  constructor() {
+    super("the browser is gone");
+  }
+}
+
+// The browser's own DevTools address
+export async function socketUrl(cdpUrl: string) {
+  const r = await fetch(`${cdpUrl}/json/version`);
+  const url = r.ok ? ((await r.json().catch(() => ({}))) as { webSocketDebuggerUrl?: string }).webSocketDebuggerUrl : undefined;
+  if (!url) throw new BrowserGone();
+  return url;
+}
+
 // One DevTools session on a tab: send a command, wait for its answer.
 export async function devtools(cdpUrl: string) {
-  const { webSocketDebuggerUrl } = (await (await fetch(`${cdpUrl}/json/version`)).json()) as { webSocketDebuggerUrl: string };
-  const sock = new WebSocket(webSocketDebuggerUrl);
+  const sock = new WebSocket(await socketUrl(cdpUrl));
   await new Promise((resolve, reject) => {
     sock.onopen = resolve;
     sock.onerror = () => reject(new Error("couldn't reach the browser"));
@@ -287,7 +306,7 @@ const idle = (conversationId: string, live: LiveBrowser) => {
       if (busy) return;
       busy = true;
       void keepSignIns(live)
-        .catch((e) => console.error("browser sign-ins not kept:", e))
+        .catch((e) => (e instanceof BrowserGone ? void forget(conversationId, live) : console.error("browser sign-ins not kept:", e)))
         .finally(() => (busy = false));
     }, KEEP_MS);
   }
