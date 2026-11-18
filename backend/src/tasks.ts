@@ -3,6 +3,7 @@
 // Owner and admins see and change all of them; staff the ones they asked for or have to do.
 // Chasing (`chase`, run by the check-in timer, in each person's own work hours): once a person's task is due they get a reminder
 // on their channel, once (their morning brief lists it as late after that); two days late, whoever asked (or the owner) is told, once.
+// One of the AI's own can name the agent of its that does it (`agent`): its run hands it over (`emplio hand`).
 // The AI's own tasks (`startDueTasks`) start on their own at their due time (straight away without one), as whoever
 // asked, with their apps and view: back in the chat they came from, with everything said there,
 // or in a new background chat when there's none (added on the Tasks page, or the chat was deleted). The background agent's hand-offs always get a new one.
@@ -12,6 +13,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql, type SQL } from
 import type { FastifyInstance } from "fastify";
 import { TASK_PREFIX, TASK_STATUSES, type Role, type Task, type TaskInput, type TaskStatus } from "@emplio/shared";
 import { record } from "./activity";
+import { findAgent, listAgents } from "./agents";
 import { context } from "./auth";
 import { listAutomations, personFor } from "./automations";
 import { generateReply, lastWords, quiet } from "./chat";
@@ -19,7 +21,7 @@ import { isReplying } from "./live";
 import { chatLink, heldBack, mainChat, post, sendTo } from "./channels";
 import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
-import { conversations, tasks, workspaceMembers, workspaces } from "./db/schema";
+import { conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
 import { listTeam } from "./team";
 
 type Who = { workspaceId: string; userId: string; role: Role };
@@ -47,16 +49,26 @@ export function parseDue(s: string, tz = DEFAULT_ZONE) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// what each task's agent is called now, as whoever asked sees their agents (the run hands it over as them)
+async function agentNames(rows: Row[], workspaceId: string) {
+  const names = new Map<string, string>();
+  for (const userId of new Set(rows.flatMap((t) => (t.agent && t.requesterId ? [t.requesterId] : []))))
+    for (const a of await listAgents(workspaceId, { userId, admin: true }).catch(() => [])) names.set(`${userId}/${a.slug}`, a.name);
+  return names;
+}
+
 async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
   const names = new Map((await listTeam(workspaceId)).map((m) => [m.id, m.name ?? m.email]));
-  return rows.map((t) => ({
+  const agents = await agentNames(rows, workspaceId);
+  return rows.map((t) => withName({
     id: t.id,
     title: t.title,
     notes: t.notes,
     status: t.status,
     waitingOn: t.waitingOn,
     assigneeId: t.assigneeId,
-    assigneeName: t.assigneeId ? (names.get(t.assigneeId) ?? "(left the team)") : AI,
+    agent: t.agent,
+    agentName: t.agent ? (agents.get(`${t.requesterId}/${t.agent}`) ?? t.agent) : null,
     requesterId: t.requesterId,
     requesterName: t.requesterId ? (names.get(t.requesterId) ?? "(left the team)") : null,
     dueAt: t.dueAt?.toISOString() ?? null,
@@ -67,8 +79,10 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
     chases: t.chases,
     createdAt: t.createdAt.toISOString(),
     doneAt: t.doneAt?.toISOString() ?? null,
+    assigneeName: t.assigneeId ? (names.get(t.assigneeId) ?? "(left the team)") : AI,
   }));
 }
+const withName = (t: Task): Task => (t.agentName ? { ...t, assigneeName: `the ${t.agentName} agent` } : t);
 
 // assignee: a user id, null for the AI, undefined for anyone. open: not done or cancelled. due: due by now.
 export async function listTasks(w: Who, f: { assignee?: string | null; open?: boolean; due?: boolean; mine?: boolean } = {}) {
@@ -99,6 +113,15 @@ async function check(w: Who, input: TaskInput) {
     });
     if (!m) return "that person isn't on the team";
   }
+  if (input.agent) {
+    if (input.assigneeId) return "a task goes to a person or to an agent, not both";
+    // by its id (slug) or its name, renamed ones too; saved by id, which stays when it's renamed
+    const viewer = { userId: w.userId, admin: isAdmin(w) };
+    const q = input.agent.trim().toLowerCase();
+    const a = (await findAgent(w.workspaceId, input.agent, viewer)) ?? (await listAgents(w.workspaceId, viewer)).find((x) => x.name.toLowerCase() === q);
+    if (!a || a.archived) return `no agent named "${input.agent}" (emplio agents list)`;
+    input.agent = a.slug;
+  }
   return null;
 }
 
@@ -118,6 +141,7 @@ export async function addTask(w: Who, input: TaskInput, conversationId?: string)
       status,
       waitingOn: input.waitingOn?.trim() || null,
       assigneeId: input.assigneeId ?? null,
+      agent: input.agent || null,
       requesterId: w.userId,
       dueAt: input.dueAt ? parseDue(input.dueAt, await timezoneOf(w.userId)) : null,
       conversationId: conversationId || null,
@@ -136,8 +160,8 @@ const find = (w: Who, id: string) =>
 // The AI runs a task as whoever asked for it, with their apps and what they may see. So anyone else who writes what it
 // should do, or hands it to the AI, becomes who asked: nobody gets to borrow someone's access by rewriting their task.
 export function takesOver(w: Pick<Who, "userId">, t: Pick<Row, "assigneeId" | "requesterId">, input: TaskInput) {
-  const forAI = (input.assigneeId === undefined ? t.assigneeId : input.assigneeId) === null;
-  const steered = input.title !== undefined || input.notes !== undefined || input.assigneeId !== undefined;
+  const forAI = input.agent ? true : (input.assigneeId === undefined ? t.assigneeId : input.assigneeId) === null;
+  const steered = input.title !== undefined || input.notes !== undefined || input.assigneeId !== undefined || input.agent !== undefined;
   return forAI && steered && t.requesterId !== w.userId;
 }
 
@@ -151,6 +175,10 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
   if (input.notes !== undefined) set.notes = input.notes?.trim() || null;
   if (input.waitingOn !== undefined) set.waitingOn = input.waitingOn?.trim() || null;
   if (input.assigneeId !== undefined) set.assigneeId = input.assigneeId;
+  // a person or an agent: picking one drops the other
+  if (input.assigneeId) set.agent = null;
+  if (input.agent !== undefined) set.agent = input.agent || null;
+  if (input.agent) set.assigneeId = null;
   if (takesOver(w, t, input)) set.requesterId = w.userId;
   if (input.status !== undefined) {
     set.status = input.status;
@@ -276,6 +304,11 @@ async function work(t: Row, asked = false) {
   // they're mid-conversation there: generateReply waits for that reply (holdChat)
   // ponytail: waits in memory; a restart meanwhile leaves it doing (shown as such), like any task cut off by one
   const id = t.id.slice(0, 8);
+  // its agent's own chat (the agent added it there): it does it itself, rather than hand it to a copy of itself
+  const handTo =
+    t.agent && !(source?.kind === "job" && (await db.query.jobs.findFirst({ where: eq(jobs.chatId, source.id), columns: { agent: true } }))?.agent === t.agent)
+      ? (await one(t)).agentName
+      : null;
   const text = [
     `${TASK_PREFIX}Task ${id} from the Tasks list, for you, asked by ${person.userName}: ${t.title}`,
     ...(t.dueAt ? [`Due: ${when(t.dueAt, await timezoneOf(person.userId))}`] : []),
@@ -286,7 +319,9 @@ async function work(t: Row, asked = false) {
     "",
     `First check it's still needed: ${person.userName} may have answered it or done it since (\`emplio history search <words>\`, recent messages first). If so, mark it done and say so in one line.`,
     ...(t.chases > 2 ? [`It has run ${t.chases - 1} times already: if nothing has changed, don't push it again; set it waiting on ${person.userName} instead of rescheduling.`] : []),
-    "Do it now. Then update the task:",
+    handTo
+      ? `Hand it to your ${handTo} agent now: \`emplio hand ${JSON.stringify(t.agent)}\`, with the task and how to do it as its brief. Wait for its report and check it, then update the task:`
+      : "Do it now. Then update the task:",
     `- finished: \`emplio tasks done ${id}\``,
     `- needs a person (a decision, an OK, a reply): \`emplio tasks update ${id} --status waiting --waiting "<who and what>"\``,
     `- can't be done yet: \`emplio tasks update ${id} --status todo --due <when to try again>\` (it starts again then)`,
@@ -428,7 +463,8 @@ options: --to <email, name, me or ai>  who does it (default: ai)
          --notes <text>                how to do it: steps, the skill to follow, links
          --status todo|doing|waiting|done|cancelled
          --waiting <text>              who or what it's waiting on
-         --agent <name>                the agent that does it, for your own tasks (emplio agents list)
+         --agent <name>                the agent of yours that does it (emplio agents list); "none": you
+                                       do it yourself
          --actions a,b                 with --every: every app action its runs take that sends or changes something
                                        (gmail.send_email); the person allows them once on a card, and runs may do
                                        only those
@@ -449,7 +485,7 @@ export const line = (t: Task, tz: string) =>
 
 // A repeating task is an automation underneath (automations.ts): `repeat` saves one, as this chat's person.
 // asked by code (the Python library): a task as data
-const asData = (t: Task) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt ? new Date(t.dueAt).toISOString() : null, assignee: t.assigneeName, waiting_on: t.waitingOn ?? null, asked_by: t.requesterName ?? null });
+const asData = (t: Task) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt ? new Date(t.dueAt).toISOString() : null, assignee: t.assigneeName, agent: t.agentName, waiting_on: t.waitingOn ?? null, asked_by: t.requesterName ?? null });
 
 export async function tasksCommand(w: Who, conversationId: string, args: string[], repeat?: (name: string, file: string) => Promise<string>, data = false) {
   const [sub, ...rest] = args;
@@ -484,6 +520,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     if (opts.status !== undefined) i.status = opts.status as TaskStatus;
     if (opts.waiting !== undefined) i.waitingOn = opts.waiting;
     if (opts.title !== undefined) i.title = opts.title;
+    if (opts.agent !== undefined) i.agent = opts.agent === "none" ? null : opts.agent;
     return i;
   };
   const show = (t: Task) =>
@@ -542,8 +579,6 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   }
   if (sub === "add" && words.length) {
     const i = input();
-    // a one-off for an agent: the run hands it over (startDueTasks reads the notes)
-    if (typeof i !== "string" && opts.agent) i.notes = `Hand this to your ${opts.agent} agent: emplio hand ${JSON.stringify(opts.agent)}.${i.notes ? `\n\n${i.notes}` : ""}`;
     if (typeof i === "string") return i;
     const r = await addTask(w, { assigneeId: null, ...i, title: words.join(" ") }, conversationId);
     return r.ok ? `added ${show(r.task)}` : `error: ${r.error}`;
@@ -574,6 +609,7 @@ const BODY = {
     status: { type: "string", enum: [...TASK_STATUSES] },
     waitingOn: { type: ["string", "null"], maxLength: 300 },
     assigneeId: { type: ["string", "null"], format: "uuid" },
+    agent: { type: ["string", "null"], maxLength: 100 },
     dueAt: { type: ["string", "null"], maxLength: 40 },
   },
 };

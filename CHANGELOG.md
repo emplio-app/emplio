@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.81 (2026-11-19)
+
+### What's new
+
+- On the Work page you can now give a task to one of Emplio's agents, like Inbox Triage, the same way you pick a person or Emplio. The agent does it, and its name shows on the task.
+
+### For developers
+
+- Tasks have an `agent` column (the agent's slug, so a renamed agent stays on its tasks; `Task.agentName` is what it's called now, as whoever asked sees their agents; `assigneeId` stays null, so it's still the AI's own task). Its run starts in the chat it came from as before, where Emplio `emplio hand`s it to that agent (carrying on that agent's job there if it has one; in the agent's own chat, the agent just does it), replacing the "Hand this to your ... agent" line `emplio tasks add --agent` used to write into the notes. `emplio tasks update --agent <name|none>` changes it, and picking a person clears it (#157).
+
 ## 1.2.80 (2026-11-19)
 
 ### What's new
