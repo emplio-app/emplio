@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Task, TaskInput, TaskStatus, TeamMember } from "@emplio/shared";
+import type { AgentInfo, Task, TaskInput, TaskStatus, TeamMember } from "@emplio/shared";
 import { BotIcon, CalendarIcon, CheckIcon, ChevronRightIcon, ClipboardListIcon, MessageSquareIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -31,6 +31,12 @@ const STATUS: { value: TaskStatus; label: string }[] = [
 ];
 const LABEL = Object.fromEntries(STATUS.map((s) => [s.value, s.label])) as Record<TaskStatus, string>;
 const AI = "ai";
+// a picker value for one of Emplio's agents
+const AGENT = "agent:";
+// who the picker shows for a task, and what picking someone changes
+const whoOf = (t: Pick<Task, "assigneeId" | "agent">) => t.assigneeId ?? (t.agent ? AGENT + t.agent : AI);
+const pick = (v: string): TaskInput =>
+  v === AI ? { assigneeId: null, agent: null } : v.startsWith(AGENT) ? { assigneeId: null, agent: v.slice(AGENT.length) } : { assigneeId: v, agent: null };
 const SHOW = [
   { value: "all", label: "Everyone" },
   { value: "mine", label: "Mine" },
@@ -39,7 +45,7 @@ const SHOW = [
 
 // every word of the search somewhere in the task: its title, notes, who it's waiting on, who does it or asked
 const matches = (t: Task, words: string[]) => {
-  const text = [t.title, t.notes, t.waitingOn, t.assigneeId ? t.assigneeName : "Emplio", t.requesterName].join(" ").toLowerCase();
+  const text = [t.title, t.notes, t.waitingOn, t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio"), t.requesterName].join(" ").toLowerCase();
   return words.every((w) => text.includes(w));
 };
 
@@ -81,7 +87,7 @@ function Person({ t, short }: { t: Task; short?: boolean }) {
           <BotIcon className="size-3" />
         </span>
       )}
-      {!short && <span className="truncate">{t.assigneeId ? t.assigneeName : "Emplio"}</span>}
+      {!short && <span className="truncate">{t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio")}</span>}
     </span>
   );
 }
@@ -125,6 +131,7 @@ export function TasksPage() {
   const queryClient = useQueryClient();
   const tasks = useTasks();
   const team = useQuery({ queryKey: ["team"], queryFn: () => api<TeamMember[]>("/team") });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: () => api<AgentInfo[]>("/agents") });
   const [show, setShow] = useState("all");
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
@@ -137,7 +144,16 @@ export function TasksPage() {
     // show it straight away; the server's answer replaces it
     onMutate: ({ id, ...body }) =>
       queryClient.setQueryData<Task[]>(tasksQueryKey, (old) =>
-        old?.map((t) => (t.id === id ? { ...t, ...(body as Partial<Task>), ...(body.dueAt !== undefined && { dueAt: body.dueAt && new Date(`${body.dueAt}T18:00:00+05:30`).toISOString() }) } : t)),
+        old?.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                ...(body as Partial<Task>),
+                ...(body.dueAt !== undefined && { dueAt: body.dueAt && new Date(`${body.dueAt}T18:00:00+05:30`).toISOString() }),
+                ...(body.agent !== undefined && { agentName: agents.data?.find((a) => a.slug === body.agent)?.name ?? body.agent }),
+              }
+            : t,
+        ),
       ),
     onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
   });
@@ -154,7 +170,11 @@ export function TasksPage() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
   });
 
-  const people = [{ value: AI, label: "Emplio" }, ...(team.data ?? []).map((m) => ({ value: m.id, label: m.name ?? m.email }))];
+  const people = [
+    { value: AI, label: "Emplio" },
+    ...(agents.data ?? []).map((a) => ({ value: AGENT + a.slug, label: `${a.name} (agent)` })),
+    ...(team.data ?? []).map((m) => ({ value: m.id, label: m.name ?? m.email })),
+  ];
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const all = (tasks.data ?? [])
     .filter((t) => (show === "mine" ? t.assigneeId === me?.user.id || t.requesterId === me?.user.id : show === "ai" ? !t.assigneeId : true))
@@ -398,7 +418,7 @@ function QuickAdd({ people }: { people: People }) {
       className="grid gap-2 rounded-xl border bg-background p-2 shadow-xs focus-within:ring-2 focus-within:ring-ring/30"
       onSubmit={(e) => {
         e.preventDefault();
-        if (title.trim()) add.mutate({ title, assigneeId: who === AI ? null : who, dueAt: due || null });
+        if (title.trim()) add.mutate({ title, ...pick(who), dueAt: due || null });
       }}
     >
       <div className="flex items-center gap-2 px-1">
@@ -488,9 +508,10 @@ function TaskDetails({
           </Select>
           <Label className="text-muted-foreground">Who</Label>
           <WhoSelect
-            people={people}
-            value={t.assigneeId ?? AI}
-            onChange={(v) => onChange({ assigneeId: v === AI ? null : v })}
+            // an agent since archived or out of view still shows as its name
+            people={people.some((p) => p.value === whoOf(t)) ? people : [...people, { value: whoOf(t), label: t.agentName ?? t.assigneeName }]}
+            value={whoOf(t)}
+            onChange={(v) => onChange(pick(v))}
             className="w-full"
           />
           <Label htmlFor="task-due" className="text-muted-foreground">

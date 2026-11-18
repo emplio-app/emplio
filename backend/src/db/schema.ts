@@ -550,6 +550,8 @@ export const tasks = pgTable(
     notes: text(),
     // null: the AI's own
     assigneeId: uuid().references(() => users.id, { onDelete: "set null" }),
+    // the AI's own, done by one of its agents: the agent's slug ("inbox-triage"), its run hands it over (`emplio hand`)
+    agent: text(),
     requesterId: uuid().references(() => users.id, { onDelete: "set null" }),
     status: text({ enum: ["todo", "doing", "waiting", "done", "cancelled"] }).notNull().default("todo"),
     // who or what it's waiting on, while status is waiting

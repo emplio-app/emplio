@@ -566,6 +566,9 @@ export type Task = {
   status: TaskStatus;
   waitingOn: string | null;
   assigneeId: string | null;
+  // the AI's own, done by this agent of its: its id (slug, "inbox-triage") and what it's called now
+  agent: string | null;
+  agentName: string | null;
   assigneeName: string;
   requesterId: string | null;
   requesterName: string | null;
@@ -579,7 +582,7 @@ export type Task = {
   createdAt: string;
   doneAt: string | null;
 };
-export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; dueAt?: string | null };
+export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null };
 
 // A file the AI employee made (backend made.ts): the Files page and the previews in the chat.
 export type MadeFile = {

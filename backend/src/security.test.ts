@@ -66,6 +66,9 @@ test("anyone else's rewrite of a task the AI will run makes them who it runs as"
   // a person's working notes on their own task leave it as the owner's
   expect(takesOver({ userId: staff }, theirs, { notes: "called them" })).toBe(false);
   expect(takesOver({ userId: staff }, { assigneeId: null, requesterId: null }, { title: "x" })).toBe(true);
+  // giving someone's task to an agent hands it to the AI too
+  expect(takesOver({ userId: staff }, theirs, { agent: "Inbox Triage" })).toBe(true);
+  expect(takesOver({ userId: "admin" }, ais, { agent: null })).toBe(true);
 });
 
 test("a removed person's message stops, it doesn't loop", async () => {
