@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.91 (2026-11-19)
+
+### What's new
+
+- Seven more apps connect with a key you paste, no sign-in pages: Shopify, Mailchimp, Brevo, Cashfree, PayU, and your own PostgreSQL or MySQL database. Emplio can look after orders, stock and refunds in your Shopify store, grow your mailing lists and send campaigns, check payments and send payment links, and look things up or run reports straight from your database. Each one can also start work by itself, like the moment an order comes in, a payment fails or someone unsubscribes. ![](frontend/public/whats-new/1.2.91-integrations.webp)
+
+### For developers
+
+- New own apps `shopify`, `mailchimp`, `brevo`, `cashfree`, `payu`, `postgresql`, `mysql` (#254, #258, #260, #261, #266, #267, #268), each with `COVERAGE.md`. Brevo, Mailchimp and Cashfree are generated from their OpenAPI specs (`scripts/openapi/<app>.ts`); Shopify from its Admin GraphQL schema (`own/shopify/generate.ts`, API 2026-10, `graphql` and `graphql_query` on top); PayU by hand. Shopify takes `store shpat_…` or `store client_id secret` (client credentials, 24-hour token cached in memory). Cashfree and PayU take `ID:SECRET[:sandbox|test]`.
+- Webhook triggers for all five API apps through `/webhooks/app/`; apps that don't sign deliveries carry an HMAC-of-`ENCRYPTION_KEY` token in the path. Cashfree and PayU webhooks are set in their dashboards (`get_webhook_setup` gives the address). The shared route now takes form-encoded bodies and answers a GET for apps with `receive` (Mailchimp checks the address first).
+- `own/sql`: one read-only transaction per lookup, 1000-row cap, 30 s timeout, a connection per call. Every connect resolves the host, refuses private and internal addresses and our own database (`isPrivate`), then connects to the checked address with TLS verified against the host name. Polled triggers `new_row`, `row_updated`, `query_result_changed`.
+- `own/openapi.ts` reads `detail` from error bodies (Mailchimp).
+
 ## 1.2.90 (2026-11-19)
 
 ### What's new

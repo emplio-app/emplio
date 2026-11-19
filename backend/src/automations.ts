@@ -665,6 +665,8 @@ export async function automationRoutes(app: FastifyInstance) {
   // Composio posts trigger events here (the only path the dev tunnel lets in). Signed, so the raw body is kept.
   await app.register(async (hooks) => {
     hooks.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 5 * 1024 * 1024 }, (_req, body, done) => done(null, body));
+    // form-encoded deliveries (Mailchimp's), kept raw for the app to read
+    hooks.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: 5 * 1024 * 1024 }, (_req, body, done) => done(null, body));
     hooks.post<{ Body: string }>("/webhooks/composio", async (req, reply) => {
       const h = (name: string) => String(req.headers[name] ?? "");
       if (!webhookSecret || !signatureOk(webhookSecret, h("webhook-id"), h("webhook-timestamp"), req.body, h("webhook-signature")))
@@ -719,6 +721,8 @@ export async function automationRoutes(app: FastifyInstance) {
     };
     hooks.post("/webhooks/app/:app/:connection", appWebhook);
     hooks.post("/webhooks/app/:app/:connection/*", appWebhook);
+    // some apps (Mailchimp) check a webhook's address with a GET before saving it; nothing is run
+    hooks.get<{ Params: { app: string } }>("/webhooks/app/:app/:connection/*", async (req, reply) => (OWN_APPS[req.params.app]?.push?.receive ? { ok: true } : reply.code(404).send({ error: "unknown webhook" })));
   });
 }
 
