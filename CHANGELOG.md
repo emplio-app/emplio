@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.93 (2026-11-19)
+
+### What's new
+
+- Four more Zoho apps: Zoho Inventory, Zoho Billing, Zoho Campaigns and Zoho Desk. Sign in with your Zoho account and Emplio can keep an eye on stock and orders, look after subscriptions and failed payments, grow your mailing lists and send campaigns, and answer and sort support tickets. Each can start work by itself too, like when stock runs low, a payment fails or a new ticket comes in. ![](frontend/public/whats-new/1.2.93-zoho.webp)
+
+### For developers
+
+- New own apps `zoho_inventory`, `zoho_billing`, `zoho_campaigns`, `zoho_desk` (#262, #263, #264, #265) on the shared Zoho client (`zohoOAuth`), each with `COVERAGE.md`. Inventory and Billing are generated from Zoho's spec zips (`zohoZip` now takes `inventory` and `billing`), Desk from github.com/zoho/zohodesk-oas (`orgId` sent as a header and auto-filled), Campaigns by hand (v1.1, host worked out from the Mail host per data centre). `zoho-login.ts` gains an optional `desk` host per data centre and `zohoDesk()`.
+- Triggers: Desk registers its own webhooks (56 events, one per connection and organisation, token in the path since Desk doesn't sign); Inventory, Billing and Campaigns are polled (Billing reads its event log).
+- Scopes checked on Zoho's consent page for all four; the four callbacks are added to the Emplio client in Zoho's console.
+
 ## 1.2.92 (2026-11-19)
 
 ### What's new

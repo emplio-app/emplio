@@ -54,8 +54,12 @@ import { namecheap } from "./namecheap";
 import { wix } from "./wix";
 import { wordpress } from "./wordpress";
 import { zoho } from "./zoho";
+import { zoho_billing } from "./zoho_billing";
 import { zoho_books } from "./zoho_books";
+import { zoho_campaigns } from "./zoho_campaigns";
+import { zoho_desk } from "./zoho_desk";
 import { zoho_invoice } from "./zoho_invoice";
+import { zoho_inventory } from "./zoho_inventory";
 import { zoho_mail } from "./zoho_mail";
 import { postgresql } from "./postgresql";
 import { mysql } from "./mysql";
@@ -125,7 +129,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";

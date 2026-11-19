@@ -8,10 +8,10 @@ import { namer } from "./composio-names";
 // Zoho's specs give defaults for fields like tax_treatment; left in, every write would quietly send them
 export const noDefaults = (text: string) => text.replace(/^\s*default:\s+(?![>|]).*\n/gm, "");
 
-export async function zohoZip(product: "books" | "invoice") {
+export async function zohoZip(product: "books" | "invoice" | "inventory" | "billing") {
   const dir = await mkdtemp(join(tmpdir(), `zoho-${product}-`));
   const zip = join(dir, "spec.zip");
-  await Bun.write(zip, await (await fetch(`https://www.zoho.com/${product}/api/v3/openapi-all.zip`)).arrayBuffer());
+  await Bun.write(zip, await (await fetch(`https://www.zoho.com/${product}/api/${product === "inventory" || product === "billing" ? "v1" : "v3"}/openapi-all.zip`)).arrayBuffer());
   await Bun.$`unzip -qo ${zip} -d ${dir}`;
   const files = (await readdir(dir)).filter((f) => /\.ya?ml$/.test(f)).sort().map((f) => join(dir, f));
   // every list that sorts can sort either way (Zoho's own answers show it), but the spec only lists sort_column
