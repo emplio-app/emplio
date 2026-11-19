@@ -299,7 +299,7 @@ Name it as a doer, like a job title ("Invoice Chaser", "Task Reporter"), not the
 Hand work to one: emplio hand <name> <<'EOF' ... EOF (emplio hand help).`;
 
 // `emplio agents ...`. `job`: run by a thread, which may only add lessons; `admin`: an owner or admin chat.
-export async function agentsCommand(who: Who & { admin: boolean; job: boolean; author: Author }, args: string[]): Promise<{ text: string; changed?: boolean }> {
+export async function agentsCommand(who: Who & { admin: boolean; job: boolean; author: Author }, args: string[], bare = false): Promise<{ text: string; changed?: boolean }> {
   const [sub, ...all] = args;
   const { set, rest } = flags(all, ["name", "description", "skills", "tools", "level", "bucket"]);
   const [ref, ...text] = rest.filter((x) => x !== "-");
@@ -341,6 +341,8 @@ export async function agentsCommand(who: Who & { admin: boolean; job: boolean; a
         if (await findAgent(who.workspaceId, slug, { ...viewer, admin: true }))
           // one that isn't theirs to see is only "taken", so its name doesn't show
           return { text: (await find(slug)) ? `error: agents/${slug} already exists; emplio agents update ${slug}` : `error: the name ${ref.trim()} is taken; pick another` };
+        // without them it only ever knows the brief: what worked is lost. `bare`: made by a hand-off, it gets them after its first job (agentNudge)
+        if (!body && !bare) return { text: `error: give ${ref.trim()} its instructions after the command: <<'EOF' ... EOF. Write the steps that worked in the job it comes from (where to look, what to use, what to check) and what it reports back` };
         const repo = bucket === "me" ? `me-${who.userId}` : bucket;
         const a = { slug, repo, name: ref.trim(), description: set.description, skills: skills(set.skills) ?? [], tools: tools(set.tools) ?? [], level: level(set.level) ?? "light", archived: false, instructions: body, createdBy: who.userId };
         await save(a, "AGENT.md", agentMd(a), `Added agent ${a.name}`);
