@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.101 (2026-11-19)
+
+### What's new
+
+- Link your own WhatsApp: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, send replies and files when you ask, and run automations when a message comes in. It only writes to people and groups you already chat with, and keeps it slow so your number stays safe.
+- The official WhatsApp Business API connection is now called "WhatsApp Business API".
+
+### For developers
+
+- New `whatsapp/` service (Node 22, Baileys 7, one SQLite file with FTS5 per account) behind a token-protected HTTP API; accounts connect on demand, stay connected while an automation watches them, and catch up every 4 hours. Sends: known chats only, 20/hour and 150/day.
+- `whatsapp_linked` own app: 11 actions and a `new_message` trigger (signed webhook), linking through the OAuth plumbing with our own QR page (`/whatsapp/link`). Needs `WHATSAPP_URL` and `WHATSAPP_TOKEN`; Docker installs get a `whatsapp` service and the token from setup.sh.
+
 ## 1.2.100 (2026-11-19)
 
 ### What's new

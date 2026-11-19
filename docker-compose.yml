@@ -19,6 +19,7 @@ services:
       DATABASE_URL: postgres://emplio:${POSTGRES_PASSWORD}@postgres:5432/emplio
       GITEA_URL: http://gitea:3000
       COMPUTER_RUNNER_URL: http://runner:4100
+      WHATSAPP_URL: http://whatsapp:4200
       FILE_DIR: /data/files
       DATA_DB_DIR: /data/business-databases
     ports:
@@ -31,6 +32,7 @@ services:
       postgres: { condition: service_healthy }
       gitea-init: { condition: service_completed_successfully }
       runner: { condition: service_started }
+      whatsapp: { condition: service_started }
       computer-image: { condition: service_completed_successfully }
       browser-image: { condition: service_completed_successfully }
 
@@ -97,6 +99,18 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
+  # People's linked WhatsApp accounts, their logins and messages (whatsapp/). It has no port on this machine.
+  whatsapp:
+    image: ${EMPLIO_IMAGES:-ghcr.io/emplio-app/emplio}-whatsapp:${EMPLIO_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/whatsapp.Dockerfile
+    restart: unless-stopped
+    environment:
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+    volumes:
+      - whatsapp-data:/data
+
   # Not running services: these fetch the two images the runner starts containers from, and exit.
   computer-image:
     build:
@@ -138,3 +152,4 @@ volumes:
   secrets:
   caddy-data:
   caddy-config:
+  whatsapp-data:

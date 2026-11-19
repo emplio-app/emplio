@@ -4,8 +4,8 @@ import { afterCheck, availableApps, MISSING_SCOPE, providerFor } from "./index";
 import { own } from "./own";
 
 // sign-in only: not connectable until this server has their client id and secret
-const SIGN_IN_ONLY = ["slack", "zoom", "googlebusiness", "googlecalendar", "googledocs", "googlesheets", "googlemeet", "googlesearchconsole", "googleanalytics", "zoho_mail", "zoho_books", "zoho_campaigns", "zoho_desk", "zoho_invoice", "zoho_billing", "zoho_inventory", "zoho"];
-const NEEDS = ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET"];
+const SIGN_IN_ONLY = ["slack", "zoom", "googlebusiness", "googlecalendar", "googledocs", "googlesheets", "googlemeet", "googlesearchconsole", "googleanalytics", "zoho_mail", "zoho_books", "zoho_campaigns", "zoho_desk", "zoho_invoice", "zoho_billing", "zoho_inventory", "zoho", "whatsapp_linked"];
+const NEEDS = ["SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "ZOOM_CLIENT_ID", "ZOOM_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "WHATSAPP_URL", "WHATSAPP_TOKEN"];
 
 test("with no Composio account, every app with a pasted key is still offered, and no Composio app is", async () => {
   delete process.env.COMPOSIO_API_KEY;

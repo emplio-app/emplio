@@ -203,6 +203,7 @@ if [ ! -f .env ]; then
   cp .env.example .env
   fill ENCRYPTION_KEY "$(openssl rand -base64 32)"
   fill RUNNER_TOKEN "$(openssl rand -hex 32)"
+  fill WHATSAPP_TOKEN "$(openssl rand -hex 32)"
   fill POSTGRES_PASSWORD "$(openssl rand -hex 24)"
   fill SETUP_TOKEN "$(openssl rand -hex 32)"
   fill SETUP_EMAIL "$email"
