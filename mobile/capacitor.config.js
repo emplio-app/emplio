@@ -5,7 +5,7 @@ module.exports = {
   webDir: "www",
   // opens on the app itself, not the marketing page (already signed in, /login goes straight to /home)
   server: { url: process.env.CAP_SERVER_URL || "https://emplio.app", appStartPath: "/login" },
-  // how the site knows it is inside the app (cloud/frontend/client.tsx hides buying)
+  // how the site knows it is inside the app (iPhone and Android) (cloud/frontend/client.tsx hides buying)
   appendUserAgent: "EmplioApp",
   // scrollEnabled false: the page itself never scrolls (each screen scrolls inside), so iOS can't slide the whole app
   // up to a box being typed in and back down again (#34)

@@ -2,11 +2,14 @@
   "name": "emplio-mobile",
   "private": true,
   "scripts": {
-    "dev": "CAP_SERVER_URL=http://localhost:3000 cap sync ios",
-    "sync": "cap sync ios",
-    "open": "cap open ios"
+    "dev": "CAP_SERVER_URL=http://localhost:3000 cap sync",
+    "sync": "cap sync",
+    "open": "cap open ios",
+    "android": "cd android && ./gradlew bundleRelease"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.6.0",
     "@capacitor/filesystem": "^7.1.9",
     "@capacitor/haptics": "^7.0.5",

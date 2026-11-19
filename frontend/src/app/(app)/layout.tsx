@@ -55,7 +55,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// In the iPhone app, once signed in: ask to notify (iOS only asks once), tell the server where to reach this
+// In the phone app (iPhone or Android), once signed in: ask to notify (iOS only asks once), tell the server where to reach this
 // phone, and open the chat a tapped notification is about. The plugin is missing on app builds without it.
 type PushPlugin = {
   requestPermissions(): Promise<{ receive: string }>;
