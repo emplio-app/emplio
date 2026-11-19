@@ -8,13 +8,13 @@ import type { OwnAction, OwnApp } from "./index";
 import { postToken } from "./oauth";
 import type { Api } from "./openapi";
 
-const DCS: Record<string, { accounts: string; tld: string; mail?: string; upload?: string }> = {
+const DCS: Record<string, { accounts: string; tld: string; mail?: string; upload?: string; desk?: string }> = {
   us: { accounts: "https://accounts.zoho.com", tld: "com" },
   eu: { accounts: "https://accounts.zoho.eu", tld: "eu" },
   in: { accounts: "https://accounts.zoho.in", tld: "in" },
   au: { accounts: "https://accounts.zoho.com.au", tld: "com.au" },
   jp: { accounts: "https://accounts.zoho.jp", tld: "jp" },
-  ca: { accounts: "https://accounts.zohocloud.ca", tld: "ca", mail: "https://mail.zohocloud.ca", upload: "https://upload.zohocloud.ca" },
+  ca: { accounts: "https://accounts.zohocloud.ca", tld: "ca", mail: "https://mail.zohocloud.ca", upload: "https://upload.zohocloud.ca", desk: "https://desk.zohocloud.ca" },
   sa: { accounts: "https://accounts.zoho.sa", tld: "sa" },
   uk: { accounts: "https://accounts.zoho.uk", tld: "uk" },
   ae: { accounts: "https://accounts.zoho.ae", tld: "ae" },
@@ -52,9 +52,13 @@ export const zohoUpload = (key: string) => {
   const dc = dcEntry(key);
   return dc.upload ?? `https://upload.zoho.${dc.tld}`;
 };
+export const zohoDesk = (key: string) => {
+  const dc = dcEntry(key);
+  return dc.desk ?? `https://desk.zoho.${dc.tld}`;
+};
 // Actions are generated with the US addresses; this puts the login's data centre in their place.
 const zohoUrl = (key: string, base: string, path: string) =>
-  `${base.replace("https://www.zohoapis.com", zohoApi(key)).replace("https://upload.zoho.com", zohoUpload(key)).replace("https://mail.zoho.com", zohoMail(key))}${path}`;
+  `${base.replace("https://www.zohoapis.com", zohoApi(key)).replace("https://upload.zoho.com", zohoUpload(key)).replace("https://mail.zoho.com", zohoMail(key)).replace(/^https:\/\/desk\.zoho\.com$/, zohoDesk(key))}${path}`;
 
 // What Zoho says when a login is finished, in whichever of its shapes (Books' code 57 comes with a 401). Not a scope problem: signing in again wouldn't fix that.
 const DEAD = new Set(["INVALID_TOKEN", "AUTHENTICATION_FAILURE", "INVALID_OAUTHTOKEN"]);
