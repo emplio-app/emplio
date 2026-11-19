@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.92 (2026-11-19)
+
+### What's new
+
+- Choosing who does a task on the Work page now has a search box, with Emplio first and then your agents and your team under their own headings, so you can find one agent among dozens instead of scrolling a long list.
+
+### For developers
+
+- `WhoSelect` in `tasks-page.tsx` is the Combobox popup (button trigger, search inside, `ComboboxGroup` per kind) instead of a `Select`; values are unchanged (`ai`, `agent:<slug>`, user id), and agent labels lose the "(agent)" suffix (#281).
+
 ## 1.2.91 (2026-11-19)
 
 ### What's new
