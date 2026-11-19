@@ -280,6 +280,53 @@ export const PAGE_CHECK = String.raw`(() => {
   return JSON.stringify({ page: location.protocol.startsWith("http") ? location.host : "", blocked, signIn: password && !blocked });
 })()`;
 
+// `emplio browser skill`: how to drive the browser, in the commands this computer has. agent-browser's own guide
+// (14 KB) is mostly what the wrapper already does (sessions, installing, connecting) or never comes up here, and
+// it was read at the start of every browser chat and kept in it.
+const BROWSER_SKILL = String.raw`# emplio browser
+
+One command per call; chain with && . The browser stays open between commands, signed in.
+
+## Look, then act
+emplio browser open <url>
+emplio browser snapshot -i            # buttons, links, boxes, each with a ref like @e3
+emplio browser click @e3
+emplio browser fill @e5 "text"        # clears, then types; type @e5 "more" adds
+emplio browser select @e4 "Shipped"   # a dropdown, by its label
+emplio browser check @e6              # uncheck too
+emplio browser press Enter
+Refs change when the page does: after a click that opens something or goes somewhere, snapshot again.
+Long page: emplio browser snapshot -i | grep -i "save\|next" , or one part: snapshot -i -s "main"
+
+## Without a ref
+emplio browser find role button click --name "Save"
+emplio browser find label "Email" fill "a@b.com"
+emplio browser find text "Sign in" click
+
+## Waiting
+emplio browser wait --text "Saved"     # or --url "**/orders", or wait @e7
+Not fixed sleeps, not --load networkidle.
+
+## Reading
+emplio browser get text @e1            # also: get url, get title, get value @e2
+emplio browser read                    # the page's text
+emplio browser eval "document.title"   # a script; long ones: eval --stdin <<'EOF' ... EOF
+
+## Seeing it
+emplio browser screenshot /work/tmp/x.png, then emplio view /work/tmp/x.png
+screenshot --annotate: numbered labels, number N is ref @eN
+
+## Tabs and pop-ups
+emplio browser tab | tab new <url> | tab t2 | tab close t2
+A confirm box: emplio browser dialog accept (or dismiss)
+
+## When it goes wrong
+- "covered by ...": a banner or pop-up is on top; close it, then click again.
+- Ref not found: the page changed; snapshot again.
+- Fill does nothing: emplio browser focus @e1 && emplio browser keyboard inserttext "text"
+- More on one topic: emplio browser skill --ref commands
+`;
+
 // emplio browser calls|send: what the page asked its server, and repeating it from the signed-in page.
 // Login headers are read from the browser's record here, so they never reach the output or the conversation.
 // Old sites that post a whole form and reload count too: send then fills the rest of that form from the open page.
@@ -696,7 +743,14 @@ case "$1" in
     fi
     run() { AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" "$ab" --cdp "$BROWSER_CDP_URL" --session "$BROWSER_SESSION" "$@"; }
     case "$1" in
-      skill) shift; AGENT_BROWSER_SKILLS_DIR="$guides" exec "$ab" skills get core "$@" ;;
+      # ours (BROWSER_SKILL); agent-browser's own, 6 times as long, only for a part of it asked for by name
+      skill)
+        shift
+        [ $# -gt 0 ] && AGENT_BROWSER_SKILLS_DIR="$guides" exec "$ab" skills get core "$@"
+        cat <<'GUIDE'
+${BROWSER_SKILL}
+GUIDE
+        exit 0 ;;
       # stopped by the server after this command (sign-ins are saved first); the next browser command starts a fresh
       # one, at the usual size and with no phone setting. Later browser steps in this command stop.
       close) : > "/tmp/emplio-resize.$EZ_KEY"; req BROWSERCLOSE; exit 0 ;;
