@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.94 (2026-11-19)
+
+### What's new
+
+- When a button on a website has no name Emplio can read, like an icon, a map or a drawing area, Emplio now looks at the page and clicks the right spot instead of getting stuck.
+
+### For developers
+
+- Browser instructions in `sandbox.ts` drop "Never click by position". When no ref works the agent takes `emplio browser screenshot --annotate` (its labels are refs), then falls back to `mouse move <x> <y>` with `mouse down/up left` and looks again.
+
 ## 1.2.93 (2026-11-19)
 
 ### What's new
