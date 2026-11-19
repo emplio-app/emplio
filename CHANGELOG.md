@@ -89,7 +89,7 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 ### What's new
 
-- Select text in a file open beside the chat, such as a PDF, a Markdown file or a spreadsheet, and press Reply to answer just that part. On a phone you're taken back to the chat to write your answer.
+- Select text in a file open beside the chat, such as a PDF, a Markdown file or a spreadsheet, and press Reply to answer just that part. On a phone you're taken back to the chat to write your answer. ![](frontend/public/whats-new/1.2.83-reply-in-file.webp)
 - PDFs now open in Emplio's own viewer on every screen, so their words can be selected and copied.
 
 ### For developers
@@ -109,7 +109,7 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 ### What's new
 
-- On the Work page you can now give a task to one of Emplio's agents, like Inbox Triage, the same way you pick a person or Emplio. The agent does it, and its name shows on the task.
+- On the Work page you can now give a task to one of Emplio's agents, like Inbox Triage, the same way you pick a person or Emplio. The agent does it, and its name shows on the task. ![](frontend/public/whats-new/1.2.81-task-to-agent.webp)
 
 ### For developers
 
