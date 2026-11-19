@@ -700,7 +700,7 @@ usage() {
   echo "       emplio view <file>...                          look at images (png, jpg, gif, webp) or PDFs yourself"
   echo "       emplio text <file>                             the words in a PDF, Word, Excel or PowerPoint file, as plain text"
   echo "       emplio media get <file.media>...                the real file a .media note points to, in /work/tmp/media/ from the next command"
-  echo "       emplio browser <command>                       drive this chat's web browser: open, snapshot -i, click, fill... (emplio browser skill: how)"
+  echo "       emplio browser <command>                       drive this chat's web browser: open, snapshot -i, click, fill... (emplio browser help: every command)"
   echo "       emplio ask <question> [answer]... [--multi]      ask the person, with answers to tap (--multi: pick several; they can also type their own); text on stdin (a draft) shows on the card"
   echo "       emplio team list                               who's on the team, with roles"
   echo "       emplio team add <email> [full name] [--admin]  add someone and email them (owner/admin chats only)"
@@ -772,9 +772,9 @@ case "$1" in
     # agent-browser, pointed at this chat's browser: the server starts it and sets BROWSER_CDP_URL
     # for any command that mentions emplio browser
     shift
-    # every command, short (BROWSER_COMMANDS), without starting a browser; the tool itself has no help command
+    # every command, short, without starting a browser (code mode: the Python list; else our guide); the tool itself has no help command
     case "$1" in help|--help) cat <<'BROWSERHELP'
-${BROWSER_COMMANDS}
+${codeMode() ? BROWSER_COMMANDS : BROWSER_SKILL}
 BROWSERHELP
       exit 0 ;; esac
     # code mode: code that doesn't say so where it runs (a saved tool, a function from an earlier step) asks the server
@@ -790,7 +790,7 @@ BROWSERHELP
     fi
     [ -n "$BROWSER_CDP_URL" ] || { echo "emplio browser: no browser attached; say emplio browser in the command itself. A script file: emplio browser run <script> [args]" >&2; exit 1; }
     [ -f "/tmp/emplio-resize.$EZ_KEY" ] && { echo "emplio browser: the browser is restarting. Run this in your next command." >&2; exit 1; }
-    [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser skill" >&2; exit 2; }
+    [ $# -gt 0 ] || { echo "emplio browser: it takes one command at a time now, not a Python script: emplio browser open <url>, then snapshot -i, click @e1, fill @e2 <text>. See: emplio browser help" >&2; exit 2; }
     # Windows (Git Bash, on a person's PC) has its own build, an .exe
     os=$(uname -s | tr '[:upper:]' '[:lower:]'); x=; case "$os" in mingw*|msys*|cygwin*) os=win32; x=.exe ;; esac
     ab="$HOME/.local/bin/agent-browser$x"; guides="$HOME/.local/share/agent-browser"
@@ -1489,7 +1489,7 @@ export function browserGuide(s: Session, commands = false) {
   const name = s.user.name;
   const bg = !!(s.automation || s.task);
   const py = codeMode();
-  const text = `[${py && commands ? `Browser commands (\`emplio browser help\` shows them again):\n\`\`\`python\n${BROWSER_COMMANDS}\n\`\`\`\n` : ""}How to work a site, fastest first:
+  const text = `[${!commands ? "" : py ? `Browser commands (\`emplio browser help\` shows them again):\n\`\`\`python\n${BROWSER_COMMANDS}\n\`\`\`\n` : `${BROWSER_SKILL}(\`emplio browser help\` shows this again)\n\n`}How to work a site, fastest first:
 1. A browser result lists new calls the page made (\`POST /api/expenses 201 sends {date, amount} returns {id}\`). Repeat them from the signed-in page: \`emplio browser calls POST /api/expenses\` shows one in full; \`emplio browser send GET "/api/expenses?page=2"\`, \`emplio browser send POST /api/expenses @/work/tmp/x.json\`. Reading: use \`send\` rather than clicking through pages. Saving: do the first on the page, read its call, then \`send\` the rest one at a time, stopping at the first failure. Old form sites (\`returns page\`): open the record's form, then \`emplio browser send POST /invoices/13 'amount=150'\` with only the fields you change. Calls seen before are listed when you open a site.
 ${py ? `- Doing the same thing on a site a second time: make it a function using \`emplio.browser.send(...)\` or \`find\` steps, never refs, keep it as a tool for that site (\`emplio.tools.save(change_date, area="<site>", risk="changes")\`), then call it (\`from tools.<site> import change_date\`; emplio.map for many).
 2. A page you've already seen: all its steps in one run; a failing step stops it.` : `- Doing the same thing on a site a second time: make it a script in that site's skill (\`emplio browser run <skill folder>/change_date.py INV-12 01-10-2026\`), using \`send\` or \`find\` steps, never refs; then run it per record.
