@@ -42,23 +42,28 @@ async function session(state: string, create = true): Promise<Session | null> {
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 const page = (body: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Link WhatsApp</title>
-<style>body{font:15px/1.5 system-ui;max-width:440px;margin:0 auto;padding:24px 16px;color:#111;background:#fff}h1{font-size:18px;display:flex;gap:10px;align-items:center}h1 img{width:28px;height:28px}
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=DM+Sans:opsz,wght@9..40,400;9..40,600&display=swap">
+<style>body{font:15px/1.5 "DM Sans",system-ui,sans-serif;max-width:440px;margin:0 auto;padding:24px 16px;color:#111;background:#fff}h1{font:600 22px/1.2 "Bricolage Grotesque","DM Sans",system-ui,sans-serif;display:flex;gap:10px;align-items:center}h1 img{width:28px;height:28px}
 ol{padding-left:20px}.m{color:#555;font-size:13px}.e{color:#c00}#qr{width:260px;height:260px;margin:12px auto;display:grid;place-items:center;background:#fff;border-radius:12px;border:1px solid #ddd}#qr svg{width:240px;height:240px}
-#code{font:600 28px ui-monospace,monospace;letter-spacing:3px;text-align:center;margin:12px 0}input{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box}
+#code{font:600 28px ui-monospace,monospace;letter-spacing:3px;text-align:center;margin:12px 0}.w{margin-top:16px;padding:10px 12px;border-radius:8px;background:#f5f5f4;border:1px solid #e7e5e4;font-size:13px;color:#57534e}
+input{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box}
 button{font:inherit;margin-top:8px;width:100%;padding:11px;border:0;border-radius:8px;background:#111;color:#fff}a{color:inherit}details{margin-top:16px}summary{cursor:pointer}
-@media(prefers-color-scheme:dark){body{background:#111;color:#eee}.m{color:#aaa}input{background:#1c1c1c;color:#eee;border-color:#333}button{background:#eee;color:#111}}</style>${body}`;
+@media(prefers-color-scheme:dark){body{background:#111;color:#eee}.w{background:#1c1c1c;border-color:#2a2a2a;color:#a8a29e}.m{color:#aaa}input{background:#1c1c1c;color:#eee;border-color:#333}button{background:#eee;color:#111}}</style>${body}`;
 
 function linkPage(state: string, logo: string) {
   const s = JSON.stringify(state).replace(/</g, "\\u003c");
   return page(`<h1><img src="${esc(logo)}" alt="">Link your WhatsApp</h1>
-<p>Emplio will be able to read and search your chats, groups included, and send messages and files when you or your team ask. It asks before sending anything, and only writes to people and groups you already chat with.</p>
-<div id="qr"><span class="m">Getting a code from WhatsApp…</span></div>
-<ol><li>Open WhatsApp on your phone.</li><li>Go to <b>Settings</b> (on Android, the ⋮ menu) → <b>Linked devices</b> → <b>Link a device</b>.</li><li>Point your phone at this code.</li></ol>
-<details id="byphone"><summary>On your phone right now? Link with your number instead</summary>
-<form id="f"><p class="m">Your WhatsApp number, with the country code:</p><input id="phone" type="tel" placeholder="+1 555 123 4567" autocomplete="tel" required><button>Get a code</button></form>
-<div id="pair" hidden><div id="code"></div><p>In WhatsApp, go to <b>Linked devices</b> → <b>Link a device</b> → <b>Link with phone number instead</b>, and type this code.</p></div>
+<p>Emplio reads your chats and groups, and replies when you ask.</p>
+<div id="risk"><p class="w">Don't use it for bulk or unwanted messages: WhatsApp bans numbers that spam. Linking other apps isn't officially supported by WhatsApp, so use it at your own risk.</p>
+<button id="ok">I understand the risk</button></div>
+<div id="link" hidden>
+<div id="qr"><span class="m">Getting a code…</span></div>
+<p>In WhatsApp: <b>Settings → Linked devices → Link a device</b>, then scan.</p>
+<details id="byphone"><summary>On this phone? Use your number instead</summary>
+<form id="f"><input id="phone" type="tel" placeholder="+1 555 123 4567" autocomplete="tel" required><button>Get a code</button></form>
+<div id="pair" hidden><div id="code"></div><p>In <b>Link a device</b>, tap <b>Link with phone number instead</b> and type this code.</p></div>
 <p class="e" id="err"></p></details>
-<p class="m">Unlink any time in WhatsApp → Linked devices, or in Emplio → Integrations. WhatsApp doesn't officially support linking outside apps, so Emplio keeps its sending slow and only to chats you already have.</p>
+<p class="m">Unlink any time in WhatsApp or Emplio.</p></div>
 <script>
 const state = ${s};
 const qr = document.getElementById("qr");
@@ -73,7 +78,12 @@ async function poll() {
   } catch {}
   setTimeout(poll, 2000);
 }
-poll();
+document.getElementById("ok").onclick = () => {
+  document.getElementById("risk").hidden = true;
+  document.getElementById("link").hidden = false;
+  if (matchMedia("(pointer: coarse)").matches) document.getElementById("byphone").open = true;
+  poll();
+};
 document.getElementById("f").onsubmit = async (e) => {
   e.preventDefault();
   const err = document.getElementById("err");
@@ -87,7 +97,6 @@ document.getElementById("f").onsubmit = async (e) => {
   document.getElementById("pair").hidden = false;
   document.getElementById("code").textContent = d.code;
 };
-if (matchMedia("(pointer: coarse)").matches) document.getElementById("byphone").open = true;
 </script>`);
 }
 
