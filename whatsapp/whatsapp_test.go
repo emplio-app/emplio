@@ -3,12 +3,17 @@
 package main
 
 import (
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -122,6 +127,56 @@ func TestSendsOnlyToKnownChatsAndNotTooMany(t *testing.T) {
 	if err := a.Ready(true); err == nil || err.(*Refused).Status != 409 {
 		t.Fatalf("ready: %v", err)
 	}
+}
+
+func TestEditsDeletesReactionsAndTicks(t *testing.T) {
+	a, err := OpenAccount(t.TempDir(), "00000000-0000-4000-8000-000000000002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	sarah := types.NewJID("15551234567", types.DefaultUserServer)
+	from := func(id string, m *waE2E.Message) *events.Message {
+		return &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, ID: id, Timestamp: time.Now()}, Message: m}
+	}
+	a.on(from("m1", &waE2E.Message{Conversation: proto.String("meet at 5")}))
+	// a chat first heard of now is a new chat
+	evs := a.store.Events(0, []string{"new_chat"}, 10)
+	eq(t, len(evs), 1)
+	eq(t, evs[0].Who, sarah.String())
+
+	key := &waCommon.MessageKey{ID: proto.String("m1"), RemoteJID: proto.String(sarah.String())}
+	a.on(from("m2", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), Key: key, EditedMessage: &waE2E.Message{Conversation: proto.String("meet at 6")}}}))
+	m := a.store.GetMessage(sarah.String(), "m1")
+	eq(t, m.Text, "meet at 6")
+	eq(t, a.Present(*m)["edited"], any(true))
+	a.on(from("m3", &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Key: key, Text: proto.String("👍")}}))
+	eq(t, a.store.Marks("reactions", sarah.String(), "m1")[0][1], "👍")
+	a.on(from("m4", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_REVOKE.Enum(), Key: key}}))
+	eq(t, a.Present(*a.store.GetMessage(sarah.String(), "m1"))["deleted"], any(true))
+	// none of those are messages of their own
+	eq(t, len(a.store.Messages(sarah.String(), 10, 0, 0)), 1)
+	kinds := ""
+	for _, e := range a.store.Events(0, nil, 10) {
+		kinds += e.Kind + " "
+	}
+	eq(t, kinds, "deleted reaction edited new_chat ")
+	eq(t, a.store.Events(0, []string{"deleted"}, 10)[0].Text, "meet at 6")
+
+	// ticks on what this account sent only move forward
+	a.store.SaveMessage(Message{Chat: sarah.String(), ID: "s1", FromMe: true, TS: time.Now().UnixMilli(), Type: "conversation", Text: "ok", Ack: 1})
+	a.on(&events.Receipt{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, MessageIDs: []types.MessageID{"s1"}, Type: types.ReceiptTypeRead})
+	a.on(&events.Receipt{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, MessageIDs: []types.MessageID{"s1"}, Type: types.ReceiptTypeDelivered})
+	eq(t, a.Present(*a.store.GetMessage(sarah.String(), "s1"))["status"], any("read"))
+}
+
+func TestPollVotesAndForwards(t *testing.T) {
+	poll := &waE2E.Message{PollCreationMessageV3: &waE2E.PollCreationMessage{Name: proto.String("Lunch?"), Options: []*waE2E.PollCreationMessage_Option{{OptionName: proto.String("Pizza")}, {OptionName: proto.String("Sushi")}}}}
+	h := sha256.Sum256([]byte("Sushi"))
+	eq(t, strings.Join(pollChoices(poll, [][]byte{h[:]}), ","), "Sushi")
+	f := withContext(&waE2E.Message{Conversation: proto.String("fyi")}, &waE2E.ContextInfo{IsForwarded: proto.Bool(true)})
+	eq(t, f.GetExtendedTextMessage().GetText(), "fyi")
+	eq(t, f.GetExtendedTextMessage().GetContextInfo().GetIsForwarded(), true)
 }
 
 func TestTheAPIWantsItsToken(t *testing.T) {

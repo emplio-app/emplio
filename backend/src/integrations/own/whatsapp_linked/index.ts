@@ -20,6 +20,16 @@ const q = (o: Record<string, unknown>) => new URLSearchParams(Object.entries(o).
 
 const chat = z.string().min(1).max(200).describe("The chat: its id from list_chats (like 15551234567@s.whatsapp.net, or ...@g.us for a group), a phone number with country code, or the chat's exact name");
 const message = z.string().min(1).max(200).describe("The message's id, from get_messages or search_messages");
+const phones = z.array(z.string().min(1).max(30)).min(1).max(50).describe("Phone numbers with country code, like +15551234567");
+const group = z.string().min(1).max(200).describe("The group: its id from list_chats (ending @g.us) or its exact name");
+const RULES = "Only to people and groups this WhatsApp already chats with, and at most 20 an hour and 150 a day (shared with every send), so the number isn't flagged.";
+
+// a change to a group's members
+const members = (action: string, description: string, known = false) => ({
+  description,
+  input: z.object({ chat: group, phones: known ? phones.describe("Phone numbers with country code, like +15551234567; only people this WhatsApp already chats with") : phones }),
+  run: async (i: { chat: string; phones: string[] }, key: string) => wa("POST", `/accounts/${account(key)}/group/members`, { ...i, action }),
+});
 
 type Msg = { chat: string; chat_name: string; is_group: boolean; from_me: boolean; from: string; from_name: string | null; text: string };
 const contains = (hay: unknown, needle: unknown) => String(hay ?? "").toLowerCase().includes(String(needle).toLowerCase());
@@ -154,6 +164,109 @@ export const whatsapp_linked: OwnApp = {
         if (!(i.file instanceof AppFile)) throw new AppsError('file: give the file as {"file": "/work/..."}');
         return wa("POST", `/accounts/${account(key)}/send-file`, { to: i.to, name: i.file.name, type: i.file.mimetype, data: Buffer.from(i.file.bytes).toString("base64"), caption: i.caption });
       },
+    },
+    reply_to_message: {
+      description: `Reply to one message: your text is sent in the same chat with their message quoted above it. ${RULES}`,
+      input: z.object({
+        chat: chat.describe("The chat the message is in (its chat id from get_messages or the trigger)"),
+        message: message.describe("The id of the message to reply to"),
+        text: z.string().min(1).max(65_000).describe("Your reply. WhatsApp formatting: *bold*, _italic_"),
+      }),
+      run: async (i: { chat: string; message: string; text: string }, key) => wa("POST", `/accounts/${account(key)}/reply`, i),
+    },
+    get_message: {
+      description: "One message with its reactions, whether it was edited or deleted, its ticks (sent, delivered, read, played) if this WhatsApp sent it, and the votes if it's a poll.",
+      readOnly: true,
+      input: z.object({ chat, message }),
+      run: async (i: { chat: string; message: string }, key) => wa("GET", `/accounts/${account(key)}/message?${q(i)}`),
+    },
+    edit_message: {
+      description: "Change the text of a text message this WhatsApp sent, within 20 minutes of sending it. Everyone sees it marked edited.",
+      input: z.object({ chat, message, text: z.string().min(1).max(65_000).describe("The new text") }),
+      run: async (i: { chat: string; message: string; text: string }, key) => wa("POST", `/accounts/${account(key)}/edit`, i),
+    },
+    delete_message: {
+      description: "Delete a message for everyone: one this WhatsApp sent, or anyone's in a group where it's an admin. WhatsApp only allows this for about two days after sending. Can't be undone.",
+      input: z.object({ chat, message }),
+      run: async (i: { chat: string; message: string }, key) => wa("POST", `/accounts/${account(key)}/delete`, i),
+    },
+    forward_message: {
+      description: `Forward a message (text, photo, file, voice note...) to another chat; it shows as forwarded. ${RULES}`,
+      input: z.object({ chat: chat.describe("The chat the message is in"), message, to: chat.describe("The chat to forward it to: a chat id, a phone number with country code, or the chat's exact name") }),
+      run: async (i: { chat: string; message: string; to: string }, key) => wa("POST", `/accounts/${account(key)}/forward`, i),
+    },
+    pin_message: {
+      description: "Pin a message at the top of its chat for everyone (or unpin it). In groups this may need admin.",
+      input: z.object({
+        chat,
+        message,
+        pin: z.boolean().default(true).describe("true to pin (the default), false to unpin"),
+        days: z.union([z.literal(1), z.literal(7), z.literal(30)]).default(30).describe("How long it stays pinned: 1, 7 or 30 days (default 30)"),
+      }),
+      run: async (i: { chat: string; message: string; pin: boolean; days: number }, key) => wa("POST", `/accounts/${account(key)}/pin`, i),
+    },
+    send_poll: {
+      description: `Send a poll people answer by tapping a choice. Votes show in get_message and start the new poll vote trigger. ${RULES}`,
+      input: z.object({
+        to: chat.describe("Who to send it to: a chat id, a phone number with country code, or the chat's exact name"),
+        question: z.string().min(1).max(255).describe("The question"),
+        options: z.array(z.string().min(1).max(100)).min(2).max(12).describe("The choices, 2 to 12"),
+        multiple: z.boolean().default(false).describe("Let people pick more than one choice"),
+      }),
+      run: async (i: { to: string; question: string; options: string[]; multiple: boolean }, key) => wa("POST", `/accounts/${account(key)}/poll`, i),
+    },
+    check_numbers: {
+      description: "Whether phone numbers have WhatsApp (and the business name, for verified businesses). Doesn't message them.",
+      readOnly: true,
+      input: z.object({ phones }),
+      run: async (i: { phones: string[] }, key) => wa("POST", `/accounts/${account(key)}/check`, i),
+    },
+    list_events: {
+      description:
+        "What happened lately besides new messages, newest first: messages edited or deleted, reactions, poll votes, people joining, leaving, made or no longer admin in groups, new chats, and this WhatsApp being added to groups.",
+      readOnly: true,
+      input: z.object({
+        kinds: z.array(z.enum(["edited", "deleted", "reaction", "poll_vote", "joined", "left", "promoted", "demoted", "new_chat", "added_to_group"])).optional().describe("Only these kinds (default all)"),
+        after: z.string().optional().describe("Only after this time (ISO 8601); default the last 3 hours"),
+        limit: z.number().int().min(1).max(1000).default(200).describe("How many (default 200)"),
+      }),
+      run: async (i: { kinds?: string[]; after?: string; limit: number }, key) => wa("GET", `/accounts/${account(key)}/events?${q({ ...i, kinds: i.kinds?.join(",") })}`),
+    },
+    create_group: {
+      description: "Make a new WhatsApp group with this WhatsApp as admin. Only people it already chats with can be put in; anyone whose privacy settings block it gets left out (send them get_group_invite_link).",
+      input: z.object({ name: z.string().min(1).max(100).describe("The group's name"), phones: phones.describe("Who to put in: phone numbers with country code, people this WhatsApp already chats with") }),
+      run: async (i: { name: string; phones: string[] }, key) => wa("POST", `/accounts/${account(key)}/groups`, i),
+    },
+    add_group_members: members("add", "Add people to a group (this WhatsApp must be an admin). Only people it already chats with; for anyone else, send them the invite link.", true),
+    remove_group_members: members("remove", "Remove people from a group (this WhatsApp must be an admin)."),
+    make_group_admins: members("promote", "Make group members admins (this WhatsApp must be an admin)."),
+    remove_group_admins: members("demote", "Make group admins regular members again (this WhatsApp must be an admin)."),
+    update_group_settings: {
+      description: "Change a group's name, description, who can send messages, who can edit its details, or disappearing messages. Give only what should change. Usually needs admin.",
+      input: z.object({
+        chat: group,
+        name: z.string().min(1).max(100).optional().describe("New name"),
+        description: z.string().max(2048).optional().describe("New description; empty to remove it"),
+        only_admins_send: z.boolean().optional().describe("true: only admins can send messages; false: everyone"),
+        only_admins_edit: z.boolean().optional().describe("true: only admins can change the name, picture and description; false: everyone"),
+        disappearing: z.enum(["off", "24h", "7d", "90d"]).optional().describe("Disappearing messages: off, 24h, 7d or 90d"),
+      }),
+      run: async (i: Record<string, unknown>, key) => wa("POST", `/accounts/${account(key)}/group/settings`, i),
+    },
+    get_group_invite_link: {
+      description: "A group's invite link (chat.whatsapp.com/...), to send people who should join. reset makes a new one and stops the old one working.",
+      input: z.object({ chat: group, reset: z.boolean().default(false).describe("Make a new link; the old one stops working") }),
+      run: async (i: { chat: string; reset: boolean }, key) => wa("GET", `/accounts/${account(key)}/group/invite?${q({ chat: i.chat, reset: i.reset || undefined })}`),
+    },
+    join_group: {
+      description: "Join a group with its invite link (chat.whatsapp.com/...).",
+      input: z.object({ link: z.string().min(1).max(300).describe("The invite link, like https://chat.whatsapp.com/AbCdEf123") }),
+      run: async (i: { link: string }, key) => wa("POST", `/accounts/${account(key)}/group/join`, i),
+    },
+    leave_group: {
+      description: "Leave a group. Getting back in needs an invite.",
+      input: z.object({ chat: group }),
+      run: async (i: { chat: string }, key) => wa("POST", `/accounts/${account(key)}/group/leave`, i),
     },
     react_to_message: {
       description: "React to a message with an emoji, or take a reaction back with an empty emoji.",

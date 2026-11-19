@@ -72,8 +72,11 @@ test("the sign-in goes to our own QR page, and only a code that page made finish
 });
 
 test("reads run unasked, writes ask", async () => {
-  for (const a of ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "download_media"]) expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBe(true);
-  for (const a of ["send_message", "send_file", "react_to_message", "mark_as_read"]) expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBeFalsy();
+  for (const a of ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "download_media", "get_message", "check_numbers", "list_events"])
+    expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBe(true);
+  const writes = ["send_message", "send_file", "react_to_message", "mark_as_read", "reply_to_message", "edit_message", "delete_message", "forward_message", "pin_message", "send_poll"];
+  const groups = ["create_group", "add_group_members", "remove_group_members", "make_group_admins", "remove_group_admins", "update_group_settings", "get_group_invite_link", "join_group", "leave_group"];
+  for (const a of [...writes, ...groups]) expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBeFalsy();
 });
 
 test("reads and sends go to the account on the WhatsApp server", async () => {
@@ -85,6 +88,20 @@ test("reads and sends go to the account on the WhatsApp server", async () => {
   expect(JSON.parse(calls[1]!.body)).toEqual({ to: "+1 555 000 1111", text: "On its way", reply_to: "ABC" });
   stub(() => json({ error: "WhatsApp messages only go to people and groups this WhatsApp already chats with." }, 400));
   await expect(own.run("whatsapp_linked.send_message", { to: "x", text: "hi" }, login, "o")).rejects.toThrow(/already chats with/);
+});
+
+test("replies, edits, polls and group changes go to their own routes", async () => {
+  const calls = stub(() => json({ ok: true }));
+  await own.run("whatsapp_linked.reply_to_message", { chat: "Sarah", message: "M1", text: "Yes, ready" }, login, "o");
+  expect([calls[0]!.method, calls[0]!.url]).toEqual(["POST", `http://wa.test:4200/accounts/${ACCT}/reply`]);
+  expect(JSON.parse(calls[0]!.body)).toEqual({ chat: "Sarah", message: "M1", text: "Yes, ready" });
+  await own.run("whatsapp_linked.send_poll", { to: "Northwind team", question: "Lunch?", options: ["Pizza", "Sushi"] }, login, "o");
+  expect(JSON.parse(calls[1]!.body)).toEqual({ to: "Northwind team", question: "Lunch?", options: ["Pizza", "Sushi"], multiple: false });
+  await own.run("whatsapp_linked.make_group_admins", { chat: "Northwind team", phones: ["+15550001111"] }, login, "o");
+  expect([calls[2]!.url, JSON.parse(calls[2]!.body).action]).toEqual([`http://wa.test:4200/accounts/${ACCT}/group/members`, "promote"]);
+  await own.run("whatsapp_linked.list_events", { kinds: ["edited", "deleted"] }, login, "o");
+  expect(calls[3]!.url).toBe(`http://wa.test:4200/accounts/${ACCT}/events?kinds=edited%2Cdeleted&limit=200`);
+  await expect(own.run("whatsapp_linked.send_poll", { to: "x", question: "?", options: ["only one"] }, login, "o")).rejects.toThrow();
 });
 
 test("files go out and come back as files", async () => {
@@ -138,4 +155,18 @@ test("a check reads recent messages from the server", async () => {
   const calls = stub(() => json({ messages: [] }));
   await own.run("whatsapp_linked.list_recent_messages", { after: "2026-11-19T10:00:00Z" }, login, "o");
   expect(calls[0]!.url).toBe(`http://wa.test:4200/accounts/${ACCT}/recent?after=2026-11-19T10%3A00%3A00Z&limit=200`);
+});
+
+test("edits, deletes, reactions and group changes are their own hourly triggers", async () => {
+  const ev = { event: 7, kind: "reaction", time: "2026-11-19T10:00:00Z", chat: msg.chat, chat_name: "Sarah Lee", is_group: false, message: "M1", from: "+15550001111", from_name: "Sarah Lee", from_me: false, text: "👍" };
+  const calls: { action: string; input: any }[] = [];
+  const run = (events: unknown[]) => async (action: string, input: unknown) => (calls.push({ action, input }), { events });
+  const noted = await pollOnce("whatsapp_linked.new_reaction", {}, null, run([]));
+  expect([calls[0]!.action, calls[0]!.input.kinds]).toEqual(["whatsapp_linked.list_events", ["reaction"]]);
+  const mine = { ...ev, event: 8, from: "me", from_me: true };
+  expect((await pollOnce("whatsapp_linked.new_reaction", {}, noted.seen, run([ev, mine]))).fresh).toEqual([{ event: ev }]);
+  expect((await pollOnce("whatsapp_linked.new_reaction", { chat: "Northwind" }, noted.seen, run([ev]))).fresh).toEqual([]);
+  await pollOnce("whatsapp_linked.group_members_changed", {}, null, run([]));
+  expect(calls.at(-1)!.input.kinds).toEqual(["joined", "left", "promoted", "demoted"]);
+  expect(() => pollConfig("whatsapp_linked.message_deleted", { every: 15 })).toThrow(/at least 60/);
 });

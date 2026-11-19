@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -351,6 +352,9 @@ func (a *Account) on(evt any) {
 	case *events.HistorySync:
 		a.history(e)
 	case *events.Message:
+		if a.changed(e) {
+			return
+		}
 		m, fresh, ok := a.keep(e)
 		if !ok || !fresh {
 			return
@@ -408,12 +412,36 @@ func (a *Account) on(evt any) {
 			}
 			return nil
 		})
+	case *events.Receipt:
+		ack := map[types.ReceiptType]int{types.ReceiptTypeDelivered: 2, types.ReceiptTypeRead: 3, types.ReceiptTypePlayed: 4}[e.Type]
+		if ack > 0 && !e.IsFromMe {
+			a.store.Acked(e.MessageIDs, ack)
+		}
 	case *events.GroupInfo:
 		if e.Name != nil {
 			a.store.Chat(e.JID.String(), e.Name.Name, 0, -1)
 		}
+		by := ""
+		if e.Sender != nil {
+			alt := types.EmptyJID
+			if e.SenderPN != nil {
+				alt = *e.SenderPN
+			}
+			by = a.canon(*e.Sender, alt).String()
+		}
+		for kind, people := range map[string][]types.JID{"joined": e.Join, "left": e.Leave, "promoted": e.Promote, "demoted": e.Demote} {
+			for _, p := range people {
+				who := a.canon(p, types.EmptyJID).String()
+				text := ""
+				if by != "" && by != who {
+					text = "by " + by
+				}
+				a.store.Event(Event{TS: msOf(e.Timestamp), Kind: kind, Chat: e.JID.String(), Who: who, Text: text})
+			}
+		}
 	case *events.JoinedGroup:
 		a.store.Chat(e.JID.String(), e.Name, 0, -1)
+		a.store.Event(Event{Kind: "added_to_group", Chat: e.JID.String(), Text: e.Name})
 	}
 }
 
@@ -466,6 +494,137 @@ func (a *Account) history(e *events.HistorySync) {
 
 func (a *Account) keep(e *events.Message) (Message, bool, bool) { return a.keepIn(a.store, e) }
 
+// whereFrom is a message's chat (one-to-one chats by phone number where known) and who sent it.
+func (a *Account) whereFrom(info types.MessageInfo) (chat types.JID, who string) {
+	// in a one-to-one chat, the other side's number comes alongside a hidden id as the sender's (theirs) or the
+	// recipient's (ours)
+	alt := info.SenderAlt
+	if info.IsFromMe {
+		alt = info.RecipientAlt
+	}
+	chat = info.Chat
+	if !info.IsGroup {
+		chat = a.canon(info.Chat, alt)
+	}
+	switch {
+	case info.IsFromMe:
+		a.mu.Lock()
+		if a.meta.Me != nil {
+			who = a.meta.Me.JID
+		}
+		a.mu.Unlock()
+	case info.IsGroup:
+		who = a.canon(info.Sender, info.SenderAlt).String()
+	default:
+		who = chat.String()
+	}
+	return chat, who
+}
+
+// target is a saved message something refers to (a reaction, an edit, a delete).
+func (a *Account) target(chat, id string) *Message {
+	if m := a.store.GetMessage(chat, id); m != nil {
+		return m
+	}
+	return a.store.FindMessage(id)
+}
+
+// changed handles what changes an earlier message rather than saying something: reactions, edits, deletes, poll
+// votes. false: it isn't one of those.
+func (a *Account) changed(e *events.Message) bool {
+	if skipChat(e.Info.Chat) {
+		return false
+	}
+	m := e.Message
+	chat, who := a.whereFrom(e.Info)
+	ts := msOf(e.Info.Timestamp)
+	ev := Event{TS: ts, Chat: chat.String(), Who: who, FromMe: e.Info.IsFromMe}
+	switch {
+	case m.GetReactionMessage() != nil:
+		r := m.GetReactionMessage()
+		t := a.target(chat.String(), r.GetKey().GetID())
+		if t == nil {
+			return true
+		}
+		a.store.React(t.Chat, t.ID, who, r.GetText(), ts)
+		if r.GetText() != "" {
+			ev.Kind, ev.Chat, ev.Message, ev.Text = "reaction", t.Chat, t.ID, r.GetText()
+			a.store.Event(ev)
+		}
+		return true
+	case m.GetPollUpdateMessage() != nil:
+		key := m.GetPollUpdateMessage().GetPollCreationMessageKey()
+		t := a.target(chat.String(), key.GetID())
+		cli := a.client()
+		if t == nil || cli == nil {
+			return true
+		}
+		vote, err := cli.DecryptPollVote(bg, e)
+		if err != nil {
+			a.logf("poll vote: %v", err)
+			return true
+		}
+		chosen := []string{}
+		if _, poll, err := a.Raw(t.Chat, t.ID); err == nil {
+			chosen = pollChoices(poll, vote.GetSelectedOptions())
+		}
+		a.store.Vote(t.Chat, t.ID, who, strings.Join(chosen, ", "), ts)
+		ev.Kind, ev.Chat, ev.Message, ev.Text = "poll_vote", t.Chat, t.ID, strings.Join(chosen, ", ")
+		a.store.Event(ev)
+		return true
+	case m.GetProtocolMessage() != nil:
+		p := m.GetProtocolMessage()
+		t := a.target(chat.String(), p.GetKey().GetID())
+		switch p.GetType() {
+		case waE2E.ProtocolMessage_REVOKE:
+			if t != nil {
+				a.store.Deleted(t.Chat, t.ID)
+				ev.Kind, ev.Chat, ev.Message, ev.Text = "deleted", t.Chat, t.ID, t.Text
+				a.store.Event(ev)
+			}
+		case waE2E.ProtocolMessage_MESSAGE_EDIT:
+			if _, text, ok := TextOf(p.GetEditedMessage()); ok && t != nil {
+				a.store.Edited(t.Chat, t.ID, text)
+				ev.Kind, ev.Chat, ev.Message, ev.Text = "edited", t.Chat, t.ID, text
+				a.store.Event(ev)
+			}
+		}
+		// the rest (key exchanges, history, settings) isn't anything anyone said either
+		return true
+	}
+	return false
+}
+
+// msOf is a time in milliseconds, now when WhatsApp didn't say.
+func msOf(t time.Time) int64 {
+	if t.IsZero() {
+		return time.Now().UnixMilli()
+	}
+	return t.UnixMilli()
+}
+
+// pollChoices is the names of the options picked in a poll vote (WhatsApp sends each as the SHA-256 of its name).
+func pollChoices(poll *waE2E.Message, picked [][]byte) []string {
+	m := unwrap(poll)
+	p := m.GetPollCreationMessage()
+	if p == nil {
+		p = m.GetPollCreationMessageV2()
+	}
+	if p == nil {
+		p = m.GetPollCreationMessageV3()
+	}
+	out := []string{}
+	for _, o := range p.GetOptions() {
+		h := sha256.Sum256([]byte(o.GetOptionName()))
+		for _, x := range picked {
+			if string(x) == string(h[:]) {
+				out = append(out, o.GetOptionName())
+			}
+		}
+	}
+	return out
+}
+
 // keepIn saves a message from WhatsApp. ok is false for what isn't something anyone said (a reaction, a delete, a
 // status update).
 func (a *Account) keepIn(s *Store, e *events.Message) (m Message, fresh, ok bool) {
@@ -477,36 +636,17 @@ func (a *Account) keepIn(s *Store, e *events.Message) (m Message, fresh, ok bool
 	if !said {
 		return m, false, false
 	}
-	// in a one-to-one chat, the other side's number comes alongside a hidden id as the sender's (theirs) or the
-	// recipient's (ours)
-	alt := info.SenderAlt
-	if info.IsFromMe {
-		alt = info.RecipientAlt
-	}
-	chat := info.Chat
-	if !info.IsGroup {
-		chat = a.canon(info.Chat, alt)
-	}
+	chat, who := a.whereFrom(info)
 	var sender, senderName *string
+	if who != "" {
+		sender = &who
+	}
 	if info.IsFromMe {
-		a.mu.Lock()
-		if a.meta.Me != nil {
-			sender = &a.meta.Me.JID
-		}
-		a.mu.Unlock()
 		me := "me"
 		senderName = &me
-	} else {
-		j := chat
-		if info.IsGroup {
-			j = a.canon(info.Sender, info.SenderAlt)
-		}
-		js := j.String()
-		sender = &js
-		if info.PushName != "" {
-			senderName = &info.PushName
-			s.Contact(js, "", info.PushName)
-		}
+	} else if info.PushName != "" {
+		senderName = &info.PushName
+		s.Contact(who, "", info.PushName)
 	}
 	senderJID := info.Sender.ToNonAD().String()
 	raw, _ := proto.Marshal(e.Message)
@@ -515,6 +655,9 @@ func (a *Account) keepIn(s *Store, e *events.Message) (m Message, fresh, ok bool
 		ts = time.Now().UnixMilli()
 	}
 	m = Message{Chat: chat.String(), ID: info.ID, FromMe: info.IsFromMe, Sender: sender, SenderName: senderName, TS: ts, Type: typ, Text: text, Quoted: strPtr(QuotedOf(e.Message)), SenderJID: &senderJID, Raw: raw}
+	if info.IsFromMe {
+		m.Ack = 1
+	}
 	return m, s.SaveMessage(m), true
 }
 
@@ -638,6 +781,15 @@ func (a *Account) Present(m Message) map[string]any {
 	if m.Quoted != nil {
 		out["replying_to"] = *m.Quoted
 	}
+	if m.FromMe && m.Ack > 0 && m.Ack < len(ackNames) {
+		out["status"] = ackNames[m.Ack]
+	}
+	if m.Edited {
+		out["edited"] = true
+	}
+	if m.Deleted {
+		out["deleted"] = true
+	}
 	return out
 }
 
@@ -682,9 +834,17 @@ func (a *Account) ChatFor(to string) (string, error) {
 // CheckSend: sends go only to people and groups this account already chats with, and not too many. Cold messages
 // and bulk sending get numbers banned.
 func (a *Account) CheckSend(jid string) error {
-	if !a.store.HasChat(jid) && a.store.NameOf(jid) == "" {
+	if !a.Knows(jid) {
 		return refuse(400, "WhatsApp messages only go to people and groups this WhatsApp already chats with. For new numbers or bulk messages, use the WhatsApp Business API instead")
 	}
+	return a.UnderLimit()
+}
+
+// Knows: a person or group this account already chats with, or has in its contacts.
+func (a *Account) Knows(jid string) bool { return a.store.HasChat(jid) || a.store.NameOf(jid) != "" }
+
+// UnderLimit: not too many sends (and group adds) lately.
+func (a *Account) UnderLimit() error {
 	if a.store.Sent(time.Hour) >= LimitHour {
 		return refuse(429, "already sent %d messages from this WhatsApp in the last hour; wait before sending more, so the number isn't flagged", LimitHour)
 	}
@@ -720,7 +880,11 @@ func (a *Account) Send(chat string, msg *waE2E.Message) (any, error) {
 	if cli.Store.ID != nil {
 		own = cli.Store.ID.ToNonAD()
 	}
-	kept, _, ok := a.keep(&events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: to, Sender: own, IsFromMe: true, IsGroup: to.Server == types.GroupServer}, ID: resp.ID, Timestamp: resp.Timestamp}, Message: msg})
+	evt := (&events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: to, Sender: own, IsFromMe: true, IsGroup: to.Server == types.GroupServer}, ID: resp.ID, Timestamp: resp.Timestamp}, RawMessage: msg}).UnwrapRaw()
+	if a.changed(evt) {
+		return map[string]any{"sent": true}, nil
+	}
+	kept, _, ok := a.keep(evt)
 	if !ok {
 		return map[string]any{"sent": true}, nil
 	}

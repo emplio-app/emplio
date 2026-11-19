@@ -479,9 +479,7 @@ func (s *Server) Routes() *http.ServeMux {
 			if err != nil {
 				return nil, err
 			}
-			msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: &waE2E.ContextInfo{
-				StanzaID: proto.String(q.ID), Participant: proto.String(a.senderOf(q).String()), QuotedMessage: unwrap(w),
-			}}}
+			msg = a.replyTo(q, w, text)
 		}
 		return a.Send(chat, msg)
 	}))
@@ -600,6 +598,7 @@ func (s *Server) Routes() *http.ServeMux {
 		a.store.Chat(chat, "", 0, 0)
 		return map[string]any{"ok": true, "marked": marked}, nil
 	}))
+	s.manageRoutes(mux)
 	return mux
 }
 

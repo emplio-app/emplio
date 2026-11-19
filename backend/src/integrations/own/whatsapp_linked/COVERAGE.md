@@ -1,7 +1,8 @@
 # WhatsApp (linked) coverage
 
-Checked 2026-11-19 against whatsmeow (the WhatsApp Web protocol library the WhatsApp server uses, in Go) and
-Composio's WhatsApp toolkit, which is Meta's WhatsApp Business API, a different product (the `whatsapp` app).
+Checked 2026-11-20 against whatsmeow (the WhatsApp Web protocol library the WhatsApp server uses, in Go), Periskope's
+API and workflow triggers (docs.periskope.app, the closest product: linked WhatsApp numbers for teams), and Composio's
+WhatsApp toolkit, which is Meta's WhatsApp Business API, a different product (the `whatsapp` app).
 
 ## What it is
 
@@ -18,9 +19,14 @@ shows as needing a reconnect.
 
 ## Actions (* asks first)
 
-- Account: get_account
-- Chats: list_chats, get_messages, list_recent_messages, search_messages, list_contacts, get_group, download_media
-- Sending: send_message*, send_file*, react_to_message*, mark_as_read*
+- Account: get_account, check_numbers
+- Chats: list_chats, get_messages, get_message (reactions, ticks, poll votes, edited/deleted), list_recent_messages,
+  list_events, search_messages, list_contacts, get_group, download_media
+- Sending: send_message*, reply_to_message* (its own action: small models miss send_message's reply_to), send_file*,
+  send_poll*, forward_message*, react_to_message*, edit_message*, delete_message*, pin_message*, mark_as_read*
+- Groups: create_group*, add_group_members*, remove_group_members*, make_group_admins*, remove_group_admins*,
+  update_group_settings* (name, description, admins-only sending and editing, disappearing messages),
+  get_group_invite_link*, join_group*, leave_group*
 
 ## Triggers
 
@@ -28,17 +34,24 @@ shows as needing a reconnect.
   minutes (at least 60); filters chat, groups (include/exclude/only), contains, from_me. Each check connects the
   account, takes in what WhatsApp queued while it was idle, and reads the last 3 hours. Not instant, on purpose: an
   instant trigger would keep the person's WhatsApp connected around the clock.
+- message_edited, message_deleted, new_reaction, new_poll_vote, group_members_changed (joined, left, promoted,
+  demoted), new_chat (someone's first message), added_to_group: same hourly checks over `list_events`; filters chat,
+  groups, from_me. The server keeps events 30 days.
 
 ## Left out, and why
 
-- Starting chats with new numbers, bulk sends, creating groups and adding people: what gets numbers banned. The WhatsApp
-  Business API (Composio `whatsapp`, MSG91, Plivo) does those properly.
-- Status updates, channels (newsletters), calls, polls and editing or deleting sent messages: not asked for by
-  business owners yet, and each is more traffic of the kind WhatsApp watches.
+- Starting chats with new numbers and bulk sends (Periskope's broadcasts): what gets numbers banned. Groups can only be
+  made with, and added to by, people the account already chats with; anyone else gets the invite link. The WhatsApp
+  Business API (Composio `whatsapp`, MSG91, Plivo) does cold and bulk messaging properly.
+- Periskope's own CRM (tickets, tasks, labels, private notes, custom properties, scheduled messages, team access,
+  AI agent, knowledge base): Emplio has its own automations, tasks and memory for these.
+- Status updates, channels (newsletters), calls, group pictures, profile name and picture, archiving and muting chats:
+  not asked for yet.
+- Editing captions on photos and files (text messages only), and poll votes cast before the account was linked.
 - Full history: only what WhatsApp copies over when linking (recent months) and everything after.
-- Message edits and deletions made later on the phone aren't reflected in what's saved.
 
 ## Limits (server-enforced)
 
-20 sends an hour and 150 a day per account; only to chats it already has. The account stays connected for 10 minutes
+20 sends an hour and 150 a day per account (replies, reactions, edits, deletes, pins, polls, forwards, new groups and
+adds all count); only to chats it already has. The account stays connected for 10 minutes
 after use, and catches up every 4 hours.
