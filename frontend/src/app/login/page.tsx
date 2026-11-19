@@ -79,9 +79,9 @@ export default function LoginPage() {
   if (isPending || me?.user.name) return null;
 
   return (
-    // on a phone, near the top and clear of the status bar: centered, the keyboard made the page scroll the logo
-    // up under the clock to reach the field
-    <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6 py-24 max-sm:justify-start max-sm:gap-6 max-sm:pt-[calc(var(--safe-top)+2.5rem)] max-sm:pb-10">
+    // centered on a phone too, clear of the status bar; "safe" centering falls back to the top when the keyboard
+    // leaves too little room, so the logo never ends up under the clock
+    <main className="flex flex-1 flex-col items-center justify-center-safe gap-8 px-6 py-24 max-sm:gap-6 max-sm:pt-[calc(var(--safe-top)+2.5rem)] max-sm:pb-10">
       <Logo />
       <Card className="w-full max-w-sm shadow-xl shadow-primary/5">
         <CardHeader>
