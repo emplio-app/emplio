@@ -2,11 +2,24 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AgentInfo, Task, TaskInput, TaskStatus, TeamMember } from "@emplio/shared";
-import { BotIcon, CalendarIcon, CheckIcon, ChevronRightIcon, ClipboardListIcon, MessageSquareIcon, PlayIcon, PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
+import { BotIcon, CalendarIcon, CheckIcon, ChevronRightIcon, ClipboardListIcon, MessageSquareIcon, PlayIcon, PlusIcon, SearchIcon, SparklesIcon, Trash2Icon, UserIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxLabel,
+  ComboboxList,
+  ComboboxTrigger,
+  ComboboxValue,
+} from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
@@ -172,7 +185,7 @@ export function TasksPage() {
 
   const people = [
     { value: AI, label: "Emplio" },
-    ...(agents.data ?? []).map((a) => ({ value: AGENT + a.slug, label: `${a.name} (agent)` })),
+    ...(agents.data ?? []).map((a) => ({ value: AGENT + a.slug, label: a.name })),
     ...(team.data ?? []).map((m) => ({ value: m.id, label: m.name ?? m.email })),
   ];
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -381,20 +394,52 @@ export function TasksPage() {
 
 type People = { value: string; label: string }[];
 
+// Emplio first, then its agents, then the team, each under its own heading; a search box on top, as a business can
+// have dozens of agents (the plain list ran off the screen)
+const KINDS = [
+  { value: "Emplio", is: (v: string) => v === AI, Icon: SparklesIcon },
+  { value: "Agents", is: (v: string) => v.startsWith(AGENT), Icon: BotIcon },
+  { value: "People", is: (v: string) => v !== AI && !v.startsWith(AGENT), Icon: UserIcon },
+];
+
 function WhoSelect({ people, value, onChange, className }: { people: People; value: string; onChange: (v: string) => void; className?: string }) {
+  const groups = KINDS.map((k) => ({ ...k, items: people.filter((p) => k.is(p.value)) })).filter((g) => g.items.length);
   return (
-    <Select items={people} value={value} onValueChange={(v) => v && onChange(v)}>
-      <SelectTrigger aria-label="Who does it" className={className}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {people.map((p) => (
-          <SelectItem key={p.value} value={p.value}>
-            {p.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Combobox
+      items={groups}
+      value={people.find((p) => p.value === value) ?? null}
+      itemToStringLabel={(p: People[number]) => p.label}
+      isItemEqualToValue={(a: People[number], b: People[number]) => a.value === b.value}
+      onValueChange={(p: People[number] | null) => p && onChange(p.value)}
+    >
+      <ComboboxTrigger
+        aria-label="Who does it"
+        render={<Button variant="outline" className={cn("justify-between gap-2 px-3 font-normal", className)} />}
+      >
+        <span className="truncate">
+          <ComboboxValue />
+        </span>
+      </ComboboxTrigger>
+      <ComboboxContent className="w-72 max-w-(--available-width)">
+        <ComboboxInput showTrigger={false} placeholder="Search people and agents" />
+        <ComboboxEmpty>Nobody matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(g: (typeof groups)[number]) => (
+            <ComboboxGroup key={g.value} items={g.items}>
+              {g.value !== "Emplio" && <ComboboxLabel>{g.value}</ComboboxLabel>}
+              <ComboboxCollection>
+                {(p: People[number]) => (
+                  <ComboboxItem key={p.value} value={p}>
+                    <g.Icon className="text-muted-foreground" />
+                    <span className="truncate">{p.label}</span>
+                  </ComboboxItem>
+                )}
+              </ComboboxCollection>
+            </ComboboxGroup>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   );
 }
 
