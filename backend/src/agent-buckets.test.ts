@@ -37,7 +37,9 @@ test("add --bucket writes to that bucket's repo; lessons follow the agent", asyn
   const files = fake({});
   const member = { workspaceId: "w", userId: "u1", admin: false, job: false, author };
   expect((await agentsCommand(member, ["add", "Payroll", "--description", "pay", "--bucket", "restricted"])).text).toContain("only an owner or admin");
-  expect((await agentsCommand(member, ["add", "My Helper", "--description", "mine", "--bucket", "me"])).text).toContain("added me/agents/my-helper");
+  expect((await agentsCommand(member, ["add", "My Helper", "--description", "mine", "--bucket", "me", "Do it."])).text).toContain("added me/agents/my-helper");
+  expect((await agentsCommand(member, ["add", "Note Taker", "--description", "notes"])).text).toContain("its instructions");
+  expect((await agentsCommand(member, ["add", "Note Taker", "--description", "notes"], true)).text).toContain("added company/agents/note-taker");
   expect(files["me-u1"]!["agents/my-helper/AGENT.md"]).toContain("name: My Helper");
   await agentsCommand(member, ["learn", "my-helper", "the export button moved"]);
   expect(files["me-u1"]!["agents/my-helper/LESSONS.md"]).toContain("the export button moved");
@@ -101,7 +103,7 @@ test("a team agent keeps its maker, and only they or an owner or admin change it
   const files = fake({ company: { "agents/old/AGENT.md": md("Old") } });
   const maker = { workspaceId: "w", userId: "u1", admin: false, job: false, author };
   const other = { ...maker, userId: "u2" };
-  await agentsCommand(maker, ["add", "Web Helper", "--description", "web"]);
+  await agentsCommand(maker, ["add", "Web Helper", "--description", "web", "Browse."]);
   expect(files.company!["agents/web-helper/AGENT.md"]).toContain("created_by: u1");
   expect((await findAgent("w", "web-helper"))?.createdBy).toBe("u1");
   for (const sub of ["update", "archive", "remove"]) expect((await agentsCommand(other, [sub, "web-helper", "--level", "strong"])).text).toContain("only whoever made Web Helper");

@@ -539,19 +539,26 @@ async function recorded(w: Row) {
   return recordedLine(changes.slice(-10), await timezoneOf(w.userId));
 }
 
-// Under the report of a plain copy's finished work: the moment to turn a kind of work into an agent.
-// ponytail: said in staff chats too, where `emplio agents add` refuses with its own clear error; check admin here if that's noisy
-export const agentNudge = (w: Pick<Row, "status" | "agent" | "depth">) =>
-  w.status === "done" && !w.agent && w.depth === 1
-    ? "\n[A plain copy of you did this. If this kind of work will come back, make an agent for it now so the next one goes to it: `emplio agents add` (emplio agents help). A true one-off: ignore this.]"
-    : "";
+// Under the report of finished work: the moment to turn a kind of work into an agent, or to give one made without
+// instructions (`bare`) its instructions from what just worked.
+// ponytail: said in staff chats too, where `emplio agents add|update` refuses with its own clear error; check admin here if that's noisy
+export const agentNudge = (w: Pick<Row, "status" | "agent" | "depth">, bare = false) =>
+  w.status !== "done" || w.depth !== 1
+    ? ""
+    : !w.agent
+      ? "\n[A plain copy of you did this. If this kind of work will come back, make an agent for it now so the next one goes to it, with its instructions from how this went: `emplio agents add` (emplio agents help). A true one-off: ignore this.]"
+      : bare
+        ? `\n[${w.agent} has no instructions yet, only its brief each time. Write them now from how this went: emplio agents update ${w.agent} - <<'EOF' (the steps that worked, what to check, what it reports) EOF]`
+        : "";
 
+const bareAgent = async (w: Row) =>
+  !!w.agent && w.status === "done" && w.depth === 1 && (await findAgent(w.workspaceId, w.agent, { userId: w.userId, admin: true }))?.instructions === "";
 const full = async (w: Row) => {
   const actions = await actionsOf(w);
   const head = `${short(w.id)} "${w.name}"${w.agent ? ` (${w.agent})` : ""}: ${w.status}, ${actions.length} actions\n`;
   return w.status === "working"
     ? `${head}now: ${actions.filter((a) => !a.done).at(-1)?.description ?? "thinking"}`
-    : `${head}${w.report ?? ""}${madeNote(actions)}${await recorded(w)}${agentNudge(w)}`;
+    : `${head}${w.report ?? ""}${madeNote(actions)}${await recorded(w)}${agentNudge(w, await bareAgent(w))}`;
 };
 // what a job already put in the person's chat, so Emplio doesn't show it again
 const madeNote = (actions: Action[]) => {
@@ -684,7 +691,7 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
         if (!set.description) return { text: `error: there's no agent "${pick}". Nothing was started. ${await yours()} If none of them fits, run it again with --description "<the kind of work it does>" and "${pick}" is made.` };
         const close = closeTo(pick, (await activeAgents(who)).map((a) => a.name));
         if (close) return { text: `error: "${pick}" is close to your agent ${close}. Nothing was started: hand it to ${close} (emplio agents update widens what it does), or name the new one for clearly different work.` };
-        const added = await agentsCommand({ ...who, admin: true, job: false, author: maker.author }, ["add", pick, "--description", set.description]);
+        const added = await agentsCommand({ ...who, admin: true, job: false, author: maker.author }, ["add", pick, "--description", set.description], true);
         if (!added.changed) return { text: added.text };
         agent = await findAgent(who.workspaceId, pick, await viewerOf(who));
       }

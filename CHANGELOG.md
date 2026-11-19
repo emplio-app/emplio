@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.90 (2026-11-19)
+
+### What's new
+
+- Every new agent Emplio makes now comes with written instructions on how to do its work, taken from the job it learned from, and agents made without any get them after their next finished job.
+
+### For developers
+
+- `emplio agents add` refuses without instructions (the heredoc body) and says what to write.
+- `agentNudge` asks Emplio to write instructions (`emplio agents update <slug> -`) under the report of a finished job whose agent has none.
+
 ## 1.2.89 (2026-11-19)
 
 ### What's new

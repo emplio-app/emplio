@@ -208,6 +208,8 @@ test("a plain copy's finished work gets the agent nudge; an agent's, a deeper th
   expect(agentNudge({ status: "done", agent: "invoice-chaser", depth: 1 })).toBe("");
   expect(agentNudge({ status: "done", agent: null, depth: 2 })).toBe("");
   expect(agentNudge({ status: "asking", agent: null, depth: 1 })).toBe("");
+  expect(agentNudge({ status: "done", agent: "invoice-chaser", depth: 1 }, true)).toContain("emplio agents update invoice-chaser");
+  expect(agentNudge({ status: "asking", agent: "invoice-chaser", depth: 1 }, true)).toBe("");
 });
 
 test("a new agent that nearly copies one already there is caught; clearly different work isn't", () => {
