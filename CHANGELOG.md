@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.98 (2026-11-19)
+
+### What's new
+
+- Agents learn from every piece of work you give them, not only the first. When you send more work to an agent that's already done a job, it now also keeps what it worked out as tools, so the next time is quicker.
+
+### For developers
+
+- The tool-saving nudge (`SAVE_TOOL`) now goes after each finished run of a job, not once per job. `nudged()` skips the nudge's own run (also when a restart or the step limit splits it) and runs with 2 commands or fewer (`SMALL_WORK`). The other conditions stay: completed, not interrupted, not asking, done, and no tool saved in that run.
+
 ## 1.2.97 (2026-11-19)
 
 ### What's new

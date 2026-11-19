@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue } from "./jobs";
+import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, RESTARTED, CARRY_ON, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -287,11 +287,22 @@ test("a question nobody answers for a day stops waiting; \"Question: none\" neve
   }
 });
 
-test("the report goes first: the job is done with its answer before the tool-saving run, which comes once", async () => {
+test("each piece of work a job is given gets the tool-saving nudge, but not the nudge's own run or a tiny one", () => {
   const said = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
-  expect(nudged([said(FROM_EMPLIO + "check usage")])).toBe(false);
-  expect(nudged([said(FROM_EMPLIO + SAVE_TOOL)])).toBe(true);
+  const ran = (n: number) => ({ role: "assistant", parts: Array.from({ length: n }, () => ({ type: "tool-python", input: { code: "print(1)" } })) });
+  expect(nudged([said(FROM_EMPLIO + "check usage"), ran(3)])).toBe(false);
+  // two commands or fewer: nothing worth keeping
+  expect(nudged([said(FROM_EMPLIO + "check usage"), ran(2)])).toBe(true);
+  expect(nudged([said(FROM_EMPLIO + SAVE_TOOL), ran(5)])).toBe(true);
   expect(nudged([said(FROM_EMPLIO + "Before your report: keep what the next job like this would call as tools.")])).toBe(true);
+  // a follow-up after the nudge gets its own
+  expect(nudged([said(FROM_EMPLIO + "email the team"), ran(9), said(FROM_EMPLIO + SAVE_TOOL), ran(1), said(FROM_EMPLIO + "delete the test email"), ran(4)])).toBe(false);
+  // a restart or the step limit mid-nudge doesn't make it ask again
+  expect(nudged([said(FROM_EMPLIO + SAVE_TOOL), ran(4), said(FROM_EMPLIO + RESTARTED), ran(3)])).toBe(true);
+  expect(nudged([said(FROM_EMPLIO + "email the team"), ran(30), said(FROM_EMPLIO + CARRY_ON), ran(1)])).toBe(false);
+});
+
+test("the report goes first: the job is done with its answer before the tool-saving run", async () => {
 
   const tag = crypto.randomUUID().slice(0, 8);
   const [ws] = await db.insert(workspaces).values({ name: `jobs-test-${tag}` }).returning();
