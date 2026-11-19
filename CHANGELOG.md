@@ -2,6 +2,27 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.98 (2026-11-19)
+
+### What's new
+
+- Agents learn from every piece of work you give them, not only the first. When you send more work to an agent that's already done a job, it now also keeps what it worked out as tools, so the next time is quicker.
+
+### For developers
+
+- The tool-saving nudge (`SAVE_TOOL`) now goes after each finished run of a job, not once per job. `nudged()` skips the nudge's own run (also when a restart or the step limit splits it) and runs with 2 commands or fewer (`SMALL_WORK`). The other conditions stay: completed, not interrupted, not asking, done, and no tool saved in that run.
+
+## 1.2.97 (2026-11-19)
+
+### What's new
+
+- Emplio spends less when it works on websites for you: it now starts from a much shorter guide to the browser, so a typical website task costs about 12% less, with the same results.
+
+### For developers
+
+- `emplio browser skill` prints our own guide (`BROWSER_SKILL` in `sandbox.ts`, about 1.8 KB) instead of agent-browser's core skill (14 KB), which was mostly sessions, installing and add-ons the wrapper already handles. `emplio browser skill --ref <topic>` still reads agent-browser's references.
+- New benchmark `backend/evals/browser/bench.ts`: an agent job's own instructions, the real `emplio` wrapper and agent-browser, a local Chrome and a made-up shop admin (`site.ts`), marked by what the site says happened. `BENCH_SRC` points it at another checkout to compare two versions. On 5 tasks × 4 runs (Haiku): 20/20 both, $0.0049 → $0.0043 a task, page text read −30%. A trial of snapshot `--delta` after every click cost 5–20% more (the agent still lists the page) and was dropped.
+
 ## 1.2.96 (2026-11-19)
 
 ### What's new

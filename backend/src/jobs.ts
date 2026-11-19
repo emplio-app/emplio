@@ -62,16 +62,26 @@ const untold = new Set<string>();
 // from) runs out. In memory: a restart ends the job anyway (markOrphanedJobs).
 const carryUntil = new Map<string, number>();
 const deadline = (id: string) => carryUntil.get(id) ?? Date.now() + JOB_MINUTES * 60_000;
-const RESTARTED =
+export const RESTARTED =
   "The server restarted and cut your last run off mid-work. Carry on from where you stopped, without redoing what's done: what you found is in your files and this chat. Threads you started were cut off too: check them with `emplio threads` before starting any again.";
-// A job whose run kept no tool gets this once, after its report has gone (began, below): every kind of task done once
+// A job's run that kept no tool gets this after its report has gone (began, below): every kind of task done once
 // is one call the next time. Opening a skill or calling a tool doesn't count: a job that did part of the work inline
 // (a write by hand next to a skill that only reads) would never keep that part. Its answer is a line, not the report.
 export const SAVE_TOOL =
   'Your report has gone to whoever asked; nobody is waiting on this. Now keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. Keep it simple: save the steps that worked as they are, in a few steps. Don\'t debug, retry or redo the work here, and don\'t build more than the job needed; a step that won\'t save cleanly is left out. If every step was already a call to a saved tool, or this was a true one-off, save nothing. Reply with one line: the tools you saved, or "Nothing to keep." Not the report again.';
-// this job had the nudge already (the job's chat says so): never twice, even after a restart or a follow-up
+// No nudge for this piece of work: it was the nudge's own run (also when a restart or the step limit cut that run in
+// two), or it ran SMALL_WORK commands or fewer. Each follow-up a job is given gets its own nudge.
 const NUDGED = /^\[From Emplio\] (Your report has gone|Before your report)/;
-export const nudged = (msgs: { role: string; parts: unknown }[]) => msgs.some((m) => m.role === "user" && NUDGED.test(textOf(m)));
+const SMALL_WORK = 2;
+export const nudged = (msgs: { role: string; parts: unknown }[]) => {
+  const brief = (m: { role: string; parts: unknown }) =>
+    m.role === "user" && textOf(m).startsWith(FROM_EMPLIO) && ![RESTARTED, CARRY_ON].includes(textOf(m).slice(FROM_EMPLIO.length));
+  const at = msgs.length - 1 - [...msgs].reverse().findIndex(brief);
+  if (at === msgs.length) return true;
+  if (NUDGED.test(textOf(msgs[at]!))) return true;
+  const commands = msgs.slice(at + 1).flatMap((m) => (m.role === "assistant" ? ((m.parts as { input?: unknown }[]) ?? []) : [])).filter((p) => p.input !== undefined);
+  return commands.length <= SMALL_WORK;
+};
 // jobs in their tool-saving run: its end leaves the report and status as they were and wakes nobody
 const saving = new Set<string>();
 export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
