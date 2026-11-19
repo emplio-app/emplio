@@ -3,8 +3,8 @@
 // Meta's WhatsApp Business API (the "whatsapp" app on Composio, MSG91, Plivo): this is the person's own number.
 // The accounts live on Emplio's WhatsApp server (whatsapp/ at the top of the repo, client.ts); a connection's login is
 // that server's id for the account. Linking runs through the sign-in plumbing every OAuth app uses: authorizeUrl is
-// our own page with the QR code (link.ts), and the code it hands back says which account was linked.
-import { createHmac, timingSafeEqual } from "node:crypto";
+// our own page with the QR code (link.ts), and the code it hands back says which account was linked. Its new-message
+// trigger is polled every hour (polls/whatsapp_linked.ts), so no one's WhatsApp stays connected around the clock.
 import { z } from "zod";
 import { AppFile, AppsError } from "../../types";
 import type { OwnApp } from "../index";
@@ -20,13 +20,6 @@ const q = (o: Record<string, unknown>) => new URLSearchParams(Object.entries(o).
 
 const chat = z.string().min(1).max(200).describe("The chat: its id from list_chats (like 15551234567@s.whatsapp.net, or ...@g.us for a group), a phone number with country code, or the chat's exact name");
 const message = z.string().min(1).max(200).describe("The message's id, from get_messages or search_messages");
-
-// Each automation's webhook secret, worked out rather than stored.
-export function webhookSecret(connection: string) {
-  const key = process.env.ENCRYPTION_KEY;
-  if (!key) throw new Error("ENCRYPTION_KEY isn't set");
-  return createHmac("sha256", key).update(`whatsapp-webhook:${connection}`).digest("hex");
-}
 
 type Msg = { chat: string; chat_name: string; is_group: boolean; from_me: boolean; from: string; from_name: string | null; text: string };
 const contains = (hay: unknown, needle: unknown) => String(hay ?? "").toLowerCase().includes(String(needle).toLowerCase());
@@ -61,56 +54,14 @@ export const whatsapp_linked: OwnApp = {
     // disconnecting in Emplio unlinks it from the phone and forgets its messages
     revoke: async (key) => void (await wa("DELETE", `/accounts/${account(key)}`)),
   },
-  push: {
-    events: { new_message: "message" },
-    triggers: {
-      new_message: {
-        description:
-          "A new message arrives on the linked WhatsApp, in any chat, groups included (also messages that came in while it was offline). Messages sent from it, Emplio's own replies included, don't start it unless from_me is set.",
-        config: [
-          { name: "chat", type: "string", required: false, description: "Only this chat: part of its name, the phone number, or its id" },
-          { name: "groups", type: "include|exclude|only", required: false, description: "Group chats: include (the default), exclude, or only groups" },
-          { name: "contains", type: "string", required: false, description: "Only messages containing this text" },
-          { name: "from_me", type: "boolean", required: false, description: "Also messages sent from this WhatsApp (by the person on their phone, or by Emplio)" },
-        ],
-        output: [
-          { name: "id", type: "string", required: true, description: "The message's id" },
-          { name: "chat", type: "string", required: true, description: "The chat's id, to answer it with send_message" },
-          { name: "chat_name", type: "string", required: true, description: "The chat's name (the person, or the group)" },
-          { name: "is_group", type: "boolean", required: true, description: "Whether it's a group chat" },
-          { name: "from", type: "string", required: true, description: "Who sent it: their phone number" },
-          { name: "from_name", type: "string", required: false, description: "Their name" },
-          { name: "time", type: "string", required: true, description: "When it was sent" },
-          { name: "type", type: "string", required: true, description: "conversation, image, audio (voice notes), document, video, location, contact..." },
-          { name: "text", type: "string", required: true, description: "What it says; media as a label like [voice note] or [photo] with any caption" },
-          { name: "replying_to", type: "string", required: false, description: "The message it replies to, when it's a reply" },
-          { name: "has_media", type: "boolean", required: true, description: "Whether there's a file to fetch with download_media" },
-        ],
-      },
-    },
-    async start(key, connection) {
-      if (!process.env.WEBHOOK_URL) throw new AppsError("this server can't receive WhatsApp's messages (WEBHOOK_URL isn't set)");
-      await wa("PUT", `/accounts/${account(key)}/watch`, { url: `${process.env.WEBHOOK_URL}/webhooks/app/whatsapp_linked/${connection}`, secret: webhookSecret(connection) });
-      return `whatsapp_linked:${connection}`;
-    },
-    stop: async (key) => void (await wa("DELETE", `/accounts/${account(key)}/watch`)),
-    async receive(delivery) {
-      const got = Buffer.from(String(delivery.headers["x-emplio-signature"] ?? ""));
-      const want = Buffer.from(createHmac("sha256", webhookSecret(delivery.connection)).update(delivery.body).digest("hex"));
-      if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
-      const p = JSON.parse(delivery.body) as { id: string; message: Msg };
-      return { events: async () => [{ id: p.id, triggers: ["new_message"], data: p.message }] };
-    },
-    wanted: (config, data) => wanted(config, data as Msg),
-  },
   actions: {
     get_account: {
-      description: "Which WhatsApp is linked (number and name), whether it's connected right now, and whether an automation is waiting for its messages.",
+      description: "Which WhatsApp is linked (number and name), and whether it's connected right now (it connects when used, and stays idle otherwise).",
       readOnly: true,
       input: z.object({}),
       run: async (_i, key) => {
         const s = await wa("GET", `/accounts/${account(key)}`);
-        return { status: s.status, phone: s.me?.phone ?? null, name: s.me?.name ?? null, watched_by_an_automation: s.watching };
+        return { status: s.status, phone: s.me?.phone ?? null, name: s.me?.name ?? null };
       },
     },
     list_chats: {
@@ -136,6 +87,15 @@ export const whatsapp_linked: OwnApp = {
         after: z.string().optional().describe("Only messages after this time (ISO 8601)"),
       }),
       run: async (i: { chat: string; limit: number; before?: string; after?: string }, key) => wa("GET", `/accounts/${account(key)}/messages?${q(i)}`),
+    },
+    list_recent_messages: {
+      description: "What came in lately across every chat, groups included, newest first: catches up with WhatsApp first, so it also has what arrived while it was idle.",
+      readOnly: true,
+      input: z.object({
+        after: z.string().optional().describe("Only messages after this time (ISO 8601, like 2026-11-19T10:00:00Z); default the last 3 hours"),
+        limit: z.number().int().min(1).max(1000).default(200).describe("How many messages (default 200)"),
+      }),
+      run: async (i: { after?: string; limit: number }, key) => wa("GET", `/accounts/${account(key)}/recent?${q(i)}`),
     },
     search_messages: {
       description: "Search every chat's messages (or one chat's) for words, newest first. Each word must appear.",

@@ -1,6 +1,6 @@
 # WhatsApp (linked) coverage
 
-Checked 2026-11-19 against Baileys 7.0.0-rc14 (the WhatsApp Web protocol library the WhatsApp server uses) and
+Checked 2026-11-19 against whatsmeow (the WhatsApp Web protocol library the WhatsApp server uses, in Go) and
 Composio's WhatsApp toolkit, which is Meta's WhatsApp Business API, a different product (the `whatsapp` app).
 
 ## What it is
@@ -19,13 +19,15 @@ shows as needing a reconnect.
 ## Actions (* asks first)
 
 - Account: get_account
-- Chats: list_chats, get_messages, search_messages, list_contacts, get_group, download_media
+- Chats: list_chats, get_messages, list_recent_messages, search_messages, list_contacts, get_group, download_media
 - Sending: send_message*, send_file*, react_to_message*, mark_as_read*
 
 ## Triggers
 
-- new_message: every new message in any chat, groups included; filters chat, groups (include/exclude/only),
-  contains, from_me. Messages missed while offline count once they arrive.
+- new_message (polled, `polls/whatsapp_linked.ts`): new messages in any chat, groups included, checked every 60
+  minutes (at least 60); filters chat, groups (include/exclude/only), contains, from_me. Each check connects the
+  account, takes in what WhatsApp queued while it was idle, and reads the last 3 hours. Not instant, on purpose: an
+  instant trigger would keep the person's WhatsApp connected around the clock.
 
 ## Left out, and why
 
@@ -38,5 +40,5 @@ shows as needing a reconnect.
 
 ## Limits (server-enforced)
 
-20 sends an hour and 150 a day per account; only to chats it already has. The account stays connected while an
-automation watches it, otherwise for 10 minutes after use, and catches up every 4 hours.
+20 sends an hour and 150 a day per account; only to chats it already has. The account stays connected for 10 minutes
+after use, and catches up every 4 hours.

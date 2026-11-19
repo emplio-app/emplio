@@ -6,13 +6,13 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 ### What's new
 
-- Link your own WhatsApp: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, send replies and files when you ask, and run automations when a message comes in. It only writes to people and groups you already chat with, and keeps it slow so your number stays safe.
+- Link your own WhatsApp: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, send replies and files when you ask, and run automations on new messages (checked every hour). It only writes to people and groups you already chat with, and keeps it slow so your number stays safe.
 - The official WhatsApp Business API connection is now called "WhatsApp Business API".
 
 ### For developers
 
-- New `whatsapp/` service (Node 22, Baileys 7, one SQLite file with FTS5 per account) behind a token-protected HTTP API; accounts connect on demand, stay connected while an automation watches them, and catch up every 4 hours. Sends: known chats only, 20/hour and 150/day.
-- `whatsapp_linked` own app: 11 actions and a `new_message` trigger (signed webhook), linking through the OAuth plumbing with our own QR page (`/whatsapp/link`). Needs `WHATSAPP_URL` and `WHATSAPP_TOKEN`; Docker installs get a `whatsapp` service and the token from setup.sh.
+- New `whatsapp/` service in Go with whatsmeow (pure-Go SQLite: the login in `whatsmeow.db`, chats and messages with FTS5 in `data.db`, one folder per account) behind a token-protected HTTP API. Nobody stays connected: accounts connect when used, drop after 10 idle minutes, and catch up every 4 hours. Sends: known chats only, 20/hour and 150/day. About 29 MB with an account linking (Baileys was about 126 MB idle).
+- `whatsapp_linked` own app: 12 actions, linking through the OAuth plumbing with our own QR page (`/whatsapp/link`), and a polled `new_message` trigger (`polls/whatsapp_linked.ts`, every 60 minutes, at least 60) over the new `list_recent_messages` action. Needs `WHATSAPP_URL` and `WHATSAPP_TOKEN`; Docker installs get a `whatsapp` service and the token from setup.sh.
 
 ## 1.2.100 (2026-11-19)
 

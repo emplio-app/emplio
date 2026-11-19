@@ -71,10 +71,11 @@ jobs:
           echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - run: cd backend && bun run db:migrate && bun run test
       - run: bun test runner
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: 22
-      - run: cd whatsapp && npm ci --no-audit --no-fund && npx tsc -p . && npm test
+          go-version-file: whatsapp/go.mod
+          cache-dependency-path: whatsapp/go.sum
+      - run: cd whatsapp && go vet ./... && go test ./...
   # the real thing: build every image and run it the way an install does, with none of the test settings above
   docker:
     needs: plan
