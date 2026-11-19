@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.100 (2026-11-19)
+
+### What's new
+
+- Emplio gets website work done in fewer steps: it does what it already knows in one go (signing in and moving on, filling and saving a whole form), goes straight to a record's own page, and makes the same change to many records in one pass. In our tests a website task cost about 17% less, and the same change on 8 orders about 27% less.
+
+### For developers
+
+- `browserGuide` (sandbox.ts): rules 2 to 5 on steps: everything already known in one run or command, a loop by `find` for the same change on several records, a record's own address over searching or paging (`snapshot -i -u`), and looking for what's needed (`snapshot -i | grep`) after a first look. Main's 1.2.99 guide changes kept as they are.
+- Browser benchmark: new `bulk` task (8 orders to Delivered); `/work` in commands maps to the run's folder; each run gets its own agent-browser socket folder (runs side by side once shared a browser); the first browser result gets the command list, as `firstInChat` gives it. Main vs this, 6 tasks × 4 runs on Haiku: 23/24 → 24/24, 11.8 → 9.5 steps, $0.0041 → $0.0034 a task.
+
 ## 1.2.99 (2026-11-19)
 
 ### What's new

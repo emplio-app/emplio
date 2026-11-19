@@ -28,8 +28,6 @@ const PARALLEL = Number(process.env.BENCH_PARALLEL ?? 3);
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const AB_VERSION = "v0.41.2";
 const ROOT = join(tmpdir(), "emplio-browser-bench");
-// agent-browser's socket path has to stay under 104 bytes
-const SOCKETS = mkdtempSync("/private/tmp/ab-");
 
 const SIGN_IN = "sign in with meera@kaveri.example / linen-2026";
 type Task = { id: string; ask: (url: string) => string; check: (s: State, said: string) => boolean };
@@ -54,6 +52,15 @@ export const TASKS: Task[] = [
     id: "read-patel",
     ask: (u) => `Our shop admin is at ${u} (${SIGN_IN}). What's the total of all orders from customers named Patel, across every page? Just the sum in rupees.`,
     check: (_s, said) => said.replace(/[,\s]/g, "").includes(String(patelSum)),
+  },
+  {
+    id: "bulk",
+    ask: (u) => `Our shop admin is at ${u} (${SIGN_IN}). Mark orders #1003, #1008, #1015, #1022, #1031, #1040, #1049 and #1057 as Delivered.`,
+    check: (s) => {
+      const want = new Set([1003, 1008, 1015, 1022, 1031, 1040, 1049, 1057]);
+      const before = fresh().orders;
+      return s.orders.every((o, i) => (want.has(o.id) ? o.status === "Delivered" : o.status === before[i]!.status));
+    },
   },
   {
     id: "page-three",
@@ -101,7 +108,9 @@ async function runOne(task: Task, trial: number, home: string): Promise<Row> {
   const site = serve(state);
   const browser = await chrome(join(run, "chrome"));
   const key = crypto.randomUUID().slice(0, 8);
-  const env = { PATH: `${join(run, "bin")}:${process.env.PATH}`, HOME: home, AGENT_BROWSER_SOCKET_DIR: SOCKETS, BROWSER_CDP_URL: browser.url, BROWSER_SESSION: `b${key}`, EZ_KEY: key, EMPLIO_WORK: work };
+  // its own: runs side by side once picked up each other's browser. The path has to stay under 104 bytes.
+  const sockets = mkdtempSync("/private/tmp/ab-");
+  const env = { PATH: `${join(run, "bin")}:${process.env.PATH}`, HOME: home, AGENT_BROWSER_SOCKET_DIR: sockets, BROWSER_CDP_URL: browser.url, BROWSER_SESSION: `b${key}`, EZ_KEY: key, EMPLIO_WORK: work };
   const ctx = { workspaceName: "Kaveri Home Furnishings", userName: "Meera", role: "owner" as const };
   const session = { conversationId: crypto.randomUUID(), workspaceId: "w", workspaceName: ctx.workspaceName, user: { id: "u", name: "Meera", email: "meera@kaveri.example" }, role: "owner", attachments: [], settings: DEFAULTS, watched: false, channel: "web", task: true };
   let images = 0;
@@ -115,7 +124,9 @@ async function runOne(task: Task, trial: number, home: string): Promise<Row> {
     inputSchema: bashInput as z.ZodType<{ command: string }>,
     execute: async ({ command }: { command: string }) => {
       commands++;
-      const p = Bun.spawn(["bash", "-c", command], { cwd: work, env, stdout: "pipe", stderr: "pipe" });
+      // /work is the computer's folder, as a person's own computer maps it (python/py/emplio _local)
+      const local = command.replace(/(?<![\w.~/-])\/work(?=$|[\s/"';:)|&<>,}\]])/gm, work);
+      const p = Bun.spawn(["bash", "-c", local], { cwd: work, env, stdout: "pipe", stderr: "pipe" });
       const timer = setTimeout(() => p.kill(), 120_000);
       const [out, err, exitCode] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
       clearTimeout(timer);
@@ -133,7 +144,7 @@ async function runOne(task: Task, trial: number, home: string): Promise<Row> {
         .slice(0, 16_000);
       if (/emplio[ .]browser/.test(command)) {
         browserChars += output.length;
-        if (!guided) output += `\n\n${browserGuide(session)}`;
+        if (!guided) output += `\n\n${browserGuide(session, true)}`; // as the first in a chat gets it (sandbox.ts firstInChat)
         guided = true;
       }
       log.push({ command: command.slice(0, 300), chars: output.length });
@@ -205,6 +216,7 @@ async function runOne(task: Task, trial: number, home: string): Promise<Row> {
     browser.p.kill();
     site.stop(true);
     rmSync(run, { recursive: true, force: true });
+    rmSync(sockets, { recursive: true, force: true });
   }
 }
 
@@ -242,7 +254,6 @@ if (import.meta.main) {
         }
       }),
     );
-    rmSync(SOCKETS, { recursive: true, force: true });
     report([out]);
   }
 }
