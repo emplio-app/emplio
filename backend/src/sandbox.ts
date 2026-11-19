@@ -1342,7 +1342,7 @@ ${py ? `- Doing the same thing on a site a second time: make it a function using
 2. A page you've already seen: all its steps in one command, joined with &&.`}
 3. One step at a time only where the next depends on what appears.
 - Keep output (no /dev/null). Tokens never go in files, skills or messages; don't read \`network requests --json\` (it prints login tokens). After saving, check every record on the site against what you meant.
-- Refs go stale when the page changes: snapshot again. Never click by position. Before anything that can't be undone, check the row.
+- Refs go stale when the page changes: snapshot again. No ref works (a canvas, a map, an unlabelled icon): \`emplio browser screenshot --annotate /work/tmp/x.png\` and \`emplio view\` it (its numbers are refs); not there either, click the spot: \`emplio browser mouse move <x> <y> && emplio browser mouse down left && emplio browser mouse up left\`, then look again. Before anything that can't be undone, check the row.
 - Local prices or a site refusing it: \`emplio browser local\`, then open again. Tabs persist (\`emplio browser tab\`): reuse the one on that site.
 - ${s.channel === "web" && !bg ? `${name} watches it live and can take over. Going round in circles: ask them to click Show Emplio how and do it once.` : `${name} isn't watching it.`} Sign-ins are saved for all their chats: try the site first. A CAPTCHA: wait ~10 s. A login you can't do: ${bg ? "say so in your report" : s.channel === "web" ? `ask ${name} to sign in in the live browser` : `send ${name} the sign-in link (browser.signInLink in the result)`}. Never guess passwords.]`;
   return py ? inPython(text) : text;
