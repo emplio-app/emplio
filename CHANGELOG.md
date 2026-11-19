@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.99 (2026-11-19)
+
+### What's new
+
+- Emplio reads much shorter instructions before each reply, so replies cost less and it gets commands right the first time more often: it rarely has to look up how a command works.
+- It does independent things at the same time (several look-ups in one go) instead of one after another.
+
+### For developers
+
+- Code mode: the system prompt carries a Python signature list of the `emplio` library (`commandList` in `sandbox.ts`, one for Emplio and one for agents), replacing per-command sentences; a test checks every listed command and flag exists. `agentRules`, `MANAGER_PROMPT` and the sandbox instructions compressed: the manager prompt is about 8,900 → 7,200 tokens. In a 36-reply probe, `help()` calls went 16 → 6 and wrong flags 1 → 0; hand-off, manager, skills, background-round and workday evals hold (workday input per chat 136k → 115k).
+- New rule in `agentRules`: commands that don't need each other's results go in the same step (they already run side by side, up to 4).
+- Browser: every command as a Python list (`BROWSER_COMMANDS`), sent with the first browser result once per chat (again after the chat is folded into notes, `Session.notesUpto`); `emplio browser help` prints it without starting a browser. Without code mode, the first result and `help` carry `BROWSER_SKILL` instead.
+
 ## 1.2.98 (2026-11-19)
 
 ### What's new

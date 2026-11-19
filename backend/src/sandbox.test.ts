@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ask, collectOut, commandEnded, commandStarted, EZ, LIST_OUT, MAX_COMMANDS, outPath, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
+import { ask, collectOut, commandEnded, commandStarted, commandList, EZ, LIST_OUT, MAX_COMMANDS, outPath, requestsTrailer, runEz, stageScript, usesBrowser, withRequests, withRoom } from "./sandbox";
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
@@ -504,4 +504,19 @@ test("a folder with its own .git is saved as files, its history kept aside", asy
   sh(stageScript(["company"]).replaceAll("/work/", `${work}/`));
   expect(sh("grep -c emplio .git/info/exclude", join(work, "company")).trim()).toBe("1");
   rmSync(work, { recursive: true });
+});
+
+test("each command in the code-mode list is a real command, with flags it really takes", () => {
+  const src = (dir: string): string =>
+    readdirSync(dir, { withFileTypes: true })
+      .map((e) => (e.isDirectory() ? src(join(dir, e.name)) : /\.ts$/.test(e.name) && !/\.test\.ts$/.test(e.name) ? readFileSync(join(dir, e.name), "utf8") : ""))
+      .join("\n");
+  const all = src(join(import.meta.dir, "."));
+  const calls = [...(commandList(false) + "\n" + commandList(true)).matchAll(/(?:^|; |\n)([a-z]+(?:\.[a-z]+)?)\(([^)]*)\)/g)];
+  expect(calls.length).toBeGreaterThan(40);
+  for (const [, name, args] of calls) {
+    const words = name!.split(".").join(" ");
+    expect(all.includes(`emplio ${words}`) || `missing: emplio ${words}`).toBe(true);
+    for (const [, flag] of args!.matchAll(/\b([a-z]+)=/g)) if (flag !== "input") expect(all.includes(`--${flag}`) || `${name}: no --${flag}`).toBe(true);
+  }
 });
