@@ -94,6 +94,7 @@ type Row = typeof connections.$inferSelect;
 const appName = (app: string) => catalogApp(app)?.name ?? app;
 // signed in through the provider an app has since left (GitHub moved off Composio): it has to be connected again
 const moved = (c: Row) => c.provider !== providerFor(c.app, c).name;
+const MOVED = "This app now connects a different way. Reconnect it to keep using it.";
 
 const toConnection = async (c: Row): Promise<Connection> => ({
   id: c.id,
@@ -102,7 +103,7 @@ const toConnection = async (c: Row): Promise<Connection> => ({
   label: c.label ?? appName(c.app),
   ...(await providerApp(c.app).then((p) => ({ logo: p?.logo, keyField: p?.keyField, signIn: p?.signIn }))),
   status: moved(c) ? "expired" : c.status,
-  ...(c.problem && !moved(c) && { problem: c.problem }),
+  ...(moved(c) ? { problem: MOVED } : c.problem && { problem: c.problem }),
   createdAt: c.createdAt.toISOString(),
 });
 
@@ -317,7 +318,7 @@ export async function connect(
   base = API_URL(),
 ): Promise<{ connection: Connection; url: string }> {
   const info = await offered(app, who);
-  if (info.keyField && !info.signIn) throw new AppsError(`${app} is connected by entering a key in the app`);
+  if (info.keyField && !info.signIn) throw new AppsError(`${info.name} is connected with its ${info.keyField.label}, not by signing in: use its Connect button and paste it there`);
   const provider = providerFor(app, who);
   const existing = connectionId ? await ownConnection(who, connectionId, app) : undefined;
   const id = existing?.id ?? crypto.randomUUID();
@@ -426,12 +427,14 @@ export async function runAction(
   await offered(app, who);
   let connection: Row | undefined = await findConnection(who, app, account);
   // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
-  if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
+  if (connection && moved(connection)) throw new AppsError(`${app} needs signing in again: it now connects a different way`);
   if (connection?.status === "pending") connection = (await refresh(connection)) ?? undefined;
   if (connection?.status === "expired") connection = await recheck(connection);
   if (connection && connection.status !== "active")
     throw new AppsError(
-      connection.status === "pending" ? `${app} sign-in isn't finished yet` : `${app} needs signing in again (${connection.status})`,
+      connection.status === "pending"
+        ? `${app} sign-in isn't finished yet`
+        : `${app} needs signing in again: ${connection.status === "failed" ? "its last sign-in didn't go through" : "its sign-in stopped working"}`,
     );
 
   const sent = await attachFiles(input, readFile);
@@ -520,7 +523,7 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   const app = appOf(trigger);
   let connection: Row | undefined = await findConnection(who, app, account);
   // before anything runs: its actions are the old provider's, and only the new provider's can be checked for an OK
-  if (connection && moved(connection)) throw new AppsError(`${app} has to be connected again: emplio apps reconnect ${app}`);
+  if (connection && moved(connection)) throw new AppsError(`${app} needs signing in again: it now connects a different way`);
   if (connection?.status === "pending") connection = (await refresh(connection)) ?? undefined;
   if (connection?.status !== "active") throw new AppsError(`${app} isn't connected for the person who saved it`);
   const polled = pollsRun(appOf(trigger), who) ? pollTrigger(trigger) : undefined;
@@ -723,6 +726,7 @@ export function fromLink(token: string) {
   return t.e > Date.now() ? t : null;
 }
 
+const SOMETHING_WRONG = "Something went wrong on our side. Try again in a minute.";
 export const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 // The page a phone link opens for an app connected with a key: the key box, or `done` (a result) instead of it.
 // t: the link's token, for the sign-in button of an app that also signs in on its own page.
@@ -896,15 +900,19 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.post<{ Params: { app: string }; Querystring: { t?: string }; Body: { key?: string } }>("/connect/:app", async (req, reply) => {
     const link = req.query.t ? fromLink(req.query.t) : null;
     const name = req.params.app.toLowerCase();
-    if (!link) return reply.type("text/html").send(await keyPage(name, null, "This link has expired. Ask for a new one."));
+    if (!link)
+      return reply
+        .type("text/html")
+        .send(await keyPage(name, null, req.query.t ? "This link has expired. Ask for a new one." : "Open this page from the link Emplio sent you in the chat."));
     const key = String(req.body?.key ?? "").trim();
     try {
       if (!key || key.length > 2000) throw new AppsError("Paste the key first.");
       const c = await connectWithKey({ workspaceId: link.w, userId: link.u }, name, key, link.c);
       return reply.type("text/html").send(await keyPage(name, null, `${esc(c.name)} is connected (${esc(c.label)}). Go back to the chat and tell Emplio it's done.`));
     } catch (error) {
-      if (!(error instanceof AppsError)) throw error;
-      return reply.type("text/html").send(await keyPage(name, error.message, undefined, req.query.t));
+      if (!(error instanceof AppsError)) req.log.error(error);
+      const why = error instanceof AppsError ? error.message : SOMETHING_WRONG;
+      return reply.type("text/html").send(await keyPage(name, why, undefined, req.query.t));
     }
   });
 
@@ -932,8 +940,8 @@ export async function integrationRoutes(app: FastifyInstance) {
       record({ workspaceId: row.workspaceId, userId: row.userId, kind: "connection", summary: `Connected ${appName(name)} (${named})` });
       return reply.redirect(s.back);
     } catch (error) {
-      if (!(error instanceof AppsError)) throw error;
-      return reply.type("text/html").send(await keyPage(name, null, esc(error.message)));
+      if (!(error instanceof AppsError)) req.log.error(error);
+      return reply.type("text/html").send(await keyPage(name, null, esc(error instanceof AppsError ? error.message : SOMETHING_WRONG)));
     }
   });
 
