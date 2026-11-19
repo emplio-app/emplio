@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.96 (2026-11-19)
+
+### What's new
+
+- Emplio is coming to Android phones. The app works like the iPhone one, with notifications you can reply to straight from the notification.
+- A new page, emplio.app/delete-account, explains how to delete your account and what happens to your data.
+
+### For developers
+
+- `mobile/android`: Capacitor Android shell (target API 36), edge-to-edge layout, its own Firebase messaging service with an inline Reply action that posts to `/push/reply`. Release signing reads the properties file named in `EMPLIO_ANDROID_SIGNING`; `app/google-services.json` stays out of git.
+- `backend/src/push.ts` sends to Android through Firebase Cloud Messaging (HTTP v1) when `FCM_SERVICE_ACCOUNT` is set; Apple tokens are told apart by their hex shape.
+
 ## 1.2.95 (2026-11-19)
 
 ### What's new

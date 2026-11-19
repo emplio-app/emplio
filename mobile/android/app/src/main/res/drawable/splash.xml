@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- phones before Android 12: the mark on green, never stretched -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/brand"/>
+    <item><bitmap android:gravity="center" android:src="@drawable/splash_mark"/></item>
+</layer-list>

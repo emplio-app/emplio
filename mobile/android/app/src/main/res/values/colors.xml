@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the site's own background (frontend/src/app/layout.tsx themeColor), behind the status and navigation bars -->
+    <color name="page">#FBFAF8</color>
+    <color name="brand">#1A613F</color>
+</resources>

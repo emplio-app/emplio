@@ -1,8 +1,9 @@
 // Notifications: the one place that decides where an event the person should hear about goes (pushTo). Inside Emplio
 // when they're looking at it (a tab, the Mac app's window or the phone app in front of them), and nowhere else; otherwise
 // their Mac, when the desktop app is connected (it shows it even from the menu bar), or else their browser (web push);
-// and their iPhone as well, being another device. Each is off unless set up, so a self-hosted Emplio needs none of it:
+// and their phone as well, being another device. Each is off unless set up, so a self-hosted Emplio needs none of it:
 //  - iPhone app, sent straight to Apple: APNS_KEY_ID, APNS_TEAM_ID and APNS_KEY (the .p8 file, base64)
+//  - Android app, sent to Google (Firebase Cloud Messaging): FCM_SERVICE_ACCOUNT (the service account's JSON, base64)
 //  - browsers: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY (webpush.ts)
 import { createHmac, sign, timingSafeEqual } from "node:crypto";
 import { connect, type SecureClientSessionOptions } from "node:http2";
@@ -117,22 +118,37 @@ async function replied(userId: string, chatId: string | undefined, text: string,
   return replyFromNotification(userId, chatId, t, log);
 }
 
+// An iPhone's address with Apple is hex; an Android phone's with Google never is (it has a colon in it).
+// ponytail: told apart by shape, not a column; a third kind of phone would want one.
+export const isApple = (token: string) => /^[0-9a-f]+$/i.test(token);
+const forget = (token: string) => db.delete(pushDevices).where(eq(pushDevices.token, token)).catch(() => {});
+
 async function pushToPhone(userId: string, note: Note) {
-  const { APNS_KEY_ID: keyId, APNS_TEAM_ID: teamId, APNS_KEY: key, APNS_HOST: host = "api.push.apple.com" } = process.env;
-  if (!keyId || !teamId || !key) return;
   try {
     const devices = await db.select({ token: pushDevices.token }).from(pushDevices).innerJoin(sessions, eq(pushDevices.sessionHash, sessions.tokenHash)).where(eq(sessions.userId, userId));
     if (!devices.length) return;
-    const authorization = `bearer ${providerToken(keyId, teamId, key)}`;
     const chatId = chatOf(note.path);
-    // "reply": the category the app registers with a text field (mobile/ios/App/App/AppDelegate.swift)
     const reply = chatId ? { reply: replyToken(userId, chatId), replyUrl: `${apiBase()}/push/reply` } : {};
+    const apple = devices.filter((d) => isApple(d.token)).map((d) => d.token);
+    const android = devices.filter((d) => !isApple(d.token)).map((d) => d.token);
+    await Promise.all([apple.length && toApple(apple, note, chatId, reply), android.length && toAndroid(android, note, reply).catch((error) => console.error("push failed", error))]);
+  } catch (error) {
+    console.error("push failed", error);
+  }
+}
+
+async function toApple(tokens: string[], note: Note, chatId: string | undefined, reply: object) {
+  const { APNS_KEY_ID: keyId, APNS_TEAM_ID: teamId, APNS_KEY: key, APNS_HOST: host = "api.push.apple.com" } = process.env;
+  if (!keyId || !teamId || !key) return;
+  try {
+    const authorization = `bearer ${providerToken(keyId, teamId, key)}`;
+    // "reply": the category the app registers with a text field (mobile/ios/App/App/AppDelegate.swift)
     const payload = JSON.stringify({ aps: { alert: { title: note.title, body: note.body }, sound: "default", ...(chatId && { category: "reply" }) }, path: note.path, ...reply });
     // ponytail: IPv4 only. Over IPv6 the connection to Apple mostly failed ("h2 is not supported") and no iPhone got
     // its notification; a server with IPv6 only would need this lifted.
     const client = connect(`https://${host}`, { family: 4 } as SecureClientSessionOptions);
     client.on("error", (error) => console.error("push connection failed", error));
-    await Promise.all(devices.map((d) => deliver(client, d.token, authorization, payload)));
+    await Promise.all(tokens.map((t) => deliver(client, t, authorization, payload)));
     client.close();
   } catch (error) {
     console.error("push failed", error);
@@ -152,11 +168,49 @@ function deliver(client: ReturnType<typeof connect>, token: string, authorizatio
       if (status === 200) return done();
       console.error("push refused", status, body);
       // the app was removed, or the token belongs to another build
-      if (status === 410 || body.includes("BadDeviceToken")) void db.delete(pushDevices).where(eq(pushDevices.token, token)).catch(() => {}).finally(done);
+      if (status === 410 || body.includes("BadDeviceToken")) void forget(token).finally(done);
       else done();
     });
     request.end(payload);
   });
+}
+
+// --- Android, through Firebase Cloud Messaging (HTTP v1) ---------------------------------------------------------------
+// Data only, no "notification" part: the app draws it itself (mobile/android/.../Notifications.java), with a Reply field
+// for a chat, even when the app isn't running. Google's sign-in is a token the service account signs for, good an hour.
+type Account = { project_id: string; client_email: string; private_key: string };
+let google = { token: "", until: 0 };
+async function googleToken(account: Account, now = Date.now()) {
+  if (now < google.until) return google.token;
+  const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const iat = Math.floor(now / 1000);
+  const body = `${part({ alg: "RS256", typ: "JWT" })}.${part({ iss: account.client_email, scope: "https://www.googleapis.com/auth/firebase.messaging", aud: "https://oauth2.googleapis.com/token", iat, exp: iat + 3600 })}`;
+  const assertion = `${body}.${sign("sha256", Buffer.from(body), account.private_key).toString("base64url")}`;
+  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }) });
+  if (!res.ok) throw new Error(`Google sign-in for notifications failed: ${res.status} ${await res.text()}`);
+  const { access_token, expires_in } = (await res.json()) as { access_token: string; expires_in: number };
+  google = { token: access_token, until: now + (expires_in - 300) * 1000 };
+  return access_token;
+}
+
+// What one Android notification carries (every value a string, as Google requires).
+export const androidMessage = (token: string, note: Note, reply: { reply?: string; replyUrl?: string }) => ({
+  message: { token, data: { title: note.title, body: note.body, path: note.path, ...reply }, android: { priority: "HIGH", ttl: "86400s" } },
+});
+
+async function toAndroid(tokens: string[], note: Note, reply: { reply?: string; replyUrl?: string }) {
+  const raw = process.env.FCM_SERVICE_ACCOUNT;
+  if (!raw) return;
+  const account = JSON.parse(Buffer.from(raw, "base64").toString()) as Account;
+  const authorization = `Bearer ${await googleToken(account)}`;
+  await Promise.all(tokens.map(async (token) => {
+    const res = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, { method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(androidMessage(token, note, reply)) }).catch((error) => (console.error("push failed", error), null));
+    if (!res || res.ok) return;
+    const body = await res.text();
+    console.error("push refused", res.status, body);
+    // the app was removed, or signed out of notifications
+    if (res.status === 404 || body.includes("UNREGISTERED")) await forget(token);
+  }));
 }
 
 export async function pushRoutes(app: FastifyInstance) {
@@ -177,10 +231,10 @@ export async function pushRoutes(app: FastifyInstance) {
     },
   );
 
-  // The phone's address with Apple, tied to this sign-in: signing out forgets it along with the session.
+  // The phone's address with Apple or Google, tied to this sign-in: signing out forgets it along with the session.
   app.post<{ Body: { token: string } }>(
     "/push/device",
-    { schema: { body: { type: "object", required: ["token"], properties: { token: { type: "string", pattern: "^[0-9a-fA-F]{32,200}$" } } } } },
+    { schema: { body: { type: "object", required: ["token"], properties: { token: { type: "string", pattern: "^[0-9A-Za-z:_-]{32,4096}$" } } } } },
     async (req, reply) => {
       const user = await currentUser(req);
       if (!user) return reply.code(401).send({ error: "Not signed in" });

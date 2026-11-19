@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- dark status bar icons on the light page -->
+    <bool name="light_bars">true</bool>
+</resources>

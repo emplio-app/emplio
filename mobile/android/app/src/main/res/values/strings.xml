@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Emplio</string>
+    <string name="title_activity_main">Emplio</string>
+    <string name="package_name">app.emplio</string>
+    <string name="custom_url_scheme">app.emplio</string>
+</resources>

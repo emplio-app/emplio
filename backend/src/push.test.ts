@@ -1,6 +1,6 @@
 import { createECDH, createDecipheriv, createPublicKey, hkdfSync, randomBytes, verify } from "node:crypto";
 import { expect, test } from "bun:test";
-import { plain, readReplyToken, replyToken, route, type Senders } from "./push";
+import { androidMessage, isApple, plain, readReplyToken, replyToken, route, type Senders } from "./push";
 import { encrypt, vapidHeader } from "./webpush";
 
 test("a lock screen shows plain words", () => {
@@ -97,4 +97,16 @@ test("a notification's reply token works for its chat for a week, and not once c
   expect(readReplyToken(t.replace("u1", "u2"), 0)).toBeNull();
   expect(readReplyToken(`${t}x`, 0)).toBeNull();
   expect(readReplyToken("nonsense", 0)).toBeNull();
+});
+
+test("an iPhone's address goes to Apple, an Android phone's to Google", () => {
+  expect(isApple("a1b2c3d4".repeat(8))).toBe(true);
+  expect(isApple("dQw4w9WgXcQ:APA91bH-x_y".padEnd(160, "z"))).toBe(false);
+});
+
+test("an Android notification is data only, every value a string, with the reply when there is one", () => {
+  const m = androidMessage("t1", { title: "Emplio", body: "Done", path: "/chat/c1" }, { reply: "r", replyUrl: "https://api/push/reply" });
+  expect(m.message).toEqual({ token: "t1", data: { title: "Emplio", body: "Done", path: "/chat/c1", reply: "r", replyUrl: "https://api/push/reply" }, android: { priority: "HIGH", ttl: "86400s" } });
+  expect(Object.values(m.message.data).every((v) => typeof v === "string")).toBe(true);
+  expect("notification" in m.message).toBe(false);
 });
