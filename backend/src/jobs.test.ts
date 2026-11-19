@@ -130,6 +130,8 @@ test("chatting in a job's chat stays quiet until Emplio's next reply; answering 
     // a run that ends without a word did nothing anyone can check: failed, not done (#244)
     await reply("");
     expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "failed", report: "(it ended without a report)" });
+    // its report wakes Emplio's chat in the background (resume): due until that has taken it
+    for (let i = 0; i < 100 && (await reportsDue(main)); i++) await Bun.sleep(20);
     expect(await reportsDue(main)).toBe(false);
     await db.update(jobs).set({ status: "working" }).where(eq(jobs.chatId, chatId));
     expect(await reportsDue(main)).toBe(true);
