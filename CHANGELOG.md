@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.89 (2026-11-19)
+
+### What's new
+
+- An app that now connects a different way says so in Integrations, instead of only showing as expired.
+- The page for pasting an app's key no longer turns into an error page when something goes wrong on our side; it shows the form again with a message. Opening it without the link from your chat says to use that link, instead of saying the link expired.
+- Messages about an account that needs signing in again say why in plain words, and asking to sign in to an app that takes a key says to paste the key instead.
+
+### For developers
+
+- `toConnection` gives a connection on an app's old provider a `problem` (`MOVED`); `runAction` and `startTrigger` say "needs signing in again: it now connects a different way" instead of naming `emplio apps reconnect` (the `appsCommand` hint still gives the agent the command), and `runAction` no longer shows the raw status. The key form's `POST /connect/:app` and `/oauth/:app/callback` log errors other than `AppsError` and show `SOMETHING_WRONG` instead of rethrowing (500); a POST with no `t` gets its own message. `connect()` on a key-only app names the key field (#221).
+
 ## 1.2.88 (2026-11-19)
 
 ### What's new
