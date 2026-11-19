@@ -23,6 +23,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [isPending, me, router]);
 
   useFitToScreen();
+  // the iPhone app: no arrows-and-Done bar above the keyboard (#282). Mobile Safari keeps it, a web page can't hide it
+  useEffect(() => {
+    const kb = (window as { Capacitor?: { Plugins?: { Keyboard?: { setAccessoryBarVisible(o: { isVisible: boolean }): Promise<void> } } } })
+      .Capacitor?.Plugins?.Keyboard;
+    void kb?.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
+  }, []);
   usePhoneNotifications(!!me?.user.name, router.push);
   useDesktopLink(me?.user.name ? me.user.id : undefined, router.push);
   const notifyBar = useWebNotifications(!!me?.user.name, router.push);

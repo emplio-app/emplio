@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.95 (2026-11-19)
+
+### What's new
+
+- In the iPhone app, the bar with arrows and a Done button no longer sits above the keyboard. To put the keyboard away, tap outside the box or drag the chat.
+
+### For developers
+
+- `(app)/layout.tsx` calls the Keyboard plugin's `setAccessoryBarVisible({ isVisible: false })` once (#282); no app store update needed. The chat's message list blurs the focused field on touch move, since the bar's Done was iOS's only button to close the keyboard. Mobile Safari still shows the bar.
+
 ## 1.2.94 (2026-11-19)
 
 ### What's new

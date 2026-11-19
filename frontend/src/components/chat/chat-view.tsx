@@ -1355,6 +1355,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   // their own scrolling ends the hold on a just-sent prompt
                   onWheel={() => (pinnedAt.current = 0)}
                   onTouchStart={() => (pinnedAt.current = 0)}
+                  // dragging the chat closes the keyboard, like a messaging app: the app hides iOS's Done bar (#282)
+                  onTouchMove={() => {
+                    const el = document.activeElement as HTMLElement | null;
+                    if (el?.tagName === "TEXTAREA" || el?.tagName === "INPUT") el.blur();
+                  }}
                   role="log"
                   // never sideways: a wide code block scrolls inside itself, the chat stays put (on a phone it felt like a web page)
                   className="relative flex-1 overflow-x-hidden overflow-y-auto overscroll-x-none"
