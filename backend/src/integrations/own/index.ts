@@ -16,6 +16,8 @@ import { notion } from "./notion";
 import { onepassword } from "./onepassword";
 import { asana } from "./asana";
 import { calendly } from "./calendly";
+import { cashfree } from "./cashfree";
+import { brevo } from "./brevo";
 import { clickup } from "./clickup";
 import { exa } from "./exa";
 import { fireflies } from "./fireflies";
@@ -32,11 +34,14 @@ import { hostinger } from "./hostinger";
 import { hubspot } from "./hubspot";
 import { indiamart } from "./indiamart";
 import { livekit } from "./livekit";
+import { mailchimp } from "./mailchimp";
 import { msg91 } from "./msg91";
 import { neon } from "./neon";
 import { plivo } from "./plivo";
+import { payu } from "./payu";
 import { razorpay } from "./razorpay";
 import { sarvam } from "./sarvam";
+import { shopify } from "./shopify";
 import { slack } from "./slack";
 import { stripe } from "./stripe";
 import { swipe } from "./swipe";
@@ -52,6 +57,8 @@ import { zoho } from "./zoho";
 import { zoho_books } from "./zoho_books";
 import { zoho_invoice } from "./zoho_invoice";
 import { zoho_mail } from "./zoho_mail";
+import { postgresql } from "./postgresql";
+import { mysql } from "./mysql";
 
 export type OwnAction = {
   description: string;
@@ -118,7 +125,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, msg91, plivo, swipe, neon, razorpay, github, stripe, todoist, hubspot, calendly, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_books, zoho_invoice, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
