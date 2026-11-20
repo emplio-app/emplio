@@ -20,6 +20,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -36,6 +37,8 @@ var (
 	LinkFor = 15 * time.Minute
 	// sends per account: WhatsApp flags numbers that send a lot, fast
 	LimitHour, LimitDay = 20, 150
+	// more for replies: chats where the other side wrote in the last day (answering people isn't what gets numbers flagged)
+	ReplyHour, ReplyDay = 60, 300
 )
 
 type Me struct {
@@ -79,6 +82,7 @@ type Account struct {
 	waLog waLog.Logger
 
 	mu       sync.Mutex
+	labelMu  sync.Mutex
 	meta     Meta
 	cli      *whatsmeow.Client
 	status   string // linking, open, closed, logged_out
@@ -457,6 +461,8 @@ func (a *Account) on(evt any) {
 				a.store.Event(Event{TS: msOf(e.Timestamp), Kind: kind, Chat: e.JID.String(), Who: who, Text: text})
 			}
 		}
+	case *events.LabelEdit, *events.LabelAssociationChat:
+		a.onLabel(evt)
 	case *events.JoinedGroup:
 		a.store.Chat(e.JID.String(), e.Name, 0, -1)
 		a.store.Event(Event{Kind: "added_to_group", Chat: e.JID.String(), Text: e.Name})
@@ -476,6 +482,8 @@ func (a *Account) history(e *events.HistorySync) {
 		return
 	}
 	chats, msgs := 0, 0
+	// older messages the phone sent when asked: they don't change unread counts
+	onDemand := e.Data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND
 	err := a.store.Tx(func(t *Store) error {
 		for _, c := range e.Data.GetConversations() {
 			raw, err := types.ParseJID(c.GetID())
@@ -488,7 +496,11 @@ func (a *Account) history(e *events.HistorySync) {
 			if name == "" {
 				name = c.GetDisplayName()
 			}
-			t.Chat(jid.String(), name, int64(c.GetConversationTimestamp())*1000, int(c.GetUnreadCount()))
+			unread := int(c.GetUnreadCount())
+			if onDemand {
+				unread = -1
+			}
+			t.Chat(jid.String(), name, int64(c.GetConversationTimestamp())*1000, unread)
 			chats++
 			for _, h := range c.GetMessages() {
 				evt, err := cli.ParseWebMessage(raw, h.GetMessage())
@@ -897,25 +909,39 @@ func (a *Account) CheckSend(jid string) error {
 	if !a.Knows(jid) {
 		return refuse(400, "WhatsApp messages only go to people and groups this WhatsApp already chats with. For new numbers or bulk messages, use the WhatsApp Business API instead")
 	}
-	return a.UnderLimit()
+	return a.limit(a.replying(jid))
+}
+
+// replying: the other side wrote in this chat in the last day.
+func (a *Account) replying(jid string) bool {
+	return a.store.HeardFrom(jid, time.Now().Add(-24*time.Hour).UnixMilli())
 }
 
 // Knows: a person or group this account already chats with, or has in its contacts.
 func (a *Account) Knows(jid string) bool { return a.store.HasChat(jid) || a.store.NameOf(jid) != "" }
 
-// UnderLimit: not too many sends (and group adds) lately.
-func (a *Account) UnderLimit() error {
-	if a.store.Sent(time.Hour) >= LimitHour {
-		return refuse(429, "already sent %d messages from this WhatsApp in the last hour; wait before sending more, so the number isn't flagged", LimitHour)
+// UnderLimit: not too many sends (and group adds, statuses, channel posts) lately.
+func (a *Account) UnderLimit() error { return a.limit(false) }
+
+// limit: replies count every send against the higher limits; anything else counts only the other non-replies.
+// ponytail: so the busiest hour is 60 replies plus 20 others; one shared cap if that ever matters
+func (a *Account) limit(reply bool) error {
+	hour, day, what := LimitHour, LimitDay, " to chats that haven't written in the last day"
+	if reply {
+		hour, day, what = ReplyHour, ReplyDay, ""
 	}
-	if a.store.Sent(24*time.Hour) >= LimitDay {
-		return refuse(429, "already sent %d messages from this WhatsApp today; wait until tomorrow, so the number isn't flagged", LimitDay)
+	if a.store.Sent(time.Hour, reply) >= hour {
+		return refuse(429, "already sent %d messages from this WhatsApp%s in the last hour; wait before sending more, so the number isn't flagged", hour, what)
+	}
+	if a.store.Sent(24*time.Hour, reply) >= day {
+		return refuse(429, "already sent %d messages from this WhatsApp%s today; wait until tomorrow, so the number isn't flagged", day, what)
 	}
 	return nil
 }
 
 // Send sends a message (text, a file, a reaction) to a chat this account has, and saves it.
 func (a *Account) Send(chat string, msg *waE2E.Message) (any, error) {
+	reply := a.replying(chat)
 	if err := a.CheckSend(chat); err != nil {
 		return nil, err
 	}
@@ -935,7 +961,7 @@ func (a *Account) Send(chat string, msg *waE2E.Message) (any, error) {
 		a.logf("send failed: %v", err)
 		return nil, refuse(502, "WhatsApp didn't take the message: %v", err)
 	}
-	a.store.NoteSend()
+	a.store.NoteSend(reply)
 	own := types.EmptyJID
 	if cli.Store.ID != nil {
 		own = cli.Store.ID.ToNonAD()

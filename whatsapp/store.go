@@ -102,6 +102,7 @@ var later = []string{
 	"alter table messages add column ack integer not null default 0",
 	"alter table messages add column edited integer not null default 0",
 	"alter table messages add column deleted integer not null default 0",
+	"alter table sends add column reply integer not null default 0",
 }
 
 func OpenStore(dir string) (*Store, error) {
@@ -288,6 +289,22 @@ func (s *Store) Messages(chat string, limit int, before, after int64) []Message 
 	return ms
 }
 
+// Oldest is a chat's first saved message (what asking the phone for older ones goes back from).
+func (s *Store) Oldest(chat string) *Message {
+	ms := scanMessages(s.q.QueryContext(bg, "select "+msgCols+" from messages where chat = ? order by ts limit 1", chat))
+	if len(ms) == 0 {
+		return nil
+	}
+	return &ms[0]
+}
+
+// DeleteChat forgets a chat and everything said in it.
+func (s *Store) DeleteChat(jid string) {
+	for _, q := range []string{"delete from messages where chat = ?", "delete from reactions where chat = ?", "delete from votes where chat = ?", "delete from events where chat = ?", "delete from chats where jid = ?"} {
+		s.q.ExecContext(bg, q, jid)
+	}
+}
+
 // Recent messages across every chat, newest first: what a new-message check looks through.
 func (s *Store) Recent(after int64, limit int) []Message {
 	return scanMessages(s.q.QueryContext(bg, "select "+msgCols+" from messages where ts > ? order by ts desc limit ?", after, limit))
@@ -332,17 +349,24 @@ func (s *Store) Contacts(query string, limit int) []Contact {
 	return out
 }
 
-// Sent counts the sends in the last d.
-func (s *Store) Sent(d time.Duration) int {
+// Sent counts the sends in the last d: all of them, or only those that weren't replies.
+func (s *Store) Sent(d time.Duration, all bool) int {
 	var n int
-	s.q.QueryRowContext(bg, "select count(*) from sends where ts > ?", time.Now().Add(-d).UnixMilli()).Scan(&n)
+	s.q.QueryRowContext(bg, "select count(*) from sends where ts > ? and (? or reply = 0)", time.Now().Add(-d).UnixMilli(), all).Scan(&n)
 	return n
 }
 
-func (s *Store) NoteSend() {
+func (s *Store) NoteSend(reply bool) {
 	now := time.Now()
-	s.q.ExecContext(bg, "insert into sends (ts) values (?)", now.UnixMilli())
+	s.q.ExecContext(bg, "insert into sends (ts, reply) values (?, ?)", now.UnixMilli(), reply)
 	s.q.ExecContext(bg, "delete from sends where ts < ?", now.Add(-24*time.Hour).UnixMilli())
+}
+
+// HeardFrom: someone other than this account wrote in the chat since (milliseconds).
+func (s *Store) HeardFrom(chat string, since int64) bool {
+	var n int
+	s.q.QueryRowContext(bg, "select count(*) from messages where chat = ? and from_me = 0 and ts > ?", chat, since).Scan(&n)
+	return n > 0
 }
 
 // Acked moves what this account sent on to delivered, read or played (never back).

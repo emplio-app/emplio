@@ -3,10 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -117,10 +122,24 @@ func TestSendsOnlyToKnownChatsAndNotTooMany(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range LimitHour {
-		a.store.NoteSend()
+		a.store.NoteSend(false)
 	}
 	if err := a.CheckSend(sarah); err == nil || err.(*Refused).Status != 429 {
 		t.Fatalf("hourly limit: %v", err)
+	}
+	// Sarah wrote today: replying to her gets the higher limit, counting every send
+	a.store.SaveMessage(Message{Chat: sarah, ID: "in1", Sender: &sarah, TS: time.Now().UnixMilli(), Type: "conversation", Text: "hi"})
+	if err := a.CheckSend(sarah); err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	for range ReplyHour - LimitHour {
+		a.store.NoteSend(true)
+	}
+	if err := a.CheckSend(sarah); err == nil || err.(*Refused).Status != 429 {
+		t.Fatalf("reply limit: %v", err)
+	}
+	if err := a.UnderLimit(); err == nil {
+		t.Fatal("non-reply limit forgot its own sends")
 	}
 	c, err := a.ChatFor("Sarah")
 	eq(t, c, sarah)
@@ -248,4 +267,87 @@ func TestTheAPIWantsItsToken(t *testing.T) {
 func TestQRCodeDraws(t *testing.T) {
 	svg := qrSVG("2@abc,def,ghi")
 	eq(t, len(svg) > 500 && svg[:4] == "<svg", true)
+}
+
+func TestPhotosCardsAndPollChoices(t *testing.T) {
+	// any photo becomes a square JPEG of at most 640 pixels
+	img := image.NewRGBA(image.Rect(0, 0, 1200, 800))
+	var png1 bytes.Buffer
+	png.Encode(&png1, img)
+	out, err := squareJPEG(png1.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(out))
+	eq(t, err == nil && format == "jpeg" && cfg.Width == 640 && cfg.Height == 640, true)
+	if _, err := squareJPEG([]byte("not a photo")); err == nil {
+		t.Fatal("took a non-photo")
+	}
+	eq(t, vcard("Sarah; Lee\n", "15551234567"), "BEGIN:VCARD\nVERSION:3.0\nFN:Sarah  Lee \nTEL;type=CELL;waid=15551234567:+15551234567\nEND:VCARD")
+	poll := &waE2E.Message{PollCreationMessageV3: &waE2E.PollCreationMessage{Name: proto.String("Lunch?"), Options: []*waE2E.PollCreationMessage_Option{{OptionName: proto.String("Pizza")}, {OptionName: proto.String("Sushi")}}}}
+	eq(t, strings.Join(pollOptions(poll), ","), "Pizza,Sushi")
+	eq(t, kindOf("image/png"), whatsmeow.MediaImage)
+	eq(t, kindOf("image/svg+xml"), whatsmeow.MediaDocument)
+}
+
+func TestLabelsOldestAndDeletingAChat(t *testing.T) {
+	a, err := OpenAccount(t.TempDir(), "00000000-0000-4000-8000-000000000004")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	sarah := types.NewJID("15551234567", types.DefaultUserServer)
+	a.on(&events.LabelEdit{LabelID: "3", Action: &waSyncAction.LabelEditAction{Name: proto.String("New customer"), Color: proto.Int32(2)}})
+	a.on(&events.LabelAssociationChat{JID: sarah, LabelID: "3", Action: &waSyncAction.LabelAssociationAction{Labeled: proto.Bool(true)}})
+	l, err := a.labelFor("new CUSTOMER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, l.ID+"|"+strings.Join(l.Chats, ","), "3|"+sarah.String())
+	a.on(&events.LabelAssociationChat{JID: sarah, LabelID: "3", Action: &waSyncAction.LabelAssociationAction{Labeled: proto.Bool(false)}})
+	l, _ = a.labelFor("3")
+	eq(t, len(l.Chats), 0)
+	a.on(&events.LabelEdit{LabelID: "3", Action: &waSyncAction.LabelEditAction{Name: proto.String("New customer"), Deleted: proto.Bool(true)}})
+	if _, err := a.labelFor("3"); err == nil {
+		t.Fatal("found a deleted label")
+	}
+
+	for i, id := range []string{"b", "a", "c"} {
+		a.store.SaveMessage(Message{Chat: sarah.String(), ID: id, TS: int64(1000 * (3 - i)), Type: "conversation", Text: "hi " + id})
+	}
+	eq(t, a.store.Oldest(sarah.String()).ID, "c")
+	a.store.DeleteChat(sarah.String())
+	eq(t, a.store.Oldest(sarah.String()) == nil && !a.store.HasChat(sarah.String()) && len(a.store.Search("hi", "", 10)) == 0, true)
+}
+
+func TestReplyingPrivatelyNeedsAGroupMessage(t *testing.T) {
+	s := &Server{dataDir: t.TempDir(), token: "t1234567890123456789012345678901", accts: map[string]*Account{}}
+	a, err := OpenAccount(s.dataDir, "00000000-0000-4000-8000-000000000005")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	s.accts[a.ID] = a
+	sarah := "15551234567@s.whatsapp.net"
+	raw, _ := proto.Marshal(&waE2E.Message{Conversation: proto.String("hi")})
+	a.store.SaveMessage(Message{Chat: sarah, ID: "m1", Sender: &sarah, TS: 1000, Type: "conversation", Text: "hi", Raw: raw})
+	a.store.SaveMessage(Message{Chat: "123@g.us", ID: "g1", Sender: &sarah, TS: 1000, Type: "conversation", Text: "hi", Raw: raw})
+	srv := httptest.NewServer(s.Routes())
+	defer srv.Close()
+	post := func(body string) (int, string) {
+		req, _ := http.NewRequest("POST", srv.URL+"/accounts/"+a.ID+"/reply-private", strings.NewReader(body))
+		req.Header.Set("authorization", "Bearer "+s.token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	code, msg := post(`{"chat":"15551234567@s.whatsapp.net","message":"m1","text":"ok"}`)
+	eq(t, code == 400 && strings.Contains(msg, "isn't in a group"), true)
+	// a group message goes to the sender's own chat: here that's a known chat, and the account isn't linked
+	code, msg = post(`{"chat":"123@g.us","message":"g1","text":"ok"}`)
+	eq(t, code == 409 && strings.Contains(msg, "not linked"), true)
 }
