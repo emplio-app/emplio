@@ -2115,7 +2115,7 @@ export async function toolsCommand(s: Session, args: string[], runner = (command
   }
   const [area, fn] = name.split(".") as [string, string];
   const run = async () => {
-    const code = `import json, os\nos.environ["EMPLIO_TOOL_OK"] = ${JSON.stringify(name)}\n_in = json.loads(${JSON.stringify(raw ?? "{}")})\nfrom tools.${area} import ${fn}\nprint(${fn}(*_in.get("args", []), **_in.get("kwargs", {})))`;
+    const code = `import os\nos.environ["EMPLIO_TOOL_OK"] = ${JSON.stringify(name)}\nfrom emplio._toolset import replay\n_a, _k = replay(${JSON.stringify(raw ?? "{}")})\nfrom tools.${area} import ${fn}\nprint(${fn}(*_a, **_k))`;
     const done = await runner(pythonCommand(s, code, { background: true }));
     return `${done.exitCode ? "error: " : ""}${String(done.output ?? "").trim() || "(it printed nothing)"}`;
   };

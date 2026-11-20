@@ -211,12 +211,7 @@ def _guard(area, name, risk, fn):
             return fn(*args, **kwargs)
         if os.environ.get("EMPLIO_TOOL_OK") != f"{area}.{name}":
             from . import Pending, _run
-            said = {"args": list(args), "kwargs": kwargs, "risk": risk}
-            try:
-                sent = json.dumps(said, ensure_ascii=False, allow_nan=False)
-            except (TypeError, ValueError):
-                raise ToolError(f"tools.{area}.{name} needs the person's OK, which goes with its inputs as plain values (text, numbers, lists, dicts): pass dates and the like as text") from None
-            answer = _run(["tools", "allow", f"{area}.{name}", sent])
+            answer = _run(["tools", "allow", f"{area}.{name}", _ask(area, name, fn, risk, args, kwargs)])
             if isinstance(answer, Pending):
                 return answer
         # what an allowed tool calls is part of what was allowed
@@ -228,6 +223,61 @@ def _guard(area, name, risk, fn):
 
     guarded.__emplio_risk__ = risk
     return guarded
+
+
+def _given(v):
+    """Where one of Emplio's own objects is in the emplio module ("" for emplio itself, "sh" for emplio.sh), or None.
+    Tools often take these as inputs (`def send(emplio, to)`, `run=sh`): they're the same in every run, so they go
+    with the OK by name and the run that comes after it gets them back, instead of the call being refused."""
+    import emplio
+    if isinstance(v, (str, bytes, int, float, bool, type(None), list, dict, tuple, set)):
+        return None  # values, never Emplio's: a short string can be the very object a constant in emplio is
+    if v is emplio:
+        return ""
+    return next((n for n in dir(emplio) if not n.startswith("_") and getattr(emplio, n, None) is v), None)
+
+
+def _ask(area, name, fn, risk, args, kwargs):
+    """What a tool's OK says (sandbox.ts toolsCommand): its inputs by name, so the card reads `plan: pro`, and
+    Emplio's own objects apart under given, kept off the card. An input that's neither can't be shown or passed to
+    the run after the OK: refused, naming it."""
+    import inspect
+    try:
+        bound = inspect.signature(fn).bind(*args, **kwargs)
+    except (TypeError, ValueError):  # a call the function wouldn't take fails the same way when it runs
+        bound = None
+    pos, named, given = (list(args), dict(kwargs), {}) if bound is None else ([], {}, {})
+    if bound is not None:
+        for p, v in bound.arguments.items():
+            kind = bound.signature.parameters[p].kind
+            if kind is inspect.Parameter.VAR_POSITIONAL:
+                pos.extend(v)
+            elif kind is inspect.Parameter.VAR_KEYWORD:
+                named.update(v)
+            elif kind is inspect.Parameter.POSITIONAL_ONLY:
+                pos.append(v)
+            elif _given(v) is not None:
+                given[p] = _given(v)
+            else:
+                named[p] = v
+    for p, v in [*((f"#{i + 1}", v) for i, v in enumerate(pos)), *named.items()]:
+        try:
+            json.dumps(v, allow_nan=False)
+        except (TypeError, ValueError):
+            raise ToolError(
+                f"tools.{area}.{name} wasn't run: its input {p} is a {type(v).__name__}, and a tool that changes things "
+                f"takes plain values (text, numbers, lists, dicts) so the person can see them when they OK it. Pass it as "
+                f"text (a date as \"2026-12-21\"); if it's something live (a browser page, a connection), have {name} get it "
+                f"itself, then save it again with replace=True") from None
+    return json.dumps({"args": pos, "kwargs": named, "given": given, "risk": risk}, ensure_ascii=False, allow_nan=False)
+
+
+def replay(raw):
+    """The inputs an allowed tool runs with (sandbox.ts toolsCommand), its given ones Emplio's own objects again."""
+    import emplio
+    sent = json.loads(raw or "{}")
+    given = {p: emplio if n == "" else getattr(emplio, n) for p, n in (sent.get("given") or {}).items()}
+    return sent.get("args", []), {**sent.get("kwargs", {}), **given}
 
 
 class _Finder(importlib.abc.MetaPathFinder):
