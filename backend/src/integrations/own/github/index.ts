@@ -3,7 +3,7 @@
 import { basename } from "node:path";
 import { z } from "zod";
 import { AppFile, AppsError } from "../../types";
-import type { OwnApp } from "../index";
+import type { OwnAction, OwnApp } from "../index";
 import { type Api, call, specActions } from "../openapi";
 import { events, triggers, unwatch, watch } from "./triggers";
 
@@ -18,6 +18,22 @@ const api: Api = {
 const SCOPES = "repo workflow read:org gist read:user user:email";
 
 const raw: Api = { ...api, auth: (key, input) => ({ ...api.auth!(key, input), Accept: "application/vnd.github.raw" }) };
+
+// The spec's defaults fill all three of type, visibility and affiliation, and GitHub refuses type with either of the
+// others (422) however it's called. A type other than its default "all" is what was asked for; otherwise the others.
+function oneOfTypeOrVisibility(actions: Record<string, OwnAction>): OwnAction {
+  const a = actions.list_repositories_for_the_authenticated_user!;
+  return {
+    ...a,
+    input: a.input,
+    run: (i: Record<string, unknown>, key: string) => {
+      const { type, visibility, affiliation, ...rest } = i;
+      return a.run(type && type !== "all" ? { ...rest, type } : { ...rest, visibility, affiliation }, key);
+    },
+  };
+}
+
+const generated = await specActions(new URL("./actions.json", import.meta.url), api);
 
 export const github: OwnApp = {
   app: "github",
@@ -57,7 +73,8 @@ export const github: OwnApp = {
     stop: (key, id) => unwatch(api, key, id),
   },
   actions: {
-    ...(await specActions(new URL("./actions.json", import.meta.url), api)),
+    ...generated,
+    list_repositories_for_the_authenticated_user: oneOfTypeOrVisibility(generated),
     get_raw_repository_content: {
       description: "Get one file from a repository as a file on the computer. For a whole repository, git clone it instead.",
       readOnly: true,
