@@ -15,6 +15,7 @@ Emplio's settings live in `~/emplio/.env`, which the installer writes from `.env
 |---|---|
 | `ENCRYPTION_KEY` | Encrypts saved passwords, pasted app keys and MCP server tokens. 32 random bytes, base64. Never change it on a running install. |
 | `RUNNER_TOKEN` | The shared secret between Emplio and the runner. At least 32 characters. |
+| `WHATSAPP_TOKEN` | The shared secret between Emplio and its WhatsApp server. At least 32 characters. Without it, WhatsApp isn't offered. |
 | `POSTGRES_PASSWORD` | The password for Emplio's Postgres database. |
 | `SETUP_TOKEN` | The one-time link that signs in the first person. |
 | `SETUP_EMAIL` | The owner's email, which that link signs in. |

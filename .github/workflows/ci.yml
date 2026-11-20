@@ -28,7 +28,7 @@ jobs:
           if [ "$EVENT" = pull_request ]; then
             # HEAD is the pull request merged into its target, so this is exactly what it changes
             git diff --name-only HEAD^1 HEAD |
-              grep -qE '^(docker/|runner/|docker-compose\.yml$|install\.sh|setup\.sh$|\.env\.example$|\.dockerignore$|bun\.lock$|(.*/)?package\.json$|frontend/next\.config|backend/src/(computer|browser)|\.github/workflows/ci\.yml$)' ||
+              grep -qE '^(docker/|runner/|whatsapp/|docker-compose\.yml$|install\.sh|setup\.sh$|\.env\.example$|\.dockerignore$|bun\.lock$|(.*/)?package\.json$|frontend/next\.config|backend/src/(computer|browser)|\.github/workflows/ci\.yml$)' ||
               install=false
           elif [ "$EVENT" = push ]; then
             # a version not yet released is published; a failed publish is retried by the next push
@@ -71,6 +71,11 @@ jobs:
           echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - run: cd backend && bun run db:migrate && bun run test
       - run: bun test runner
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp/go.mod
+          cache-dependency-path: whatsapp/go.sum
+      - run: cd whatsapp && go vet ./... && go test ./...
   # the real thing: build every image and run it the way an install does, with none of the test settings above
   docker:
     needs: plan
@@ -92,7 +97,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        image: [app, runner, computer, browser]
+        image: [app, runner, computer, browser, whatsapp]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3

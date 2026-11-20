@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.0 (2026-11-20)
+
+### What's new
+
+- WhatsApp is here. Link your own WhatsApp or WhatsApp Business: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, reply to messages, send files and polls, forward, edit, delete and pin messages, run your groups (make them, add and remove people, admins, settings, invite links), check which numbers have WhatsApp, and run automations on new messages, edits, deletes, reactions, poll votes, people joining or leaving groups and new chats. WhatsApp automations come with paid plans: checked every hour on Starter and Growth, and the moment it happens on Pro. It only writes to people and groups you already chat with, and keeps it slow so your number stays safe. ![](frontend/public/whats-new/1.3.0-whatsapp.webp)
+- The official WhatsApp Business API connection is now called "WhatsApp Business API".
+
+### For developers
+
+- New `whatsapp/` service in Go with whatsmeow (pure-Go SQLite: the login in `whatsmeow.db`, chats and messages with FTS5 in `data.db`, one folder per account) behind a token-protected HTTP API. Nobody stays connected: accounts connect when used, drop after 10 idle minutes, and catch up every 4 hours. Sends: known chats only, 20/hour and 150/day. About 29 MB with an account linking (Baileys was about 126 MB idle).
+- `whatsapp_linked` own app: 30 actions (Periskope's WhatsApp-level API as the checklist; a separate `reply_to_message` because small models miss `send_message`'s `reply_to`), linking through the OAuth plumbing with our own QR page (`/whatsapp/link`), and a polled `new_message` trigger (`polls/whatsapp_linked.ts`, every 60 minutes, at least 60) over the new `list_recent_messages` action, plus 7 event triggers (edits, deletes, reactions, poll votes, group members, new chats, added to a group) over `list_events`. The server records those events, delivery ticks, reactions and poll votes (`events`, `reactions`, `votes` tables). Plans: new `OwnApp.plans` ({ triggers, instant }) checked by `triggerPlan` in `startTrigger` (refused with an upgrade message, polled, or pushed), `cloud.plan(workspaceId)` (null where nothing is sold: everything allowed), and an hourly `recheckPlans` that sets automations up again when a plan changes. Only `whatsapp_linked` sets it: Pro gets push through a watch on the WhatsApp server (`PUT /accounts/{id}/watch`: the account stays connected and posts each message and event, HMAC-signed, to `/webhooks/app/whatsapp_linked/<connection>`). Needs `WHATSAPP_URL` and `WHATSAPP_TOKEN`; Docker installs get a `whatsapp` service and the token from setup.sh.
+
 ## 1.2.102 (2026-11-20)
 
 ### What's new
