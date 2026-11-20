@@ -119,9 +119,14 @@ export function described(doc: string, annotation?: string) {
 // An agent's tools as its thread sees them: what each takes, what it's for, what calling it does. A name whose tool
 // is gone (renamed, removed) is left out. Their own toolset first, then admins', then the company's, like Python finds them.
 export async function toolLines(who: { workspaceId: string } & Viewer, names: string[]) {
+  return (await findTools(who, names)).map((tool) => `- tools.${tool.name.split(".")[0]}.${tool.signature}: ${tool.description} [${tool.risk}]`);
+}
+
+// The named tools as kept, the way Python finds them (following a tool a split moved); a name whose tool is gone is left out
+export async function findTools(who: { workspaceId: string } & Viewer, names: string[]) {
   const repos = reposOf(who);
   const files = new Map<string, string>();
-  const lines: string[] = [];
+  const found: ToolInfo[] = [];
   const read = async (area: string) => {
     if (!files.has(area)) {
       let text = "";
@@ -137,12 +142,13 @@ export async function toolLines(who: { workspaceId: string } & Viewer, names: st
     return files.get(area)!;
   };
   for (const name of names) {
-    const area = name.split(".")[0]!;
     const tool = await toolDefined(read, name);
-    if (tool) lines.push(`- tools.${area}.${tool.signature}: ${tool.description} [${tool.risk}]`);
+    if (tool) found.push(tool);
   }
-  return lines;
+  return found;
 }
+
+export const onlyReads = (t: ToolInfo) => t.risk === RISKS.reads;
 
 // The tools a piece of work saved or used: "Saved tool gmail.send (" lines in its output, and `from tools.gmail
 // import send` or `emplio.tools.gmail.send(` in its code.

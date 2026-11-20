@@ -25,6 +25,7 @@ import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
 import { approve } from "./approvals";
+import { findAgent, findTools, onlyReads, toolsUsed } from "./agents";
 import type { Session } from "./sandbox";
 import { pollConfig, pollOnce } from "./integrations/polls";
 import * as githubHooks from "./integrations/own/github/triggers";
@@ -125,7 +126,7 @@ async function build(workspaceId: string, name: string, sha: string, old: Row | 
   if ("error" in parsed) return { ...base, when: "manual", enabled: false, prompt: text ?? "", actions: [], allowed: [], error: parsed.error! } satisfies typeof automations.$inferInsert;
   // what it does: the file's actions:, and any app action its prompt names that sends or changes something, so a
   // file that forgets to list one still gets it asked about rather than refused on every run
-  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId))])];
+  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId)), ...(await toolsThatChange(workspaceId, parsed, member))])];
   // what was allowed stays allowed while it's still listed and runs as the same person
   const allowed = old && old.userId === member?.id ? old.allowed.filter((a) => parsed.actions.includes(a)) : [];
   const values: typeof automations.$inferInsert = { ...base, ...parsed, allowed, error: null };
@@ -350,9 +351,21 @@ async function changesNamed(prompt: string, workspaceId: string) {
   return found.flat();
 }
 
+// The saved tools it uses that change things or spend money, already kept when it's set up: the ones its prompt names
+// and its agent's. Listed like app actions, so they're allowed once for every run the same way. A tool made later
+// isn't on the list, and its runs use it anyway (approvals.ts).
+async function toolsThatChange(workspaceId: string, a: { prompt: string; agent: string | null }, member?: { id: string; role: string }) {
+  const who = { workspaceId, userId: member?.id, admin: member?.role === "owner" || member?.role === "admin" };
+  const agent = a.agent ? await findAgent(workspaceId, a.agent, who).catch(() => null) : null;
+  const names = [...toolsUsed([{ input: { code: a.prompt } }]), ...[...a.prompt.matchAll(/\btools\.([a-z][a-z0-9_]*\.[A-Za-z]\w*)/g)].map((m) => m[1]!), ...(agent?.tools ?? [])];
+  const tools = await findTools(who, [...new Set(names)]).catch(() => []);
+  return tools.filter((t) => !onlyReads(t)).map((t) => `tools.${t.name}`);
+}
+
 // An action as the person reads it: its title and app
 // ponytail: looked up on every list; cache like approvals.ts does if the Automations screen gets slow
 async function describe(action: string) {
+  if (action.startsWith("tools.")) return { title: `Saved tool ${action.slice("tools.".length)}`, app: "Tools", logo: undefined };
   const app = action.split(".")[0]!;
   const [detail, card] = await Promise.all([getAction(action).catch(() => null), connectCard(app).catch(() => null)]);
   return { title: detail?.title ?? action, app: card?.name ?? app, logo: card?.logo };
@@ -369,12 +382,13 @@ export async function allowActions(who: Pick<Ctx, "workspaceId" | "role">, name:
 // The actions a run in this chat may do unasked: the automation's allowed ones, if an automation started the chat
 export async function allowedIn(conversationId: string) {
   const [row] = await db
-    .select({ allowed: automations.allowed })
+    .select({ allowed: automations.allowed, actions: automations.actions })
     .from(automationRuns)
     .innerJoin(automations, eq(automations.id, automationRuns.automationId))
     .where(eq(automationRuns.conversationId, conversationId))
     .limit(1);
-  return row?.allowed ?? [];
+  // listed: everything it lists (undefined when no automation started the chat)
+  return { allowed: row?.allowed ?? [], listed: row?.actions };
 }
 
 // Saved from a chat: one card there asking to allow what it will do on every run, while the person is here to say so.
