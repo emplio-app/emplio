@@ -114,9 +114,12 @@ export async function previewSkill(ref: string, put: (name: string, files: { pat
     const dir = await put(`${source}/${skill}`.replace(/[^\w.-]+/g, "-"), l.files);
     return { text: describeSkill(`${source}/${skill}`, l, dir), skill: new TextDecoder().decode(l.files.find((f) => f.path === "SKILL.md")!.content) };
   } catch (error) {
-    return `error: ${error instanceof Error ? error.message : String(error)}`;
+    return `error: ${failure(error)}`;
   }
 }
+
+// an error with no message (a timeout, an aborted fetch) still says what it was, never a bare "error:"
+const failure = (error: unknown) => (error instanceof Error ? error.message || error.name : String(error)) || "it failed without saying why; try again";
 
 export function describeSkill(ref: string, l: Pick<Awaited<ReturnType<typeof look>>, "report" | "files" | "found" | "scripts">, dir: string) {
   const others = l.files.map((f) => f.path).filter((p) => p !== "SKILL.md" && !l.scripts.includes(p));
@@ -217,7 +220,7 @@ export async function skillsCommand(s: Session, args: string[], catchUp: (repo: 
   } catch (error) {
     // the OK asked in a live chat: the card comes after the command, so this isn't a failure
     if (error instanceof Deferred) throw error;
-    return `error: ${error instanceof Error ? error.message : String(error)}`;
+    return `error: ${failure(error)}`;
   }
   return USAGE;
 }

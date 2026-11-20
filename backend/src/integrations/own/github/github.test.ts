@@ -89,3 +89,16 @@ test("actions: reads run unasked, writes ask, a file comes back under its own na
 test("a guessed action name is worded so the closest real ones come back", async () => {
   await expect(own.run("github.nope", {}, { externalId: "x", secret: "t" }, "o")).rejects.toThrow(/^Tool \S+ not found/);
 });
+
+test("listing your repos never sends type with visibility or affiliation (GitHub's 422)", async () => {
+  const urls: string[] = [];
+  globalThis.fetch = (async (url: string) => (urls.push(String(url)), json([]))) as unknown as typeof fetch;
+  const login = { externalId: "x", secret: "t" };
+  await own.run("github.list_repositories_for_the_authenticated_user", { per_page: 100 }, login, "o");
+  await own.run("github.list_repositories_for_the_authenticated_user", { type: "owner" }, login, "o");
+  const [plain, owner] = urls.map((u) => new URL(u).searchParams);
+  expect(plain!.has("type")).toBe(false);
+  expect(plain!.get("per_page")).toBe("100");
+  expect(owner!.get("type")).toBe("owner");
+  expect(owner!.has("visibility") || owner!.has("affiliation")).toBe(false);
+});

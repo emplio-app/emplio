@@ -749,7 +749,8 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       return { text: rows.length ? rows.map(line).join("\n") : "You haven't handed anything off yet." };
     }
     case "show": {
-      const w = rest[0] ? await find(who, conversationId, caller, rest[0]) : null;
+      // with nothing named, the latest job here (`emplio threads show` after a wait)
+      const w = rest[0] ? await find(who, conversationId, caller, rest[0]) : (await db.select().from(jobs).where(mine(who, conversationId, caller)).orderBy(desc(jobs.createdAt)).limit(1))[0];
       if (w?.report) unseen.delete(w.id), untold.delete(w.id);
       return { text: w ? await full(w) : notFound(rest[0]) };
     }
