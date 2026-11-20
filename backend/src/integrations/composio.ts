@@ -148,15 +148,19 @@ export const composio: Provider = {
   async run(action, input, login, owner) {
     const externalId = login?.externalId;
     if (externalId) owner = await accountUser(externalId, owner);
-    const out = await call("POST", `/tools/execute/${encodeURIComponent(toSlug(action))}`, {
-      // without a connection of ours, a user Composio has no logins for: it must never fall back to
-      // a login it holds for this person that our database doesn't know about
-      user_id: externalId ? owner : "employee0-no-sign-in",
-      ...(externalId && { connected_account_id: externalId }),
-      arguments: await uploadFiles(input, action),
-    });
-    if (!out.successful) throw new AppsError(String(out.error ?? "the action failed"), mayBeSignedOut(String(out.error ?? "")));
-    return downloadFiles(out.data);
+    const execute = async (args: unknown) => {
+      const out = await call("POST", `/tools/execute/${encodeURIComponent(toSlug(action))}`, {
+        // without a connection of ours, a user Composio has no logins for: it must never fall back to
+        // a login it holds for this person that our database doesn't know about
+        user_id: externalId ? owner : "employee0-no-sign-in",
+        ...(externalId && { connected_account_id: externalId }),
+        arguments: await uploadFiles(args, action),
+      });
+      if (!out.successful) throw new AppsError(String(out.error ?? "the action failed"), mayBeSignedOut(String(out.error ?? "")));
+      return out.data as Json;
+    };
+    if (action !== "gmail.fetch_emails") return downloadFiles(await execute(input));
+    return downloadFiles(await execute(input).catch((e) => (tooLarge(e) ? fetchInPages(execute, input as Json) : Promise.reject(e))));
   },
 
   async listTriggers(app, words) {
@@ -195,6 +199,46 @@ export const composio: Provider = {
     await call("DELETE", `/trigger_instances/manage/${encodeURIComponent(externalId)}`);
   },
 };
+
+// Composio refuses an answer past its size limit: ten whole emails came to 3.5 MB, and asking for 30 failed. A Gmail
+// fetch that hits it is asked again in smaller pages, joined into one answer, so asking for many just works; an email
+// too big even alone comes without its body, and the answer says so.
+// ponytail: only for Composio's Gmail; goes with it once our own Gmail (no such limit) has Google's approval
+const tooLarge = (e: unknown) => e instanceof Error && /payload is too large/i.test(e.message);
+
+export async function fetchInPages(execute: (args: Json) => Promise<Json>, input: Json) {
+  const want = Math.max(1, Number(input.max_results ?? 1));
+  const messages: Json[] = [];
+  let size = Math.max(1, Math.floor(want / 2));
+  let page: string | undefined = input.page_token;
+  let bodiless = 0;
+  let last: Json = {};
+  while (messages.length < want) {
+    const ask = { ...input, max_results: Math.min(size, want - messages.length), ...(page && { page_token: page }) };
+    let data: Json;
+    try {
+      data = await execute(ask);
+    } catch (e) {
+      if (!tooLarge(e)) throw e;
+      if (ask.max_results > 1) {
+        size = Math.max(1, Math.floor(ask.max_results / 2));
+        continue;
+      }
+      data = await execute({ ...ask, include_payload: false, verbose: false });
+      bodiless++;
+    }
+    messages.push(...(data?.messages ?? []));
+    last = data ?? {};
+    page = last.nextPageToken || undefined;
+    if (!page) break;
+  }
+  return {
+    ...last,
+    messages,
+    nextPageToken: page,
+    ...(bodiless && { note: `${bodiless} email(s) were too big to come with their body; read one by its id with gmail.fetch_message_by_message_id` }),
+  };
+}
 
 // The user a login was made under. Usually `owner`, but a login made before its workspace got a new id
 // keeps the old one, and Composio refuses a run under any other.
