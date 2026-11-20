@@ -46,4 +46,12 @@ test("a run that didn't do its work, or said nothing, shows as failed, not done 
   expect(outcome("credit ran out", null)).toEqual({ status: "failed", error: "credit ran out", said: "failed: credit ran out" });
   expect(outcome(null, "Sent 20 invites.")).toEqual({ status: "done", error: null, said: "Sent 20 invites." });
   expect(outcome(null, "No new notes this run. [SILENT]")).toEqual({ status: "done", error: null, said: null });
+  // it reported a problem and still said nothing to do: failed, so the person hears and the check-in fixes it
+  expect(outcome(null, "[SILENT]", "signups_since needs a run argument")).toEqual({
+    status: "failed",
+    error: "it hit a problem and still reported nothing to do: signups_since needs a run argument",
+    said: "failed: it hit a problem and still reported nothing to do: signups_since needs a run argument",
+  });
+  // one it reported and then told the person about stays done: they hear it either way
+  expect(outcome(null, "Sent 3 of 4; the fourth bounced.", "a send failed").status).toBe("done");
 });
