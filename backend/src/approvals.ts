@@ -55,6 +55,7 @@ export async function alwaysAllowed(workspaceId: string, userId: string) {
 // Whether an action that changes something would need asking, without asking (a git push held up by a command's time limit)
 export async function mustAsk(s: Session, action: string) {
   if (s.settings.approvals === "auto" && !s.automation) return false;
+  if (s.listedActions && action.startsWith("tools.") && !s.listedActions.includes(action)) return false;
   return !(s.allowedActions?.includes(action) || (await alwaysAllowed(s.workspaceId, s.user.id)).includes(action));
 }
 
@@ -104,6 +105,8 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   if (!asks && (await alwaysAllowed(s.workspaceId, s.user.id)).includes(action)) return null;
   // what the automation behind this run lists and was allowed
   if (!asks && s.allowedActions?.includes(action)) return null;
+  // a saved tool made after the automation was set up, so never on its list to allow: part of the automation, so it runs
+  if (!asks && s.listedActions && action.startsWith("tools.") && !s.listedActions.includes(action)) return null;
   // no such action, or the provider couldn't say: unknown is never taken for safe
   if (!detail) return `error: couldn't check what ${action} does, so it wasn't run and nothing changed. If the name is right (emplio apps actions <app>), try again in a moment.`;
   if (s.thinker)

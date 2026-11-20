@@ -70,6 +70,8 @@ export type Session = {
   watched?: boolean;
   // in a run an automation started (or a job of one): the app actions it's allowed to do unasked (automations.ts)
   allowedActions?: string[];
+  // and everything that automation lists, allowed or not: a saved tool not on it was made later, and runs anyway
+  listedActions?: string[];
   // where the person is talking: "web", or a phone channel like "telegram" (no live browser beside the chat there)
   channel?: string;
   // one of the AI's tasks, run on its own (tasks.ts): nobody is watching either, but gated actions are refused
