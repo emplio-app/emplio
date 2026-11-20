@@ -2,11 +2,11 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
-## 1.2.101 (2026-11-19)
+## 1.3.0 (2026-11-20)
 
 ### What's new
 
-- Link your own WhatsApp: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, reply to messages, send files and polls, forward, edit, delete and pin messages, run your groups (make them, add and remove people, admins, settings, invite links), check which numbers have WhatsApp, and run automations on new messages, edits, deletes, reactions, poll votes, people joining or leaving groups and new chats. WhatsApp automations come with paid plans: checked every hour on Starter and Growth, and the moment it happens on Pro. It only writes to people and groups you already chat with, and keeps it slow so your number stays safe.
+- WhatsApp is here. Link your own WhatsApp or WhatsApp Business: connect **WhatsApp** in Integrations and scan the code from your phone (WhatsApp → Linked devices), like WhatsApp Web. Emplio can then read and search your chats and groups, reply to messages, send files and polls, forward, edit, delete and pin messages, run your groups (make them, add and remove people, admins, settings, invite links), check which numbers have WhatsApp, and run automations on new messages, edits, deletes, reactions, poll votes, people joining or leaving groups and new chats. WhatsApp automations come with paid plans: checked every hour on Starter and Growth, and the moment it happens on Pro. It only writes to people and groups you already chat with, and keeps it slow so your number stays safe. ![](frontend/public/whats-new/1.3.0-whatsapp.webp)
 - The official WhatsApp Business API connection is now called "WhatsApp Business API".
 
 ### For developers
