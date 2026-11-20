@@ -30,6 +30,10 @@ shows as needing a reconnect.
 
 ## Triggers
 
+Plans (`plans` on the app, checked by the automation engine): no WhatsApp automations on the free trial; Starter and
+Growth are polled hourly as below; Pro is told the moment it happens (the WhatsApp server keeps a watched account
+connected and posts to `/webhooks/app/whatsapp_linked/<connection>`). Self-hosted servers get instant for everyone.
+
 - new_message (polled, `polls/whatsapp_linked.ts`): new messages in any chat, groups included, checked every 60
   minutes (at least 60); filters chat, groups (include/exclude/only), contains, from_me. Each check connects the
   account, takes in what WhatsApp queued while it was idle, and reads the last 3 hours. Not instant, on purpose: an

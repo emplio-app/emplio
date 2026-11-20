@@ -5,7 +5,9 @@ import { createHmac, randomBytes } from "node:crypto";
 import { AppFile, AppsError } from "../../types";
 import { own } from "../index";
 import { pollConfig, pollDetail, pollOnce } from "../../polls";
-import { whatsapp_linked, wanted } from "./index";
+import { whatsapp_linked, wanted, webhookSecret } from "./index";
+import { triggerPlan } from "../../index";
+import { cloud } from "../../../cloud";
 import { linkedAccount } from "./link";
 
 const ACCT = "6386a0fb-6ef1-404c-9934-88e548257ad3";
@@ -130,8 +132,8 @@ test("settings pick the messages an automation wants", () => {
   expect(wanted({ contains: "invoice" }, msg)).toBe(false);
 });
 
-test("new messages are checked every hour, not pushed", async () => {
-  expect(whatsapp_linked.push).toBeUndefined();
+test("new messages are checked every hour where the plan isn't Pro", async () => {
+  expect(whatsapp_linked.plans).toEqual({ triggers: ["starter", "growth", "pro"], instant: ["pro"] });
   expect(pollDetail("whatsapp_linked.new_message")?.input[0]?.description).toContain("default 60, at least 60");
   expect(() => pollConfig("whatsapp_linked.new_message", { every: 15 })).toThrow(/at least 60/);
   const run = (messages: unknown[]) => {
@@ -169,4 +171,40 @@ test("edits, deletes, reactions and group changes are their own hourly triggers"
   await pollOnce("whatsapp_linked.group_members_changed", {}, null, run([]));
   expect(calls.at(-1)!.input.kinds).toEqual(["joined", "left", "promoted", "demoted"]);
   expect(() => pollConfig("whatsapp_linked.message_deleted", { every: 15 })).toThrow(/at least 60/);
+});
+
+test("its triggers follow the plan: none on the trial, hourly on Starter and Growth, instant on Pro; everything where nothing is sold", async () => {
+  const real = cloud.plan;
+  try {
+    expect(await triggerPlan("w", "whatsapp_linked")).toEqual({ instant: true });
+    cloud.plan = async () => "trial";
+    await expect(triggerPlan("w", "whatsapp_linked")).rejects.toThrow(/Starter, Growth or Pro plan, and this business is on the free trial/);
+    cloud.plan = async () => "growth";
+    expect(await triggerPlan("w", "whatsapp_linked")).toEqual({ instant: false });
+    cloud.plan = async () => "pro";
+    expect(await triggerPlan("w", "whatsapp_linked")).toEqual({ instant: true });
+    // other apps aren't held back
+    cloud.plan = async () => "trial";
+    expect(await triggerPlan("w", "github")).toEqual({ instant: true });
+  } finally {
+    cloud.plan = real;
+  }
+});
+
+test("instantly: the account is watched, and only signed posts from the WhatsApp server start automations", async () => {
+  process.env.WEBHOOK_URL = "https://api.test";
+  const calls = stub(() => json({ watching: true }));
+  expect(await whatsapp_linked.push!.start(ACCT, "c1", "new_message", {})).toBe("whatsapp_linked:c1");
+  expect([calls[0]!.method, calls[0]!.url]).toEqual(["PUT", `http://wa.test:4200/accounts/${ACCT}/watch`]);
+  expect(JSON.parse(calls[0]!.body)).toEqual({ url: "https://api.test/webhooks/app/whatsapp_linked/c1", secret: webhookSecret("c1") });
+  const body = JSON.stringify({ id: `${msg.chat}:M1`, kind: "message", message: msg });
+  const sign = (b: string) => createHmac("sha256", webhookSecret("c1")).update(b).digest("hex");
+  const got = await whatsapp_linked.push!.receive!({ body, headers: { "x-emplio-signature": sign(body) }, connection: "c1", rest: "" }, ACCT);
+  expect(await got!.events()).toEqual([{ id: `${msg.chat}:M1`, triggers: ["new_message"], data: { message: msg } }]);
+  expect(await whatsapp_linked.push!.receive!({ body, headers: { "x-emplio-signature": "forged" }, connection: "c1", rest: "" }, ACCT)).toBeNull();
+  const left = JSON.stringify({ id: "event:9", kind: "left", event: { ...msg, kind: "left", is_group: true } });
+  const ev = await (await whatsapp_linked.push!.receive!({ body: left, headers: { "x-emplio-signature": sign(left) }, connection: "c1", rest: "" }, ACCT))!.events();
+  expect(ev[0]!.triggers).toEqual(["group_members_changed"]);
+  expect(whatsapp_linked.push!.wanted!({ groups: "exclude" }, ev[0]!.data)).toBe(false);
+  expect(whatsapp_linked.push!.wanted!({}, { message: { ...msg, from_me: true } })).toBe(false);
 });

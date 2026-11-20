@@ -5,6 +5,7 @@
 // that server's id for the account. Linking runs through the sign-in plumbing every OAuth app uses: authorizeUrl is
 // our own page with the QR code (link.ts), and the code it hands back says which account was linked. Its new-message
 // trigger is polled every hour (polls/whatsapp_linked.ts), so no one's WhatsApp stays connected around the clock.
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { AppFile, AppsError } from "../../types";
 import type { OwnApp } from "../index";
@@ -30,6 +31,25 @@ const members = (action: string, description: string, known = false) => ({
   input: z.object({ chat: group, phones: known ? phones.describe("Phone numbers with country code, like +15551234567; only people this WhatsApp already chats with") : phones }),
   run: async (i: { chat: string; phones: string[] }, key: string) => wa("POST", `/accounts/${account(key)}/group/members`, { ...i, action }),
 });
+
+// Each connection's webhook secret, worked out rather than stored.
+export function webhookSecret(connection: string) {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) throw new Error("ENCRYPTION_KEY isn't set");
+  return createHmac("sha256", key).update(`whatsapp-webhook:${connection}`).digest("hex");
+}
+
+// each trigger and the kinds of what the WhatsApp server sends that start it (a message, or an event's kind)
+export const KINDS: Record<string, string[]> = {
+  new_message: ["message"],
+  message_edited: ["edited"],
+  message_deleted: ["deleted"],
+  new_reaction: ["reaction"],
+  new_poll_vote: ["poll_vote"],
+  group_members_changed: ["joined", "left", "promoted", "demoted"],
+  new_chat: ["new_chat"],
+  added_to_group: ["added_to_group"],
+};
 
 type Msg = { chat: string; chat_name: string; is_group: boolean; from_me: boolean; from: string; from_name: string | null; text: string };
 const contains = (hay: unknown, needle: unknown) => String(hay ?? "").toLowerCase().includes(String(needle).toLowerCase());
@@ -63,6 +83,34 @@ export const whatsapp_linked: OwnApp = {
     noConsentScreen: true,
     // disconnecting in Emplio unlinks it from the phone and forgets its messages
     revoke: async (key) => void (await wa("DELETE", `/accounts/${account(key)}`)),
+  },
+  // Its triggers keep someone's WhatsApp connected, so they're for paying businesses: checked every hour on Starter and
+  // Growth, the moment it happens on Pro (the WhatsApp server keeps the account connected and posts to us).
+  plans: { triggers: ["starter", "growth", "pro"], instant: ["pro"] },
+  push: {
+    // every trigger is polled too (polls/whatsapp_linked.ts); one watch per account carries them all
+    events: Object.fromEntries(Object.keys(KINDS).map((t) => [t, t])),
+    triggers: {},
+    async start(key, connection) {
+      if (!process.env.WEBHOOK_URL) throw new AppsError("this server can't be told about WhatsApp messages (WEBHOOK_URL isn't set)");
+      await wa("PUT", `/accounts/${account(key)}/watch`, { url: `${process.env.WEBHOOK_URL}/webhooks/app/whatsapp_linked/${connection}`, secret: webhookSecret(connection) });
+      return `whatsapp_linked:${connection}`;
+    },
+    // the last instant automation on this account is gone: it goes back to connecting only when used
+    stop: async (key) => void (await wa("DELETE", `/accounts/${account(key)}/watch`)),
+    async receive(delivery) {
+      const got = Buffer.from(String(delivery.headers["x-emplio-signature"] ?? ""));
+      const want = Buffer.from(createHmac("sha256", webhookSecret(delivery.connection)).update(delivery.body).digest("hex"));
+      if (got.length !== want.length || !timingSafeEqual(got, want)) return null;
+      const p = JSON.parse(delivery.body) as { id: string; kind: string; message?: Msg; event?: Msg };
+      const triggers = Object.keys(KINDS).filter((t) => KINDS[t]!.includes(p.kind));
+      // the same shape the hourly checks give, so an automation's prompt reads it the same either way
+      return { events: async () => [{ id: p.id, triggers, data: p.message ? { message: p.message } : { event: p.event } }] };
+    },
+    wanted: (config, data) => {
+      const d = data as { message?: Msg; event?: Msg };
+      return d.message ? wanted(config, d.message) : wanted(config, { ...d.event!, text: "" });
+    },
   },
   actions: {
     get_account: {

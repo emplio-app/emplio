@@ -2,12 +2,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,12 +44,20 @@ type Me struct {
 	Phone *string `json:"phone"`
 }
 
+// Watch is where an instant automation wants this account's messages and events posted. While it's set the account
+// stays connected.
+type Watch struct {
+	URL    string `json:"url"`
+	Secret string `json:"secret"`
+}
+
 type Meta struct {
-	Created  int64 `json:"created"`
-	Linked   bool  `json:"linked"`
-	Unlinked bool  `json:"unlinked,omitempty"`
-	Me       *Me   `json:"me,omitempty"`
-	CaughtUp int64 `json:"caughtUp,omitempty"`
+	Watch    *Watch `json:"watch,omitempty"`
+	Created  int64  `json:"created"`
+	Linked   bool   `json:"linked"`
+	Unlinked bool   `json:"unlinked,omitempty"`
+	Me       *Me    `json:"me,omitempty"`
+	CaughtUp int64  `json:"caughtUp,omitempty"`
 }
 
 // Refused is an answer for Emplio (shown to the agent), with its HTTP status.
@@ -93,6 +105,9 @@ func OpenAccount(dataDir, id string) (*Account, error) {
 		return nil, err
 	}
 	a := &Account{ID: id, dir: dir, store: s, wadb: wadb, status: "closed", lastUse: time.Now(), waLog: waLog.Stdout(id[:8], logLevel(), false)}
+	s.onEvent = func(e Event) {
+		a.notify(map[string]any{"id": fmt.Sprintf("event:%d", e.ID), "kind": e.Kind, "event": a.PresentEvent(e)})
+	}
 	if raw := s.Get("meta"); raw != "" {
 		json.Unmarshal([]byte(raw), &a.meta)
 	} else {
@@ -126,12 +141,14 @@ func (a *Account) touch() {
 }
 
 type State struct {
-	ID     string  `json:"id"`
-	Status string  `json:"status"`
-	Linked bool    `json:"linked"`
-	QR     *string `json:"qr"`
-	Code   *string `json:"code"`
-	Me     *Me     `json:"me"`
+	// an instant automation keeps it connected
+	Watching bool    `json:"watching"`
+	ID       string  `json:"id"`
+	Status   string  `json:"status"`
+	Linked   bool    `json:"linked"`
+	QR       *string `json:"qr"`
+	Code     *string `json:"code"`
+	Me       *Me     `json:"me"`
 }
 
 func (a *Account) State() State {
@@ -147,7 +164,7 @@ func (a *Account) State() State {
 	} else if a.meta.Unlinked {
 		status = "unlinked"
 	}
-	return State{ID: a.ID, Status: status, Linked: a.meta.Linked, QR: strPtr(a.qr), Code: strPtr(a.code), Me: a.meta.Me}
+	return State{Watching: a.meta.Watch != nil, ID: a.ID, Status: status, Linked: a.meta.Linked, QR: strPtr(a.qr), Code: strPtr(a.code), Me: a.meta.Me}
 }
 
 func strPtr(s string) *string {
@@ -362,6 +379,7 @@ func (a *Account) on(evt any) {
 		if !m.FromMe {
 			a.store.BumpUnread(m.Chat)
 		}
+		a.notify(map[string]any{"id": m.Chat + ":" + m.ID, "kind": "message", "message": a.Present(m)})
 		if strings.HasSuffix(m.Chat, "@g.us") && a.store.NameOf(m.Chat) == "" {
 			go func() {
 				cli := a.client()
@@ -710,6 +728,48 @@ func (a *Account) Ready(fresh bool) error {
 	}
 	return nil
 }
+
+// SetWatch starts or (nil) stops posting this account's messages and events to an instant automation.
+func (a *Account) SetWatch(w *Watch) {
+	a.mu.Lock()
+	a.meta.Watch = w
+	a.saveMeta()
+	a.mu.Unlock()
+}
+
+// notify posts what happened to the instant automation watching this account, signed with its secret, trying a few
+// times. ponytail: in memory; what's mid-retry when the server restarts is lost (the hourly check still sees it)
+func (a *Account) notify(payload map[string]any) {
+	a.mu.Lock()
+	w := a.meta.Watch
+	a.mu.Unlock()
+	if w == nil {
+		return
+	}
+	body, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte(w.Secret))
+	mac.Write(body)
+	sig := hex.EncodeToString(mac.Sum(nil))
+	go func() {
+		for try, wait := 0, time.Second; try < 4; try, wait = try+1, wait*5 {
+			req, _ := http.NewRequest("POST", w.URL, bytes.NewReader(body))
+			req.Header.Set("content-type", "application/json")
+			req.Header.Set("x-emplio-signature", sig)
+			res, err := notifyClient.Do(req)
+			if err == nil {
+				res.Body.Close()
+				// 401: the automation's gone or its secret changed; retrying won't help
+				if res.StatusCode < 500 {
+					return
+				}
+			}
+			time.Sleep(wait)
+		}
+		a.logf("couldn't post to the automation watching it")
+	}()
+}
+
+var notifyClient = &http.Client{Timeout: 15 * time.Second}
 
 // Stop disconnects, keeping the login.
 func (a *Account) Stop() {

@@ -13,7 +13,7 @@ const LIMIT = 500;
 export const whatsapp_linked: Record<string, PollTrigger> = {
   new_message: {
     description:
-      "A new message on the linked WhatsApp, in any chat, groups included (checked every hour by default, so it can start up to an hour after the message). Messages sent from it, Emplio's own replies included, don't start it unless from_me is set.",
+      "A new message on the linked WhatsApp, in any chat, groups included. Needs a paid plan: on Pro it starts the moment the message arrives; on Starter and Growth it's checked every hour, so it can start up to an hour later. Messages sent from it, Emplio's own replies included, don't start it unless from_me is set.",
     config: z.object({
       chat: z.string().max(200).optional().describe("Only this chat: part of its name, the phone number, or its id"),
       groups: z.enum(["include", "exclude", "only"]).optional().describe("Group chats: include (the default), exclude, or only groups"),
@@ -54,7 +54,7 @@ const EVENT_LIMIT = 500;
 // A trigger for some kinds of list_events, with the usual chat, groups and from_me settings.
 function happened(kinds: string[], what: string, fields: string): PollTrigger {
   return {
-    description: `${what} (checked every hour by default, so it can start up to an hour later). What this WhatsApp did itself doesn't start it unless from_me is set.`,
+    description: `${what} (needs a paid plan: the moment it happens on Pro, checked every hour on Starter and Growth). What this WhatsApp did itself doesn't start it unless from_me is set.`,
     config: z.object({
       chat: z.string().max(200).optional().describe("Only this chat: part of its name, the phone number, or its id"),
       groups: z.enum(["include", "exclude", "only"]).optional().describe("Group chats: include (the default), exclude, or only groups"),

@@ -22,7 +22,7 @@ import { db } from "./db";
 import { record } from "./activity";
 import { automationRuns, automations, connections, conversations, users, workspaceMembers, workspaces } from "./db/schema";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
-import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger } from "./integrations";
+import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
 import { approve } from "./approvals";
 import type { Session } from "./sandbox";
@@ -133,7 +133,9 @@ async function build(workspaceId: string, name: string, sha: string, old: Row | 
   else if (member.role === "member") values.error = "only the owner or an admin can set up automations";
   else if (values.when === "schedule") values.nextRunAt = nextRun(values);
   else if (values.when === "trigger" && values.enabled) {
+    // an app whose triggers depend on the plan is started afresh, so a plan change takes (recheckPlans)
     const same =
+      !OWN_APPS[values.trigger!.split(".")[0]!]?.plans &&
       old?.externalId &&
       old.trigger === values.trigger &&
       old.userId === values.userId &&
@@ -497,8 +499,35 @@ async function poll(row: Row) {
 
 let webhookSecret: string | null = null;
 
+// Hourly: trigger automations of apps whose triggers depend on the plan (OwnApp.plans), set up again where the plan
+// changed what they get: started on an upgrade, polled instead of told at once on a downgrade, refused once unpaid.
+export async function recheckPlans() {
+  const apps = Object.keys(OWN_APPS).filter((a) => OWN_APPS[a]!.plans);
+  if (!apps.length) return;
+  const rows = await db
+    .select({ id: automations.id, workspaceId: automations.workspaceId, trigger: automations.trigger, provider: automations.provider, error: automations.error })
+    .from(automations)
+    .where(and(eq(automations.when, "trigger"), eq(automations.enabled, true)));
+  const redo = new Set<string>();
+  for (const row of rows) {
+    const app = row.trigger?.split(".")[0] ?? "";
+    if (!apps.includes(app)) continue;
+    const want = await triggerPlan(row.workspaceId, app).then(
+      (p) => (p.instant ? "instant" : "poll"),
+      () => "refused",
+    );
+    const has = row.error ? "refused" : row.provider === "poll" ? "poll" : "instant";
+    if (want === has) continue;
+    // a changed sha makes the next sync read it again
+    await db.update(automations).set({ sha: "" }).where(eq(automations.id, row.id));
+    redo.add(row.workspaceId);
+  }
+  for (const workspaceId of redo) await syncAutomations(workspaceId).catch((error) => console.error("rechecking plans failed", workspaceId, error));
+}
+
 export async function startAutomations() {
   setInterval(() => void tick().catch((error) => console.error("automation timer failed", error)), 30_000);
+  setInterval(() => void recheckPlans().catch((error) => console.error("rechecking plans failed", error)), 3600_000);
   void tick().catch((error) => console.error("automation timer failed", error));
   // where the provider posts trigger events; without it, trigger automations save fine but never fire
   if (process.env.WEBHOOK_URL)

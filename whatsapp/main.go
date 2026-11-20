@@ -70,8 +70,18 @@ func (s *Server) Tick() {
 	for _, a := range all {
 		a.mu.Lock()
 		linked, unlinked, created, lastUse, status, caughtUp := a.meta.Linked, a.meta.Unlinked, time.UnixMilli(a.meta.Created), a.lastUse, a.status, time.UnixMilli(a.meta.CaughtUp)
+		watched := a.meta.Watch != nil
 		a.mu.Unlock()
 		switch {
+		case linked && watched:
+			// an instant automation: kept connected, and reconnected when it drops
+			if status != "open" && status != "connecting" {
+				go func() {
+					if err := a.Start(); err != nil {
+						a.logf("reconnecting failed: %v", err)
+					}
+				}()
+			}
 		case !linked:
 			// never linked in time, or unlinked from the phone a week ago: forgotten (Emplio then asks to link again)
 			if now.Sub(created) > LinkFor && (!unlinked || now.Sub(lastUse) > 7*24*time.Hour) {
@@ -277,6 +287,34 @@ func (s *Server) Routes() *http.ServeMux {
 		return a.State(), nil
 	}))
 	mux.HandleFunc("GET /accounts/{id}", s.acct(func(a *Account, r *http.Request) (any, error) { return a.State(), nil }))
+	// an instant automation: its messages and events posted to url as they happen, signed with secret
+	mux.HandleFunc("PUT /accounts/{id}/watch", s.acct(func(a *Account, r *http.Request) (any, error) {
+		b, err := body(r)
+		if err != nil {
+			return nil, err
+		}
+		u, err := str(b["url"], "url", 2000)
+		if err != nil {
+			return nil, err
+		}
+		if p, err := url.Parse(u); err != nil || (p.Scheme != "https" && p.Scheme != "http") || p.Host == "" {
+			return nil, refuse(400, "url must be an http(s) address")
+		}
+		secret, err := str(b["secret"], "secret", 200)
+		if err != nil || len(secret) < 32 {
+			return nil, refuse(400, "secret is needed (32+ characters)")
+		}
+		a.SetWatch(&Watch{URL: u, Secret: secret})
+		if a.State().Linked {
+			go a.Start()
+		}
+		return a.State(), nil
+	}))
+	mux.HandleFunc("DELETE /accounts/{id}/watch", s.acct(func(a *Account, r *http.Request) (any, error) {
+		a.SetWatch(nil)
+		a.touch()
+		return a.State(), nil
+	}))
 	mux.HandleFunc("DELETE /accounts/{id}", s.acct(func(a *Account, r *http.Request) (any, error) {
 		s.mu.Lock()
 		delete(s.accts, a.ID)

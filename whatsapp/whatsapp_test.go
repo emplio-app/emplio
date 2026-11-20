@@ -3,7 +3,11 @@
 package main
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,6 +172,46 @@ func TestEditsDeletesReactionsAndTicks(t *testing.T) {
 	a.on(&events.Receipt{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, MessageIDs: []types.MessageID{"s1"}, Type: types.ReceiptTypeRead})
 	a.on(&events.Receipt{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, MessageIDs: []types.MessageID{"s1"}, Type: types.ReceiptTypeDelivered})
 	eq(t, a.Present(*a.store.GetMessage(sarah.String(), "s1"))["status"], any("read"))
+}
+
+func TestAWatchedAccountPostsWhatHappens(t *testing.T) {
+	got := make(chan *http.Request, 4)
+	bodies := make(chan []byte, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- r
+		bodies <- b
+	}))
+	defer srv.Close()
+	a, err := OpenAccount(t.TempDir(), "00000000-0000-4000-8000-000000000003")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	secret := strings.Repeat("s", 40)
+	a.SetWatch(&Watch{URL: srv.URL, Secret: secret})
+	eq(t, a.State().Watching, true)
+	sarah := types.NewJID("15551234567", types.DefaultUserServer)
+	a.on(&events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: sarah, Sender: sarah}, ID: "m1", Timestamp: time.Now()}, Message: &waE2E.Message{Conversation: proto.String("hello")}})
+	// a new chat (an event) and the message itself, each signed
+	kinds := map[string]bool{}
+	for range 2 {
+		select {
+		case r := <-got:
+			b := <-bodies
+			mac := hmac.New(sha256.New, []byte(secret))
+			mac.Write(b)
+			eq(t, r.Header.Get("x-emplio-signature"), hex.EncodeToString(mac.Sum(nil)))
+			var p struct{ Kind string }
+			json.Unmarshal(b, &p)
+			kinds[p.Kind] = true
+		case <-time.After(5 * time.Second):
+			t.Fatal("nothing posted")
+		}
+	}
+	eq(t, kinds["message"] && kinds["new_chat"], true)
+	a.SetWatch(nil)
+	eq(t, a.State().Watching, false)
 }
 
 func TestPollVotesAndForwards(t *testing.T) {

@@ -109,6 +109,10 @@ export type OwnApp = {
     revoke?(token: string): Promise<void>;
   };
   actions: Record<string, OwnAction>;
+  // Which plans its triggers are for (Emplio Cloud; where nothing is sold, everyone gets everything). Left out, the
+  // usual: every plan, told the moment it happens where the app can. `triggers`: plans that may set one up at all;
+  // `instant`: plans told the moment it happens (push), the rest polled.
+  plans?: { triggers: string[]; instant: string[] };
   // events the app tells us about the moment they happen
   push?: {
     // our trigger name → its event

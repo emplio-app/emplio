@@ -65,6 +65,8 @@ type querier interface {
 type Store struct {
 	db *sql.DB
 	q  querier
+	// told of each event as it's saved (an instant automation, account.go)
+	onEvent func(Event)
 }
 
 var bg = context.Background()
@@ -402,7 +404,11 @@ func (s *Store) Event(e Event) {
 	if e.TS == 0 {
 		e.TS = time.Now().UnixMilli()
 	}
-	s.q.ExecContext(bg, "insert into events (ts, kind, chat, message, who, from_me, text) values (?, ?, ?, ?, ?, ?, ?)", e.TS, e.Kind, e.Chat, e.Message, e.Who, e.FromMe, e.Text)
+	res, err := s.q.ExecContext(bg, "insert into events (ts, kind, chat, message, who, from_me, text) values (?, ?, ?, ?, ?, ?, ?)", e.TS, e.Kind, e.Chat, e.Message, e.Who, e.FromMe, e.Text)
+	if err == nil && s.onEvent != nil {
+		e.ID, _ = res.LastInsertId()
+		s.onEvent(e)
+	}
 	s.q.ExecContext(bg, "delete from events where ts < ?", time.Now().Add(-30*24*time.Hour).UnixMilli())
 }
 

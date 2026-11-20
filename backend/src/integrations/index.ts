@@ -517,6 +517,22 @@ export async function getTrigger(trigger: string, who?: Workspace) {
 // Start watching for a trigger's event on this person's login. Its events come back to our webhook with
 // the returned externalId.
 // account: which of the person's accounts of the app, when they have several.
+const planName = (p: string) => p[0]!.toUpperCase() + p.slice(1);
+
+// What the business's plan allows for an app's triggers (OwnApp.plans): refused (AppsError, saying which plans can),
+// or allowed, told at once or polled. Apps without plans, and servers that sell nothing, get everything.
+export async function triggerPlan(workspaceId: string, app: string) {
+  const rule = APPS[app]?.plans;
+  const plan = rule ? await cloud.plan(workspaceId) : null;
+  if (!rule || plan === null) return { instant: true };
+  const name = CATALOG.find((c) => c.app === app)?.name ?? app;
+  if (!rule.triggers.includes(plan))
+    throw new AppsError(
+      `${name} automations need the ${rule.triggers.map(planName).join(", ").replace(/, ([^,]*)$/, " or $1")} plan, and this business ${plan === "trial" ? "is on the free trial" : plan === "none" ? "has no plan right now" : `is on ${planName(plan)}`}. The owner or an admin can upgrade in Billing; after that, save this automation again and it starts.`,
+    );
+  return { instant: rule.instant.includes(plan) };
+}
+
 export async function startTrigger(who: Who, trigger: string, config: unknown, account?: string) {
   const detail = await getTrigger(trigger, who);
   if (!detail) throw new AppsError(`no trigger ${trigger}; list them with emplio automations triggers <app>`);
@@ -526,6 +542,7 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   if (connection && moved(connection)) throw new AppsError(`${app} needs signing in again: it now connects a different way`);
   if (connection?.status === "pending") connection = (await refresh(connection)) ?? undefined;
   if (connection?.status !== "active") throw new AppsError(`${app} isn't connected for the person who saved it`);
+  const { instant } = await triggerPlan(who.workspaceId, app);
   const polled = pollsRun(appOf(trigger), who) ? pollTrigger(trigger) : undefined;
   if (polled) {
     try {
@@ -537,7 +554,8 @@ export async function startTrigger(who: Who, trigger: string, config: unknown, a
   const provider = providerOf(connection);
   // the app tells us itself, at once. If that can't be set up here, a trigger we can poll still works, just later.
   const login = await loginOf(connection);
-  const pushed = await provider.startPush?.(trigger, login, config).catch((error) => {
+  // a plan that's polled rather than told at once: no push, when there's a polled twin
+  const pushed = await (instant || !polled ? provider.startPush?.(trigger, login, config) : Promise.resolve(null))?.catch((error) => {
     if (!polled) throw error;
     console.warn(`${trigger}: falling back to polling: ${(error as Error).message}`);
     return null;

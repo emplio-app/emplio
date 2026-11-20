@@ -39,6 +39,10 @@ export const cloud = {
   // a finished piece of work someone can use (a file made, an app action done, an agent's job done, a repeating task
   // set up): the cloud counts a business's first one
   onWork: (_workspaceId: string, _userId: string | null, _kind: "file" | "app" | "agent" | "automation") => {},
+  // the business's plan (starter, growth, pro), "trial" before it pays, "none" once a plan has ended, or null where
+  // nothing is sold: then nothing is
+  // held back by plan (an app's `plans`, integrations/own)
+  plan: async (_workspaceId: string): Promise<string | null> => null,
   // models a business may run: a Quality choice it's held to (with why, for Settings), or null for any
   models: {
     lock: async (_workspaceId: string): Promise<{ modelSet: string; why: string } | null> => null,
