@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.101 (2026-11-20)
+
+### What's new
+
+- Emplio plays a short chime when a reply or a job finishes while you're in another tab or app, so you know without checking. Turn it off in Settings, under Notifications.
+
+### For developers
+
+- `useDoneSound` (frontend/src/lib/done-sound.ts), used in the sidebar for the chat list and the jobs list: chimes when a chat stops `running` or a job leaves `working` while the page is hidden or unfocused (the same test `useLiveEvents` tells the server). Plays `public/sounds/done.mp3` ("New Notification 010" by Universfield, Pixabay license); at most one every 2 seconds; web only (not the Mac or phone app). The on/off choice is kept in localStorage (`emplio-done-sound`).
+
 ## 1.2.100 (2026-11-19)
 
 ### What's new

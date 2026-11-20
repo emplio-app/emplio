@@ -11,7 +11,7 @@ import {
   type SettingsResponse,
   type SetupStatus,
 } from "@emplio/shared";
-import { BrainIcon, Building2Icon, CalendarClockIcon, ChevronRightIcon, MessagesSquareIcon, MonitorIcon, SunMoonIcon, UserIcon } from "lucide-react";
+import { BellIcon, BrainIcon, Building2Icon, CalendarClockIcon, ChevronRightIcon, MessagesSquareIcon, MonitorIcon, SunMoonIcon, UserIcon } from "lucide-react";
 import { BusinessTab, YouTab } from "@/components/chat/settings-people";
 import { useRouter } from "next/navigation";
 import { SeePlans } from "@cloud/client";
@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { chime, doneSoundOn, setDoneSoundOn } from "@/lib/done-sound";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { setThemeChoice, themeChoice, type ThemeChoice } from "@/lib/theme";
@@ -239,6 +240,10 @@ export function SettingsDialog({
                 <SunMoonIcon />
                 Appearance
               </TabsTrigger>
+              <TabsTrigger value="notifications" className={TAB}>
+                <BellIcon />
+                Notifications
+              </TabsTrigger>
             </TabsList>
             {SETTING_SECTIONS.map((s) => (
               <TabsContent
@@ -338,6 +343,9 @@ export function SettingsDialog({
             <TabsContent value="appearance" className="min-h-0 overflow-y-auto p-4 sm:p-6">
               <Appearance />
             </TabsContent>
+            <TabsContent value="notifications" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+              <Notifications />
+            </TabsContent>
           </Tabs>
         )}
 
@@ -425,6 +433,40 @@ function Appearance() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+// Just for this device, like Appearance. The notifications themselves are asked for in a bar (web-notifications.tsx).
+function Notifications() {
+  const [sound, setSound] = useState(doneSoundOn);
+  return (
+    <>
+      <h3 className="font-medium">Notifications</h3>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Just for you, on this device.
+      </p>
+      <Card>
+        <CardContent className="grid gap-3 sm:grid-cols-[1fr_18rem] sm:gap-6">
+          <div className="grid content-start gap-1">
+            <Label htmlFor="setting-done-sound">Sound when work finishes</Label>
+            <p className="text-xs text-muted-foreground">
+              A short chime when a reply or job finishes while you&apos;re in another tab or app.
+            </p>
+          </div>
+          <div className="flex items-start sm:justify-end">
+            <Switch
+              id="setting-done-sound"
+              checked={sound}
+              onCheckedChange={(on) => {
+                setSound(on);
+                setDoneSoundOn(on);
+                if (on) chime();
+              }}
+            />
           </div>
         </CardContent>
       </Card>
