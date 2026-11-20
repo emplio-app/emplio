@@ -11,7 +11,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Cron } from "croner";
 import { generateId, type UIMessage } from "ai";
-import { and, desc, eq, inArray, isNull, lte, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AUTOMATION_PREFIX, type Automation, type AutomationRun } from "@emplio/shared";
 import { context, type Ctx } from "./auth";
@@ -20,7 +20,7 @@ import { chatLink, heldBack, post } from "./channels";
 import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
-import { automationRuns, automations, connections, conversations, users, workspaceMembers, workspaces } from "./db/schema";
+import { activity, automationRuns, automations, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
@@ -201,10 +201,32 @@ export const NOT_DONE = "[NOT DONE]";
 
 // What a run came to: failed on an error, on its own word (NOT_DONE) or when it ended without a word on what came
 // of it; otherwise done. said: what goes to the person's main chat (null: routine, nothing to say).
-export function outcome(error: string | null, words: string | null) {
-  const why = error ?? (!words?.trim() ? "it ended without saying what came of it" : words.includes(NOT_DONE) ? words.replace(NOT_DONE, "").trim() || "it didn't get the work done" : null);
+// problem: one it (or one of its agents, or the server for a command that couldn't run) reported during the run. A run
+// that reported one can't pass as routine: it fails, so the person hears and the background check-in sets out to fix it.
+export function outcome(error: string | null, words: string | null, problem: string | null = null) {
+  const why =
+    error ??
+    (!words?.trim()
+      ? "it ended without saying what came of it"
+      : words.includes(NOT_DONE)
+        ? words.replace(NOT_DONE, "").trim() || "it didn't get the work done"
+        : problem && words.includes(SILENT)
+          ? `it hit a problem and still reported nothing to do: ${problem}`
+          : null);
   if (why) return { status: "failed", error: why, said: `failed: ${why}` } as const;
   return { status: "done", error: null, said: words!.includes(SILENT) ? null : words!.trim() } as const;
+}
+
+// The latest problem reported in a run's chat or its agents' job chats since it started
+export async function problemIn(conversationId: string, since: Date) {
+  const chats = db.select({ id: jobs.chatId }).from(jobs).where(eq(jobs.conversationId, conversationId));
+  const [p] = await db
+    .select({ summary: activity.summary })
+    .from(activity)
+    .where(and(eq(activity.kind, "problem"), gte(activity.createdAt, since), or(eq(activity.conversationId, conversationId), inArray(activity.conversationId, chats))))
+    .orderBy(desc(activity.createdAt))
+    .limit(1);
+  return p?.summary ?? null;
 }
 
 // Runs whose reply ended with hand-offs still out: each ends with the reply their reports wake (woke, from jobs.ts).
@@ -259,7 +281,7 @@ async function fire(row: Row, reason: (typeof WHEN)[number], event?: unknown) {
   const finish = async (failure: string | null) => {
     await quiet(conversationId);
     // the markers anywhere count, even after a line ("No new notes this run. [SILENT]")
-    const { status, error, said } = outcome(failure, failure ? null : await lastWords(conversationId));
+    const { status, error, said } = outcome(failure, failure ? null : await lastWords(conversationId), await problemIn(conversationId, run!.startedAt));
     record({ workspaceId: row.workspaceId, userId: person.userId, conversationId, kind: "automation", summary: `Automation "${row.name}" ${error ? `failed: ${error}` : "finished"}` });
     await db.update(automationRuns).set({ status, error, finishedAt: new Date() }).where(eq(automationRuns.id, run!.id));
     // what came of it, in their main chat (and on their phone): always a failure, a success unless it was routine
