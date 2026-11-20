@@ -3,7 +3,7 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, keptNothing, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type JobSummary, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
@@ -868,9 +868,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   };
 
   const renderMessage = (message: UIMessage, i: number) => {
-    if (isHidden(message)) return null;
-    const isLast = i === messages.length - 1;
     const text = textOf(message);
+    // the run after a job's report that keeps reusable steps: a line for it, and nothing for its "kept nothing"
+    const keeping = text.startsWith(FROM_EMPLIO + KEEP_TOOLS_PREFIX);
+    if ((isHidden(message) && !keeping) || (message.role === "assistant" && keptNothing(text))) return null;
+    const isLast = i === messages.length - 1;
     // when it was said, where the chat picks up after a while or the AI wrote on its own (a check-in, a task's
     // result): the main chat is weeks long, and otherwise reads as one message
     const at = (m?: UIMessage) => (m?.metadata as Versions | undefined)?.createdAt;
@@ -894,6 +896,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       [RESUMED_PREFIX, "Picked up after a restart"],
       [AUTOMATION_PREFIX, "Automation started"],
       [TASK_PREFIX, "Task started"],
+      [FROM_EMPLIO + KEEP_TOOLS_PREFIX, "Saving steps to reuse next time"],
     ];
     // and a skill review's note of what it saved, as one line
     // which work: each report opens `<id> "<name>" (<agent>): <status>, N actions` (backend jobs.ts)
