@@ -2,6 +2,28 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.2.102 (2026-11-20)
+
+### What's new
+
+- Automations can use the steps Emplio saved for reuse. The ones that already exist are allowed once, on the same card as the automation's other actions; ones made later just run.
+- An automation run that hit a problem no longer passes as "nothing to do": it shows as failed and you're told, so Emplio's check-in can fix it.
+- Big Gmail searches come back in full instead of failing as too large.
+- After a job's report, its chat shows a "Saving steps to reuse next time" line instead of "Nothing to keep."
+- Agents keep seeing every step they can reuse after Emplio's daily tidy-up moves some to another file.
+- Listing your GitHub repositories works again, and a few confusing error messages are clearer.
+- On a Mac running several chats at once, Emplio's helper files can no longer be read half-written.
+
+### For developers
+
+- `sandbox.ts`: kernel.py, the emplio library and the emplio binary are uploaded under a per-reply suffix and moved into place in the install command (#295).
+- GitHub `list_repositories_for_the_authenticated_user` never sends `type` with `visibility`/`affiliation` (422); `emplio threads show` with no ref shows the latest job; store-skill errors with no message say what failed (#296).
+- `composio.ts` `fetchInPages`: `gmail.fetch_emails` past Composio's payload limit is re-asked in halving pages by `page_token` and joined; an email too big alone comes without its payload, with a `note` (#298).
+- Automations list saved tools (`tools.<area>.<name>`, risk changes/spends) named in the prompt or on the agent's list as actions; `approve` lets an automation's run use a saved tool it doesn't list (`listedActions`) (#299).
+- `toolDefined` (agents.ts) follows `from tools.<area> import` re-exports (3 hops, aliases) for agents' tool lists and `addTools` (#300).
+- `outcome`: a run with a problem reported in its chat or its jobs' chats that ends [SILENT] fails (#301).
+- `KEEP_TOOLS_PREFIX` / `keptNothing` (shared): the tool-saving nudge renders as a divider and its "Nothing to keep." reply is hidden (#302).
+
 ## 1.2.101 (2026-11-20)
 
 ### What's new
