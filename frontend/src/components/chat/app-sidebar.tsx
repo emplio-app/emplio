@@ -39,6 +39,7 @@ import { IntegrationsDialog } from "@/components/chat/integrations-dialog";
 import { WhatsNewDialog } from "@/components/chat/new-version";
 import { SettingsDialog } from "@/components/chat/settings-dialog";
 import { cn } from "@/lib/utils";
+import { useDoneSound } from "@/lib/done-sound";
 import { Logo } from "@/components/logo";
 import { useConfirm } from "@/components/confirm";
 import {
@@ -109,6 +110,9 @@ export function AppSidebar() {
     queryFn: () => api<JobSummary[]>("/jobs"),
     refetchInterval: (q) => (q.state.data?.some((j) => j.status === "working") ? 3000 : false),
   });
+  // a chime when a reply or a job finishes while they're away from Emplio
+  useDoneSound(conversations);
+  useDoneSound(jobs?.map((j) => ({ id: j.id, running: j.status === "working" })));
   // chats whose jobs are folded away
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const toggleFold = (id: string) =>

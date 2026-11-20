@@ -66,3 +66,22 @@ test("Emplio reads a command's result without its Allow cards", () => {
   expect(withoutCards({ exitCode: 0, output: "sent" })).toEqual({ exitCode: 0, output: "sent" });
   expect(withoutCards("text")).toBe("text");
 });
+
+test("in an automation's run, a saved tool it doesn't list (made later) runs; one it lists runs once allowed", async () => {
+  const s = {
+    workspaceId: crypto.randomUUID(),
+    user: { id: crypto.randomUUID(), name: "Asha" },
+    settings: { approvals: "ask" },
+    automation: true,
+    allowedActions: [],
+    listedActions: ["tools.leads.send_invite"],
+  } as unknown as Session;
+  const own = { title: "Saved tool", readOnly: false, appName: "Tools", run: async () => {} };
+  expect(await approve(s, "tools.leads.log_result", {}, { own })).toBeNull();
+  expect(await approve(s, "tools.leads.send_invite", {}, { own })).toContain("nobody is watching");
+  expect(await approve({ ...s, allowedActions: ["tools.leads.send_invite"] } as Session, "tools.leads.send_invite", {}, { own })).toBeNull();
+  // an app action it doesn't list is still refused
+  expect(await approve(s, "gmail.send_email", {}, { own: { ...own, appName: "Gmail" } })).toContain("nobody is watching");
+  // a run no automation started (a check-in) asks as before
+  expect(await approve({ ...s, listedActions: undefined } as Session, "tools.leads.log_result", {}, { own })).toContain("nobody is watching");
+});

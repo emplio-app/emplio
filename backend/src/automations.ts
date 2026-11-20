@@ -11,7 +11,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Cron } from "croner";
 import { generateId, type UIMessage } from "ai";
-import { and, desc, eq, inArray, isNull, lte, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { AUTOMATION_PREFIX, type Automation, type AutomationRun } from "@emplio/shared";
 import { context, type Ctx } from "./auth";
@@ -20,11 +20,12 @@ import { chatLink, heldBack, post } from "./channels";
 import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
-import { automationRuns, automations, connections, conversations, users, workspaceMembers, workspaces } from "./db/schema";
+import { activity, automationRuns, automations, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
 import { approve } from "./approvals";
+import { findAgent, findTools, onlyReads, toolsUsed } from "./agents";
 import type { Session } from "./sandbox";
 import { pollConfig, pollOnce } from "./integrations/polls";
 import * as githubHooks from "./integrations/own/github/triggers";
@@ -125,7 +126,7 @@ async function build(workspaceId: string, name: string, sha: string, old: Row | 
   if ("error" in parsed) return { ...base, when: "manual", enabled: false, prompt: text ?? "", actions: [], allowed: [], error: parsed.error! } satisfies typeof automations.$inferInsert;
   // what it does: the file's actions:, and any app action its prompt names that sends or changes something, so a
   // file that forgets to list one still gets it asked about rather than refused on every run
-  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId))])];
+  parsed.actions = [...new Set([...parsed.actions, ...(await changesNamed(parsed.prompt, workspaceId)), ...(await toolsThatChange(workspaceId, parsed, member))])];
   // what was allowed stays allowed while it's still listed and runs as the same person
   const allowed = old && old.userId === member?.id ? old.allowed.filter((a) => parsed.actions.includes(a)) : [];
   const values: typeof automations.$inferInsert = { ...base, ...parsed, allowed, error: null };
@@ -203,10 +204,32 @@ export const NOT_DONE = "[NOT DONE]";
 
 // What a run came to: failed on an error, on its own word (NOT_DONE) or when it ended without a word on what came
 // of it; otherwise done. said: what goes to the person's main chat (null: routine, nothing to say).
-export function outcome(error: string | null, words: string | null) {
-  const why = error ?? (!words?.trim() ? "it ended without saying what came of it" : words.includes(NOT_DONE) ? words.replace(NOT_DONE, "").trim() || "it didn't get the work done" : null);
+// problem: one it (or one of its agents, or the server for a command that couldn't run) reported during the run. A run
+// that reported one can't pass as routine: it fails, so the person hears and the background check-in sets out to fix it.
+export function outcome(error: string | null, words: string | null, problem: string | null = null) {
+  const why =
+    error ??
+    (!words?.trim()
+      ? "it ended without saying what came of it"
+      : words.includes(NOT_DONE)
+        ? words.replace(NOT_DONE, "").trim() || "it didn't get the work done"
+        : problem && words.includes(SILENT)
+          ? `it hit a problem and still reported nothing to do: ${problem}`
+          : null);
   if (why) return { status: "failed", error: why, said: `failed: ${why}` } as const;
   return { status: "done", error: null, said: words!.includes(SILENT) ? null : words!.trim() } as const;
+}
+
+// The latest problem reported in a run's chat or its agents' job chats since it started
+export async function problemIn(conversationId: string, since: Date) {
+  const chats = db.select({ id: jobs.chatId }).from(jobs).where(eq(jobs.conversationId, conversationId));
+  const [p] = await db
+    .select({ summary: activity.summary })
+    .from(activity)
+    .where(and(eq(activity.kind, "problem"), gte(activity.createdAt, since), or(eq(activity.conversationId, conversationId), inArray(activity.conversationId, chats))))
+    .orderBy(desc(activity.createdAt))
+    .limit(1);
+  return p?.summary ?? null;
 }
 
 // Runs whose reply ended with hand-offs still out: each ends with the reply their reports wake (woke, from jobs.ts).
@@ -261,7 +284,7 @@ async function fire(row: Row, reason: (typeof WHEN)[number], event?: unknown) {
   const finish = async (failure: string | null) => {
     await quiet(conversationId);
     // the markers anywhere count, even after a line ("No new notes this run. [SILENT]")
-    const { status, error, said } = outcome(failure, failure ? null : await lastWords(conversationId));
+    const { status, error, said } = outcome(failure, failure ? null : await lastWords(conversationId), await problemIn(conversationId, run!.startedAt));
     record({ workspaceId: row.workspaceId, userId: person.userId, conversationId, kind: "automation", summary: `Automation "${row.name}" ${error ? `failed: ${error}` : "finished"}` });
     await db.update(automationRuns).set({ status, error, finishedAt: new Date() }).where(eq(automationRuns.id, run!.id));
     // what came of it, in their main chat (and on their phone): always a failure, a success unless it was routine
@@ -330,9 +353,21 @@ async function changesNamed(prompt: string, workspaceId: string) {
   return found.flat();
 }
 
+// The saved tools it uses that change things or spend money, already kept when it's set up: the ones its prompt names
+// and its agent's. Listed like app actions, so they're allowed once for every run the same way. A tool made later
+// isn't on the list, and its runs use it anyway (approvals.ts).
+async function toolsThatChange(workspaceId: string, a: { prompt: string; agent: string | null }, member?: { id: string; role: string }) {
+  const who = { workspaceId, userId: member?.id, admin: member?.role === "owner" || member?.role === "admin" };
+  const agent = a.agent ? await findAgent(workspaceId, a.agent, who).catch(() => null) : null;
+  const names = [...toolsUsed([{ input: { code: a.prompt } }]), ...[...a.prompt.matchAll(/\btools\.([a-z][a-z0-9_]*\.[A-Za-z]\w*)/g)].map((m) => m[1]!), ...(agent?.tools ?? [])];
+  const tools = await findTools(who, [...new Set(names)]).catch(() => []);
+  return tools.filter((t) => !onlyReads(t)).map((t) => `tools.${t.name}`);
+}
+
 // An action as the person reads it: its title and app
 // ponytail: looked up on every list; cache like approvals.ts does if the Automations screen gets slow
 async function describe(action: string) {
+  if (action.startsWith("tools.")) return { title: `Saved tool ${action.slice("tools.".length)}`, app: "Tools", logo: undefined };
   const app = action.split(".")[0]!;
   const [detail, card] = await Promise.all([getAction(action).catch(() => null), connectCard(app).catch(() => null)]);
   return { title: detail?.title ?? action, app: card?.name ?? app, logo: card?.logo };
@@ -349,12 +384,13 @@ export async function allowActions(who: Pick<Ctx, "workspaceId" | "role">, name:
 // The actions a run in this chat may do unasked: the automation's allowed ones, if an automation started the chat
 export async function allowedIn(conversationId: string) {
   const [row] = await db
-    .select({ allowed: automations.allowed })
+    .select({ allowed: automations.allowed, actions: automations.actions })
     .from(automationRuns)
     .innerJoin(automations, eq(automations.id, automationRuns.automationId))
     .where(eq(automationRuns.conversationId, conversationId))
     .limit(1);
-  return row?.allowed ?? [];
+  // listed: everything it lists (undefined when no automation started the chat)
+  return { allowed: row?.allowed ?? [], listed: row?.actions };
 }
 
 // Saved from a chat: one card there asking to allow what it will do on every run, while the person is here to say so.

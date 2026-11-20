@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentMd, described, flags, parseAgent, skillsUsed, slugOf, toolsIn, toolsUsed } from "./agents";
+import { agentMd, described, flags, parseAgent, skillsUsed, slugOf, toolDefined, toolsIn, toolsUsed } from "./agents";
 
 test("AGENT.md round-trips", () => {
   const a = { name: "Supplier Finder", description: "Finds suppliers. Use for: cheaper vendor", skills: ["web-research", "price-compare"], tools: ["gmail.send", "suppliers.find_near"], level: "strong" as const, archived: false, instructions: "Near first, then wider." };
@@ -84,4 +84,21 @@ test("the skills a run read or wrote", () => {
     { input: { code: 'print(open("/work/company/skillset/other/SKILL.md").read())' } },
   ];
   expect(skillsUsed(parts).sort()).toEqual(["courier-booking", "returns", "website-login"]);
+});
+
+test("a tool moved to another file by a split is still found under its old name, with its real inputs", async () => {
+  const files: Record<string, string> = {
+    // what the daily cleanup leaves: the old file re-exports what moved
+    users: 'from tools.core import with_backoff\nfrom tools.accounts import (\n    latest,\n    since as signups_since,  # renamed\n)\n\n# risk: changes\ndef grant(ws, run):\n    """Grant a plan."""\n',
+    accounts: '# risk: reads\ndef since(ts, run):\n    """Accounts after a time."""\n\n# risk: reads\ndef latest(n, run):\n    """The newest accounts."""\n',
+    core: 'from tools.users import grant\n',
+  };
+  const read = async (area: string) => files[area] ?? null;
+  expect(await toolDefined(read, "users.grant")).toMatchObject({ name: "users.grant", signature: "grant(ws, run)" });
+  expect(await toolDefined(read, "users.latest")).toMatchObject({ name: "users.latest", signature: "latest(n, run)", risk: "only reads" });
+  expect(await toolDefined(read, "users.signups_since")).toMatchObject({ name: "users.signups_since", signature: "signups_since(ts, run)" });
+  // gone, or a loop of re-exports: not found, never stuck
+  expect(await toolDefined(read, "users.with_backoff")).toBeNull();
+  expect(await toolDefined(read, "core.grant")).toMatchObject({ signature: "grant(ws, run)" });
+  expect(await toolDefined(read, "users.nope")).toBeNull();
 });

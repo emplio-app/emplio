@@ -219,6 +219,11 @@ export const RESUMED_PREFIX = "[Resumed] ";
 export const LEARNED_PREFIX = "[Learned] ";
 // An automation's or task's instructions to the agent; shown as "Automation started" / "Task started".
 export const AUTOMATION_PREFIX = "[Automation] ";
+// A job's run after its report that keeps reusable steps as tools (backend jobs.ts SAVE_TOOL); shown as a line, and its
+// answer when it kept nothing isn't shown at all
+export const KEEP_TOOLS_PREFIX = "[Keep tools] ";
+export const NOTHING_TO_KEEP = "Nothing to keep.";
+export const keptNothing = (text: string) => /^\s*nothing to keep\.?\s*$/i.test(text);
 export const TASK_PREFIX = "[Task] ";
 
 export type SettingField = {

@@ -14,6 +14,38 @@ The newest version is at the top, and its heading is where Emplio's version numb
 - New `whatsapp/` service in Go with whatsmeow (pure-Go SQLite: the login in `whatsmeow.db`, chats and messages with FTS5 in `data.db`, one folder per account) behind a token-protected HTTP API. Nobody stays connected: accounts connect when used, drop after 10 idle minutes, and catch up every 4 hours. Sends: known chats only, 20/hour and 150/day. About 29 MB with an account linking (Baileys was about 126 MB idle).
 - `whatsapp_linked` own app: 30 actions (Periskope's WhatsApp-level API as the checklist; a separate `reply_to_message` because small models miss `send_message`'s `reply_to`), linking through the OAuth plumbing with our own QR page (`/whatsapp/link`), and a polled `new_message` trigger (`polls/whatsapp_linked.ts`, every 60 minutes, at least 60) over the new `list_recent_messages` action, plus 7 event triggers (edits, deletes, reactions, poll votes, group members, new chats, added to a group) over `list_events`. The server records those events, delivery ticks, reactions and poll votes (`events`, `reactions`, `votes` tables). Plans: new `OwnApp.plans` ({ triggers, instant }) checked by `triggerPlan` in `startTrigger` (refused with an upgrade message, polled, or pushed), `cloud.plan(workspaceId)` (null where nothing is sold: everything allowed), and an hourly `recheckPlans` that sets automations up again when a plan changes. Only `whatsapp_linked` sets it: Pro gets push through a watch on the WhatsApp server (`PUT /accounts/{id}/watch`: the account stays connected and posts each message and event, HMAC-signed, to `/webhooks/app/whatsapp_linked/<connection>`). Needs `WHATSAPP_URL` and `WHATSAPP_TOKEN`; Docker installs get a `whatsapp` service and the token from setup.sh.
 
+## 1.2.102 (2026-11-20)
+
+### What's new
+
+- Automations can use the steps Emplio saved for reuse. The ones that already exist are allowed once, on the same card as the automation's other actions; ones made later just run.
+- An automation run that hit a problem no longer passes as "nothing to do": it shows as failed and you're told, so Emplio's check-in can fix it.
+- Big Gmail searches come back in full instead of failing as too large.
+- After a job's report, its chat shows a "Saving steps to reuse next time" line instead of "Nothing to keep."
+- Agents keep seeing every step they can reuse after Emplio's daily tidy-up moves some to another file.
+- Listing your GitHub repositories works again, and a few confusing error messages are clearer.
+- On a Mac running several chats at once, Emplio's helper files can no longer be read half-written.
+
+### For developers
+
+- `sandbox.ts`: kernel.py, the emplio library and the emplio binary are uploaded under a per-reply suffix and moved into place in the install command (#295).
+- GitHub `list_repositories_for_the_authenticated_user` never sends `type` with `visibility`/`affiliation` (422); `emplio threads show` with no ref shows the latest job; store-skill errors with no message say what failed (#296).
+- `composio.ts` `fetchInPages`: `gmail.fetch_emails` past Composio's payload limit is re-asked in halving pages by `page_token` and joined; an email too big alone comes without its payload, with a `note` (#298).
+- Automations list saved tools (`tools.<area>.<name>`, risk changes/spends) named in the prompt or on the agent's list as actions; `approve` lets an automation's run use a saved tool it doesn't list (`listedActions`) (#299).
+- `toolDefined` (agents.ts) follows `from tools.<area> import` re-exports (3 hops, aliases) for agents' tool lists and `addTools` (#300).
+- `outcome`: a run with a problem reported in its chat or its jobs' chats that ends [SILENT] fails (#301).
+- `KEEP_TOOLS_PREFIX` / `keptNothing` (shared): the tool-saving nudge renders as a divider and its "Nothing to keep." reply is hidden (#302).
+
+## 1.2.101 (2026-11-20)
+
+### What's new
+
+- Emplio plays a short chime when a reply or a job finishes while you're in another tab or app, so you know without checking. Turn it off in Settings, under Notifications.
+
+### For developers
+
+- `useDoneSound` (frontend/src/lib/done-sound.ts), used in the sidebar for the chat list and the jobs list: chimes when a chat stops `running` or a job leaves `working` while the page is hidden or unfocused (the same test `useLiveEvents` tells the server). Plays `public/sounds/done.mp3` ("New Notification 010" by Universfield, Pixabay license); at most one every 2 seconds; web only (not the Mac or phone app). The on/off choice is kept in localStorage (`emplio-done-sound`).
+
 ## 1.2.100 (2026-11-19)
 
 ### What's new

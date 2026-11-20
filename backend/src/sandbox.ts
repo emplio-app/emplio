@@ -70,6 +70,8 @@ export type Session = {
   watched?: boolean;
   // in a run an automation started (or a job of one): the app actions it's allowed to do unasked (automations.ts)
   allowedActions?: string[];
+  // and everything that automation lists, allowed or not: a saved tool not on it was made later, and runs anyway
+  listedActions?: string[];
   // where the person is talking: "web", or a phone channel like "telegram" (no live browser beside the chat there)
   channel?: string;
   // one of the AI's tasks, run on its own (tasks.ts): nobody is watching either, but gated actions are refused
@@ -173,6 +175,12 @@ const KERNEL = readFileSync(new URL("./python/kernel.py", import.meta.url), "utf
 const LIBRARY = readFileSync(new URL("./python/py/emplio/__init__.py", import.meta.url), "utf8");
 const TOOLSET = readFileSync(new URL("./python/py/emplio/_toolset.py", import.meta.url), "utf8");
 const KERNEL_PATH = `${WORK}/tmp/.emplio/kernel.py`;
+// what the Python session runs, put on the computer at the start of every reply
+const PYTHON_FILES = [
+  [KERNEL_PATH, KERNEL],
+  [`${WORK}/tmp/.emplio/py/emplio/__init__.py`, LIBRARY],
+  [`${WORK}/tmp/.emplio/py/emplio/_toolset.py`, TOOLSET],
+] as const;
 // Python libraries installed on a person's own computer (the cloud one has them in its own Python)
 const PY_SITE = `${WORK}/tmp/.emplio/site`;
 
@@ -2584,25 +2592,26 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (!caughtUp.has(s)) {
       const quiet = !commandsOn(boxKey(s));
       if (quiet) for (const r of reposFor(s)) await catchUp(box, s, r), step(`catch-up ${r.dir}`);
-      // every reply, so boxes made before an emplio change get the current one
-      await upload(box, `${WORK}/tmp/emplio`, EZ);
+      // every reply, so boxes made before an emplio change get the current one. Each goes in under a name of this
+      // reply's own and is moved into place, so a Python session another chat starts meanwhile never reads half a file
+      // (a SyntaxError in kernel.py), and two replies starting at once don't install or remove each other's copy
+      const tag = `.${crypto.randomUUID().slice(0, 8)}`;
+      const python = codeMode() ? PYTHON_FILES.map(([path, text]) => [path.slice(WORK.length + 1), text] as const) : [];
+      await upload(box, `${WORK}/tmp/emplio${tag}`, EZ);
       await upload(box, POINTER_PATH, POINTER);
-      if (codeMode()) {
-        await upload(box, KERNEL_PATH, KERNEL);
-        await upload(box, `${WORK}/tmp/.emplio/py/emplio/__init__.py`, LIBRARY);
-        await upload(box, `${WORK}/tmp/.emplio/py/emplio/_toolset.py`, TOOLSET);
-      }
+      for (const [path, text] of python) await upload(box, `${WORK}/${path}${tag}`, text);
+      const moveIn = python.map(([path]) => ` && mv -f ${path}${tag} ${path}`).join("");
       step("emplio files");
       await mustExec(
         box,
         box.local
-          ? `mkdir -p ../bin && install -m 755 tmp/emplio ../bin/emplio && ln -sf emplio ../bin/ez && rm tmp/emplio${
+          ? `mkdir -p ../bin && install -m 755 tmp/emplio${tag} ../bin/emplio && ln -sf emplio ../bin/ez && rm tmp/emplio${tag}${moveIn}${
               // the app's own Python can't be changed: the libraries go in /work/tmp, which the Python session reads (kernel.py)
               codeMode()
                 ? ` && { PYTHONPATH=${PY_SITE} python3 -c "import openpyxl, pandas, docx, pptx" 2>/dev/null || (python3 -m pip install -q --target ${PY_SITE} openpyxl pandas python-docx python-pptx >/dev/null 2>&1 &); }`
                 : ""
             }`
-          : `sudo install -m 755 tmp/emplio /usr/local/bin/emplio && sudo ln -sf emplio /usr/local/bin/ez && rm tmp/emplio${
+          : `sudo install -m 755 tmp/emplio${tag} /usr/local/bin/emplio && sudo ln -sf emplio /usr/local/bin/ez && rm tmp/emplio${tag}${moveIn}${
               // ponytail: on first use, in the background; into the computer image (cloud scripts/sandbox-template.ts) once code mode is settled
               codeMode()
                 ? ` && { python3 -c "import openpyxl, pandas, docx, pptx" 2>/dev/null || ({ sudo pip install -q openpyxl pandas python-docx python-pptx || sudo pip install -q --break-system-packages openpyxl pandas python-docx python-pptx; } >/dev/null 2>&1 &); }`

@@ -768,8 +768,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     // a job Emplio told something in a run nobody watches runs unwatched too (jobs.ts); so does carrying that on
     // after a restart. What the person writes in its chat is watched.
     automation: (!!automation && automation !== TASK) || unwatchedJob,
-    // an automation's run, or a job of one: what that automation was allowed to do
-    allowedActions: await allowedIn(unwatchedJob ? job!.unattended! : id),
+    // an automation's run, or a job of one: what that automation was allowed to do, and all it lists
+    ...(await allowedIn(unwatchedJob ? job!.unattended! : id).then((a) => ({ allowedActions: a.allowed, listedActions: a.listed }))),
     task: automation === TASK,
     watched: !automation && !job && chat.kind !== "background",
     sitesShown: new Set(),

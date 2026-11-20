@@ -82,6 +82,30 @@ export function toolsIn(area: string, py: string): ToolInfo[] {
   return found;
 }
 
+// A tool as kept: in its area's file, or, moved out by a split (the daily cleanup's or an agent's), in the file that
+// area now imports it from, the way Python finds it, so agents' lists and automations keep naming it where it was.
+export async function toolDefined(read: (area: string) => Promise<string | null>, name: string, hops = 3): Promise<ToolInfo | null> {
+  const [area, fn] = name.split(".") as [string, string];
+  const py = await read(area);
+  if (!py) return null;
+  const tool = toolsIn(area, py).find((t) => t.name === name);
+  if (tool) return tool;
+  const from = hops > 0 ? importedFrom(py, fn) : null;
+  if (!from) return null;
+  const there = await toolDefined(read, `${from.area}.${from.name}`, hops - 1);
+  return there && { ...there, name, signature: fn + there.signature.slice(from.name.length) };
+}
+
+// Where a toolset file gets `name` from: its `from tools.<area> import a, b as c` lines, brackets over lines too
+export function importedFrom(py: string, name: string) {
+  for (const m of py.matchAll(/^from[ \t]+tools\.([a-z][a-z0-9_]*)[ \t]+import[ \t]+(?:\(([^)]*)\)|([^\n#]+))/gm))
+    for (const part of (m[2] ?? m[3]!).split(",")) {
+      const [orig, alias] = part.replace(/#[^\n]*/g, "").trim().split(/\s+as\s+/);
+      if (orig && (alias ?? orig) === name) return { area: m[1]!, name: orig };
+    }
+  return null;
+}
+
 // The docstring's first line, and what the tool gives back when that line doesn't say (its sentence about it, else
 // its -> annotation): the same as _toolset.described, so the next job needn't read the code to learn it
 const RETURNS = /\b(returns?|gives? back|yields?)\b/i;
@@ -95,11 +119,15 @@ export function described(doc: string, annotation?: string) {
 // An agent's tools as its thread sees them: what each takes, what it's for, what calling it does. A name whose tool
 // is gone (renamed, removed) is left out. Their own toolset first, then admins', then the company's, like Python finds them.
 export async function toolLines(who: { workspaceId: string } & Viewer, names: string[]) {
+  return (await findTools(who, names)).map((tool) => `- tools.${tool.name.split(".")[0]}.${tool.signature}: ${tool.description} [${tool.risk}]`);
+}
+
+// The named tools as kept, the way Python finds them (following a tool a split moved); a name whose tool is gone is left out
+export async function findTools(who: { workspaceId: string } & Viewer, names: string[]) {
   const repos = reposOf(who);
   const files = new Map<string, string>();
-  const lines: string[] = [];
-  for (const name of names) {
-    const area = name.split(".")[0]!;
+  const found: ToolInfo[] = [];
+  const read = async (area: string) => {
     if (!files.has(area)) {
       let text = "";
       for (const repo of repos) {
@@ -111,11 +139,16 @@ export async function toolLines(who: { workspaceId: string } & Viewer, names: st
       }
       files.set(area, text);
     }
-    const tool = toolsIn(area, files.get(area)!).find((t) => t.name === name);
-    if (tool) lines.push(`- tools.${area}.${tool.signature}: ${tool.description} [${tool.risk}]`);
+    return files.get(area)!;
+  };
+  for (const name of names) {
+    const tool = await toolDefined(read, name);
+    if (tool) found.push(tool);
   }
-  return lines;
+  return found;
 }
+
+export const onlyReads = (t: ToolInfo) => t.risk === RISKS.reads;
 
 // The tools a piece of work saved or used: "Saved tool gmail.send (" lines in its output, and `from tools.gmail
 // import send` or `emplio.tools.gmail.send(` in its code.
@@ -157,13 +190,14 @@ export async function addTools(w: { workspaceId: string; author: Author; admin?:
     if (!files.has(k)) files.set(k, readFile(w.workspaceId, repo, path).catch(() => null));
     return files.get(k)!;
   };
-  const kept = async (n: string) => {
+  const areaFile = async (area: string) => {
     for (const repo of repos) {
-      const py = await read(repo, `toolset/${n.split(".")[0]}.py`);
-      if (py) return toolsIn(n.split(".")[0]!, py).some((t) => t.name === n);
+      const py = await read(repo, `toolset/${area}.py`);
+      if (py) return py;
     }
-    return false;
+    return null;
   };
+  const kept = async (n: string) => !!(await toolDefined(areaFile, n));
   const skillKept = async (n: string) => {
     for (const repo of repos) if (await read(repo, `skillset/${n}/SKILL.md`)) return true;
     return false;
