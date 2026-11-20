@@ -73,6 +73,8 @@ test("a tool that changes things: Just do it runs it now, a live step just hears
   expect(await toolsCommand(s({}), args, runner)).toBe("Allowed, and tools.billing.grant_pro ran:\ngranted");
   expect(ran[0]).toContain('EMPLIO_TOOL_OK"] = "billing.grant_pro"');
   expect(ran[0]).toContain("from tools.billing import grant_pro");
+  // Emplio's own objects (emplio, sh) went by name apart from the inputs: replay gives them back
+  expect(ran[0]).toContain("from emplio._toolset import replay");
   expect(ran[0]).toContain("1234567890123456789");
   expect(await toolsCommand(s({ live: true }), args, runner)).toBe("allowed");
   // ponytail: the background refusal is approve()'s own (approvals.test.ts); git-proxy.test.ts fakes approve for every file

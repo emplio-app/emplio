@@ -459,11 +459,22 @@ def call(answer, code):
 
 check("a changing tool runs once allowed", call("allowed", "from tools.acct import grant, RAN; print(grant('a@b.c', months=2), RAN)"), "granted a@b.c 2 ['a@b.c']")
 asked = open(os.path.join(fake, "asked")).read()
-assert asked.startswith("tools allow acct.grant ") and '"kwargs": {"months": 2}' in asked and '"risk": "changes"' in asked, asked
+assert asked.startswith("tools allow acct.grant ") and '"kwargs": {"email": "a@b.c", "months": 2}' in asked and '"risk": "changes"' in asked, asked
 check("…and doesn't run when refused", call("error: Ashish said no", "from tools.acct import grant, RAN; grant('a@b.c'); print(RAN)"), "REFUSED error: Ashish said no")
 check("a reading tool never asks", (os.remove(os.path.join(fake, "asked")), call("error: no", "from tools.acct import note; print(note('x'))"))[1], "x")
 assert not os.path.exists(os.path.join(fake, "asked"))
-check("a date input can't go with the ask", call("allowed", "import datetime\n    from tools.acct import grant; grant(datetime.date(2026, 1, 1))"), "REFUSED tools.acct.grant needs the person's OK")
+check("a date input can't go with the ask, and says which", call("allowed", "import datetime\n    from tools.acct import grant; grant(datetime.date(2026, 1, 1))"), "REFUSED tools.acct.grant wasn't run: its input email is a date")
+# Emplio's own objects as inputs (emplio, run=sh): asked by name apart from the card's inputs, and back for the run
+open(os.path.join(WORK, "company", "toolset", "acct.py"), "a").write('\n\n# risk: changes\ndef login(emplio, site, run=None):\n    """Log in."""\n    return f"{emplio.__name__} {site} {run is emplio.sh}"\n')
+if os.path.exists(os.path.join(fake, "asked")):
+    os.remove(os.path.join(fake, "asked"))
+check("a tool taking emplio and sh asks and runs", call("allowed", "from tools.acct import login; print(login(emplio, 'apple', run=emplio.sh))"), "emplio apple True")
+asked = open(os.path.join(fake, "asked")).read()
+assert '"kwargs": {"site": "apple"}' in asked and '"given": {"emplio": "", "run": "sh"}' in asked, asked
+sent = asked.split("tools allow acct.login ", 1)[1].strip()
+a, k = T.replay(sent)
+check("…and the run after the OK gets them back", f"{a} {k['site']} {k['emplio'] is emplio} {k['run'] is emplio.sh}", "[] apple True True")
+check("something live as an input says which and what to do", call("allowed", "from tools.acct import login; login(emplio, object())"), "REFUSED tools.acct.login wasn't run: its input site is a object")
 open(os.path.join(WORK, "company", "toolset", "acct.py"), "a").write('\n\n# risk: changes\ndef grant_all(emails):\n    """All."""\n    import emplio\n    return [str(x) for x in emplio.map(grant, emails)]\n')
 if os.path.exists(os.path.join(fake, "asked")):
     os.remove(os.path.join(fake, "asked"))

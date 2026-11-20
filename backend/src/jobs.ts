@@ -627,8 +627,10 @@ A new job sees nothing of this chat: the brief must say everything it needs.
 export type JobsReply = { text: string; started?: string[] };
 
 // New work for a job that has one: running, it reads it after its current step; finished, it carries on with everything it knew.
-async function carryOn(who: Who, conversationId: string, w: Row, brief: string): Promise<JobsReply> {
+async function carryOn(who: Who, conversationId: string, w: Row, brief: string, level: Row["level"] = null): Promise<JobsReply> {
   if (!w.chatId) return { text: `error: ${short(w.id)} is from before jobs had their own chat and can't carry on; hand it off with --new` };
+  // --level on work for a job that carries on is for it from now on (jobReply reads it each reply): it was dropped
+  if (level && level !== w.level) await db.update(jobs).set({ level: (w.level = level) }).where(eq(jobs.id, w.id));
   const busy = live.has(w.id);
   if (busy) steer(w.chatId);
   else {
@@ -685,14 +687,14 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
         return names.length ? `Your agents: ${names.join(", ")}.` : "You have no agents yet.";
       };
       const make = 'Or make one: emplio hand "<Agent Name>" --description "<the kind of work it does>".';
+      const level = set.level === "strong" || set.level === "light" ? set.level : null;
+      if (set.level && !level) return { text: "error: --level is light or strong" };
       // a job id still works: that job carries on
       if (THREAD_ID.test(pick)) {
         const w = await find(who, conversationId, caller, pick);
         if (!w) return { text: `error: no job ${pick} here. Nothing was started: hand it to an agent by name (emplio hand <agent>). ${await yours()}` };
-        return carryOn(who, conversationId, w, brief);
+        return carryOn(who, conversationId, w, brief, level);
       }
-      const level = set.level === "strong" || set.level === "light" ? set.level : null;
-      if (set.level && !level) return { text: "error: --level is light or strong" };
       if (caller.depth >= MAX_DEPTH) return { text: "error: threads this deep can't hand off; do it yourself, or say in your report what's left" };
       // a plain copy: only for a thread splitting off part of its own work, which can't make agents
       const copy = pick.toLowerCase() === "myself";
@@ -713,7 +715,7 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       const current = agent
         ? (await db.select().from(jobs).where(and(mine(who, conversationId, caller), eq(jobs.agent, agent.slug), isNotNull(jobs.chatId))).orderBy(desc(jobs.createdAt)).limit(1))[0]
         : undefined;
-      if (current && !fresh) return carryOn(who, conversationId, current, brief);
+      if (current && !fresh) return carryOn(who, conversationId, current, brief, level);
       if (current && (current.status === "working" || current.status === "asking"))
         return { text: `error: ${agent!.name}'s job "${current.name}" is still ${current.status === "asking" ? "waiting on an answer" : "working"}. Nothing was started: send this to it without --new (it reads it after its current step), or wait for it to finish.` };
       const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).where(and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")));
