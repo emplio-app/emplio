@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, NOTHING_TO_KEEP, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
@@ -68,10 +68,13 @@ export const RESTARTED =
 // is one call the next time. Opening a skill or calling a tool doesn't count: a job that did part of the work inline
 // (a write by hand next to a skill that only reads) would never keep that part. Its answer is a line, not the report.
 export const SAVE_TOOL =
-  'Your report has gone to whoever asked; nobody is waiting on this. Now keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. Keep it simple: save the steps that worked as they are, in a few steps. Don\'t debug, retry or redo the work here, and don\'t build more than the job needed; a step that won\'t save cleanly is left out. If every step was already a call to a saved tool, or this was a true one-off, save nothing. Reply with one line: the tools you saved, or "Nothing to keep." Not the report again.';
+  KEEP_TOOLS_PREFIX +
+  'Your report has gone to whoever asked; nobody is waiting on this. Now keep what the next job like this would call as tools. For each such function: emplio.tools.save(<function>, area="<what it\'s about>", risk="reads" or "changes" or "spends"). Generic and modular: one step each, what changes (a name, a date, an id) as inputs, nothing fixed to this case; it brings the helpers it uses and tells you if something from this job should be an input. What you had to work out about one site or app (its address, the field that holds the answer) goes in a small tool of that site\'s area that calls the general one with those built in (reddit.username() calling sitelogin.account_name(url, field)), so the next job calls it with nothing to look up. A tool you used that failed: fix that same tool and save it again under its name, never a second one next to it. Keep it simple: save the steps that worked as they are, in a few steps. Don\'t debug, retry or redo the work here, and don\'t build more than the job needed; a step that won\'t save cleanly is left out. If every step was already a call to a saved tool, or this was a true one-off, save nothing. Reply with one line: the tools you saved, or "' +
+  NOTHING_TO_KEEP +
+  '" Not the report again.';
 // No nudge for this piece of work: it was the nudge's own run (also when a restart or the step limit cut that run in
 // two), or it ran SMALL_WORK commands or fewer. Each follow-up a job is given gets its own nudge.
-const NUDGED = /^\[From Emplio\] (Your report has gone|Before your report)/;
+const NUDGED = /^\[From Emplio\] (\[Keep tools\] )?(Your report has gone|Before your report)/;
 const SMALL_WORK = 2;
 export const nudged = (msgs: { role: string; parts: unknown }[]) => {
   const brief = (m: { role: string; parts: unknown }) =>
