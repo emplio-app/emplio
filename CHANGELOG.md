@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.1 (2026-11-20)
+
+### What's new
+
+- Emplio can do everything WhatsApp lets a linked device do. Reply privately to someone's group message in their own chat, send locations and contact cards, vote in polls, star messages, and fetch older messages from your phone. It can mute, archive, pin, mark unread and delete chats, turn on disappearing messages, and use your WhatsApp Business labels. In groups it can change the photo, approve or turn down join requests, check an invite link before joining, and run communities. It can look up anyone's profile (with a business's address and hours), block and unblock people, change your privacy settings, about text, name and photo, share your contact link, post a status, and follow, read and post in channels.
+- WhatsApp replies go faster: Emplio can answer people who wrote in the last day up to 60 times an hour (300 a day). Messages to chats that have been quiet stay at 20 an hour, so your number stays safe.
+
+### For developers
+
+- `whatsapp/more.go`: the rest of whatsmeow's client, as HTTP routes (`reply-private`, `location`, `contact-card`, `vote`, `star`, `history`, `chat/{mute,archive,pin,unread,delete,disappearing,label}`, `labels`, `label`, `message/label`, `group/{photo,requests,preview}`, `communities`, `community/{groups,link}`, `profile`, `blocked`, `block`, `privacy`, `me`, `contact-link`, `status`, `channels`, `channel`, `channel/{messages,follow,mute,react,post}`). Chat-list changes go through app-state patches; labels are kept in the account's kv from `LabelEdit`/`LabelAssociationChat` events (one full regular-patch fetch for older accounts); on-demand history leaves unread counts alone; `Store.Oldest` and `Store.DeleteChat`; group and profile photos become square JPEGs (stdlib). `create_group` takes a community, `update_group_settings` adds `only_admins_add` and `join_approval`, `send_file` sends .webp as a sticker.
+- Send limits: replies (the other side wrote in the chat in the last 24 h) get 60/hour and 300/day counting every send; other sends stay at 20/hour and 150/day counting only non-replies (`sends.reply`, `Store.HeardFrom`).
+- `whatsapp_linked`: 44 new actions (74 in all); COVERAGE.md lists them and what's still left out (calls, presence, others' statuses).
+
 ## 1.3.0 (2026-11-20)
 
 ### What's new

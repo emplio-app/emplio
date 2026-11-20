@@ -1,6 +1,6 @@
 # WhatsApp (linked) coverage
 
-Checked 2026-11-20 against whatsmeow (the WhatsApp Web protocol library the WhatsApp server uses, in Go), Periskope's
+Checked 2026-11-20 against whatsmeow (the WhatsApp Web protocol library the WhatsApp server uses, in Go; every `Client` method and `appstate` patch builder), Periskope's
 API and workflow triggers (docs.periskope.app, the closest product: linked WhatsApp numbers for teams), and Composio's
 WhatsApp toolkit, which is Meta's WhatsApp Business API, a different product (the `whatsapp` app).
 
@@ -19,14 +19,28 @@ shows as needing a reconnect.
 
 ## Actions (* asks first)
 
-- Account: get_account, check_numbers
+- Account: get_account, check_numbers, get_privacy_settings, update_privacy_setting*, update_profile* (about, name,
+  photo, default disappearing messages), get_my_contact_link* (wa.me/qr link; reset makes a new one)
 - Chats: list_chats, get_messages, get_message (reactions, ticks, poll votes, edited/deleted), list_recent_messages,
-  list_events, search_messages, list_contacts, get_group, download_media
-- Sending: send_message*, reply_to_message* (its own action: small models miss send_message's reply_to), send_file*,
-  send_poll*, forward_message*, react_to_message*, edit_message*, delete_message*, pin_message*, mark_as_read*
-- Groups: create_group*, add_group_members*, remove_group_members*, make_group_admins*, remove_group_admins*,
-  update_group_settings* (name, description, admins-only sending and editing, disappearing messages),
-  get_group_invite_link*, join_group*, leave_group*
+  list_events, search_messages, list_contacts, get_group, download_media, load_older_messages* (asks the phone for
+  history older than the link copy)
+- Sending: send_message*, reply_to_message* (its own action: small models miss send_message's reply_to),
+  reply_privately* (WhatsApp's "Reply privately": a group message answered in the sender's own chat, quoted),
+  send_file* (stickers from .webp), send_location*, send_contact*, send_poll*, vote_in_poll*, forward_message*,
+  react_to_message*, edit_message*, delete_message*, pin_message*, star_message*, mark_as_read*
+- Chat list: mute_chat*, archive_chat*, pin_chat*, mark_as_unread*, delete_chat*, set_disappearing_messages*
+- Labels (WhatsApp Business): list_labels, save_label*, delete_label*, label_chat*, label_message*. The server keeps
+  labels as the phone reports them; accounts linked before labels were added fetch them in full once.
+- Groups: create_group* (optionally inside a community), add_group_members*, remove_group_members*,
+  make_group_admins*, remove_group_admins*, update_group_settings* (name, description, admins-only sending, editing
+  and adding, join approval, disappearing messages), set_group_photo*, list_join_requests, approve_join_requests*,
+  reject_join_requests*, get_group_invite_link*, preview_group_link, join_group*, leave_group*
+- Communities: create_community*, list_community_groups, add_group_to_community*, remove_group_from_community*
+- People: get_profile (about, photo link, business name, address, email, website, categories, hours), list_blocked,
+  block_contact*, unblock_contact*
+- Status: post_status* (text, photo or video)
+- Channels: list_channels, get_channel, get_channel_messages, follow_channel*, unfollow_channel*, mute_channel*,
+  react_to_channel_post*, create_channel*, post_to_channel*
 
 ## Triggers
 
@@ -49,13 +63,19 @@ connected and posts to `/webhooks/app/whatsapp_linked/<connection>`). Self-hoste
   Business API (Composio `whatsapp`, MSG91, Plivo) does cold and bulk messaging properly.
 - Periskope's own CRM (tickets, tasks, labels, private notes, custom properties, scheduled messages, team access,
   AI agent, knowledge base): Emplio has its own automations, tasks and memory for these.
-- Status updates, channels (newsletters), calls, group pictures, profile name and picture, archiving and muting chats:
-  not asked for yet.
+- Calls (rejecting them as they ring) and presence (typing, online, last seen): both need the account connected the
+  moment it happens, and showing as online stops the phone's own notifications. Accounts connect only when used.
+- Reading other people's status updates: they'd fill the chats and set off new-message automations; status privacy
+  decides who sees ours.
+- Meta AI bots, business orders and catalogues, payments, passkeys, push-notification setup, joining with a private
+  invite message (as opposed to a link): not things a business runs through a linked device, or the library only
+  half-supports them.
 - Editing captions on photos and files (text messages only), and poll votes cast before the account was linked.
 - Full history: only what WhatsApp copies over when linking (recent months) and everything after.
 
 ## Limits (server-enforced)
 
-20 sends an hour and 150 a day per account (replies, reactions, edits, deletes, pins, polls, forwards, new groups and
-adds all count); only to chats it already has. The account stays connected for 10 minutes
+Replies to chats where the other side wrote in the last day: 60 sends an hour and 300 a day per account. Anything
+else (chats quiet for a day, new groups and adds, statuses, channel posts): 20 an hour and 150 a day. Reactions, edits,
+deletes, pins, polls and forwards count as sends; only to chats it already has. The account stays connected for 10 minutes
 after use, and catches up every 4 hours.

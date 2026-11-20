@@ -390,11 +390,19 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 		if err := a.Ready(false); err != nil {
 			return nil, err
 		}
-		g, err := a.client().CreateGroup(bg, whatsmeow.ReqCreateGroup{Name: name, Participants: people})
+		req := whatsmeow.ReqCreateGroup{Name: name, Participants: people}
+		if b["community"] != nil {
+			parent, err := a.group(b["community"])
+			if err != nil {
+				return nil, err
+			}
+			req.LinkedParentJID = parent
+		}
+		g, err := a.client().CreateGroup(bg, req)
 		if err != nil {
 			return nil, waRefused("couldn't make the group", err)
 		}
-		a.store.NoteSend()
+		a.store.NoteSend(false)
 		a.store.Chat(g.JID.String(), g.Name, time.Now().UnixMilli(), -1)
 		return map[string]any{"chat": g.JID.String(), "name": g.Name, "members": a.outcomes(g.Participants)}, nil
 	})
@@ -422,7 +430,7 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 			return nil, waRefused("WhatsApp didn't make the change", err)
 		}
 		if change == whatsmeow.ParticipantChangeAdd {
-			a.store.NoteSend()
+			a.store.NoteSend(false)
 		}
 		return map[string]any{"chat": jid.String(), "members": a.outcomes(res)}, nil
 	})
@@ -467,8 +475,24 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 			}
 			changed = append(changed, "disappearing")
 		}
+		if v, ok := b["join_approval"].(bool); ok {
+			if err := cli.SetGroupJoinApprovalMode(bg, jid, v); err != nil {
+				return nil, waRefused("couldn't change join approval", err)
+			}
+			changed = append(changed, "join_approval")
+		}
+		if v, ok := b["only_admins_add"].(bool); ok {
+			mode := types.GroupMemberAddModeAllMember
+			if v {
+				mode = types.GroupMemberAddModeAdmin
+			}
+			if err := cli.SetGroupMemberAddMode(bg, jid, mode); err != nil {
+				return nil, waRefused("couldn't change who can add people", err)
+			}
+			changed = append(changed, "only_admins_add")
+		}
 		if len(changed) == 0 {
-			return nil, refuse(400, "nothing to change: give name, description, only_admins_send, only_admins_edit or disappearing")
+			return nil, refuse(400, "nothing to change: give name, description, only_admins_send, only_admins_edit, only_admins_add, join_approval or disappearing")
 		}
 		return map[string]any{"ok": true, "changed": changed}, nil
 	})

@@ -558,18 +558,14 @@ func (s *Server) Routes() *http.ServeMux {
 		if err := a.Ready(false); err != nil {
 			return nil, err
 		}
-		kind := whatsmeow.MediaDocument
-		switch {
-		case strings.HasPrefix(typ, "image/") && !strings.Contains(typ, "svg"):
-			kind = whatsmeow.MediaImage
-		case strings.HasPrefix(typ, "video/"):
-			kind = whatsmeow.MediaVideo
-		case strings.HasPrefix(typ, "audio/"):
-			kind = whatsmeow.MediaAudio
-		}
+		kind := kindOf(typ)
+		sticker := b["sticker"] == true && typ == "image/webp"
 		up, err := a.client().Upload(bg, data, kind)
 		if err != nil {
 			return nil, refuse(502, "couldn't upload the file to WhatsApp: %v", err)
+		}
+		if sticker {
+			return a.Send(chat, &waE2E.Message{StickerMessage: &waE2E.StickerMessage{URL: &up.URL, DirectPath: &up.DirectPath, MediaKey: up.MediaKey, FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256, FileLength: &up.FileLength, Mimetype: &typ}})
 		}
 		return a.Send(chat, fileMessage(kind, up, typ, name, caption))
 	}))
@@ -637,6 +633,7 @@ func (s *Server) Routes() *http.ServeMux {
 		return map[string]any{"ok": true, "marked": marked}, nil
 	}))
 	s.manageRoutes(mux)
+	s.moreRoutes(mux)
 	return mux
 }
 

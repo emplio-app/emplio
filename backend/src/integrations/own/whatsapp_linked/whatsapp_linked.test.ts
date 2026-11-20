@@ -74,11 +74,14 @@ test("the sign-in goes to our own QR page, and only a code that page made finish
 });
 
 test("reads run unasked, writes ask", async () => {
-  for (const a of ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "download_media", "get_message", "check_numbers", "list_events"])
+  const reads = ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "download_media", "get_message", "check_numbers", "list_events"];
+  const moreReads = ["list_labels", "list_join_requests", "preview_group_link", "list_community_groups", "get_profile", "list_blocked", "get_privacy_settings", "list_channels", "get_channel", "get_channel_messages"];
+  for (const a of [...reads, ...moreReads])
     expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBe(true);
   const writes = ["send_message", "send_file", "react_to_message", "mark_as_read", "reply_to_message", "edit_message", "delete_message", "forward_message", "pin_message", "send_poll"];
   const groups = ["create_group", "add_group_members", "remove_group_members", "make_group_admins", "remove_group_admins", "update_group_settings", "get_group_invite_link", "join_group", "leave_group"];
-  for (const a of [...writes, ...groups]) expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBeFalsy();
+  const more = ["reply_privately", "send_location", "send_contact", "vote_in_poll", "star_message", "load_older_messages", "mute_chat", "archive_chat", "pin_chat", "mark_as_unread", "delete_chat", "set_disappearing_messages", "save_label", "delete_label", "label_chat", "label_message", "set_group_photo", "approve_join_requests", "reject_join_requests", "create_community", "add_group_to_community", "remove_group_from_community", "block_contact", "unblock_contact", "update_privacy_setting", "update_profile", "get_my_contact_link", "post_status", "follow_channel", "unfollow_channel", "mute_channel", "react_to_channel_post", "create_channel", "post_to_channel"];
+  for (const a of [...writes, ...groups, ...more]) expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBeFalsy();
 });
 
 test("reads and sends go to the account on the WhatsApp server", async () => {
@@ -115,6 +118,34 @@ test("files go out and come back as files", async () => {
   const f = (await own.run("whatsapp_linked.download_media", { chat: "Sarah", message: "M1" }, login, "o")) as AppFile;
   expect(f).toBeInstanceOf(AppFile);
   expect([f.name, f.mimetype, f.bytes.length]).toEqual(["voice note.ogg", "audio/ogg", 2]);
+});
+
+test("private replies, chat housekeeping, labels, profiles, status and channels go to their own routes", async () => {
+  const calls = stub(() => json({ ok: true }));
+  const sent = async (action: string, input: Record<string, unknown>) => {
+    await own.run(`whatsapp_linked.${action}`, input, login, "o");
+    const c = calls.at(-1)!;
+    return { method: c.method, path: c.url.replace(`http://wa.test:4200/accounts/${ACCT}`, ""), body: c.body ? JSON.parse(c.body) : null };
+  };
+  expect(await sent("reply_privately", { chat: "Northwind team", message: "M1", text: "Sent you the invoice" })).toEqual({
+    method: "POST",
+    path: "/reply-private",
+    body: { chat: "Northwind team", message: "M1", text: "Sent you the invoice" },
+  });
+  expect((await sent("send_location", { to: "Sarah", latitude: 51.5, longitude: -0.12, name: "Northwind" })).path).toBe("/location");
+  expect((await sent("mute_chat", { chat: "Sarah" })).body).toEqual({ chat: "Sarah", mute: true, for: "always" });
+  expect((await sent("delete_label", { label: "Paid" })).body).toEqual({ label: "Paid", delete: true });
+  expect((await sent("unblock_contact", { who: "+15550001111" })).body).toEqual({ who: "+15550001111", block: false });
+  expect((await sent("approve_join_requests", { chat: "Northwind team", all: true })).body).toEqual({ chat: "Northwind team", all: true, action: "approve" });
+  expect(await sent("get_profile", { who: "+15550001111" })).toEqual({ method: "GET", path: "/profile?who=%2B15550001111", body: null });
+  expect((await sent("get_channel_messages", { channel: "123@newsletter" })).path).toBe("/channel/messages?channel=123%40newsletter&limit=20");
+  const photo = new AppFile("logo.png", "image/png", new Uint8Array([1, 2, 3]));
+  expect((await sent("update_profile", { about: "Open 9 to 5", photo })).body).toEqual({ about: "Open 9 to 5", name: "logo.png", type: "image/png", data: "AQID" });
+  expect((await sent("set_group_photo", { chat: "Northwind team" })).body).toEqual({ chat: "Northwind team" });
+  expect((await sent("post_status", { text: "We're open on Sunday" })).body).toEqual({ text: "We're open on Sunday" });
+  expect((await sent("post_to_channel", { channel: "123@newsletter", text: "New stock", file: photo })).body).toEqual({ channel: "123@newsletter", text: "New stock", name: "logo.png", type: "image/png", data: "AQID" });
+  await expect(own.run("whatsapp_linked.post_status", { file: "/work/x.png" }, login, "o")).rejects.toBeInstanceOf(AppsError);
+  await expect(own.run("whatsapp_linked.send_location", { to: "Sarah", latitude: 120, longitude: 0 }, login, "o")).rejects.toThrow();
 });
 
 const msg = { id: "M1", chat: "15550001111@s.whatsapp.net", chat_name: "Sarah Lee", is_group: false, from_me: false, from: "+15550001111", from_name: "Sarah Lee", time: "2026-11-19T10:00:00Z", type: "conversation", text: "Is my order ready?", has_media: false };
