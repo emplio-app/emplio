@@ -27,6 +27,18 @@ export async function transcribe(audio: Blob, seconds: number): Promise<string> 
 
 type State = "idle" | "recording" | "transcribing";
 
+// A reply note (quote.tsx) the cursor was in when recording started: the words go there, not the main box. It's a
+// React-controlled field, so the value is set the way typing sets it, and its own onChange picks it up.
+const noteInFocus = () => {
+  const el = document.activeElement;
+  return el instanceof HTMLTextAreaElement && el.dataset.quoteNote !== undefined ? el : null;
+};
+function typeInto(el: HTMLTextAreaElement, text: string) {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, [el.value.trim(), text].filter(Boolean).join(" "));
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.focus();
+}
+
 export function VoiceInput({ onText }: { onText: (text: string) => void }) {
   const [state, setState] = useState<State>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -65,6 +77,7 @@ export function VoiceInput({ onText }: { onText: (text: string) => void }) {
       setError("Microphone access was blocked");
       return;
     }
+    const note = noteInFocus();
     const pieces: Promise<string>[] = [];
     let stopping = false;
     let rotate: ReturnType<typeof setTimeout>;
@@ -101,7 +114,8 @@ export function VoiceInput({ onText }: { onText: (text: string) => void }) {
       stopRef.current = null;
       setState("transcribing");
       const text = (await Promise.all(pieces)).filter(Boolean).join(" ");
-      if (text) onText(text);
+      if (text && note?.isConnected) typeInto(note, text);
+      else if (text) onText(text);
       else setError((e) => e ?? "Didn't catch anything, try again");
       setState("idle");
     };

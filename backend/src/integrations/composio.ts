@@ -50,7 +50,7 @@ const uploadFiles = (input: unknown, action: string) =>
     return { name: v.name, mimetype: v.mimetype, s3key: up.key };
   });
 // ...and hand files back the same way (an email attachment): a link to its storage, fetched here.
-const MAX_FILE = 25 * 1024 * 1024;
+const MAX_FILE = 100 * 1024 * 1024;
 const downloadFiles = (output: unknown) =>
   mapDeep(output, async (v) => {
     const f = v as { name?: unknown; mimetype?: unknown; s3url?: unknown } | null;
@@ -58,7 +58,7 @@ const downloadFiles = (output: unknown) =>
     const res = await fetch(f.s3url);
     if (!res.ok) throw new AppsError(`downloading ${f.name} failed (HTTP ${res.status})`);
     const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length > MAX_FILE) throw new AppsError(`${f.name} is over 25 MB`);
+    if (bytes.length > MAX_FILE) throw new AppsError(`${f.name} is over 100 MB`);
     return new AppFile(f.name, typeof f.mimetype === "string" ? f.mimetype : "application/octet-stream", bytes);
   });
 // ponytail: untagged tools fall back to the verb in their name (GMAIL_SEARCH_PEOPLE, NOTION_LIST_...)

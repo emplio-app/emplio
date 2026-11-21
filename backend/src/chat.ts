@@ -1,4 +1,5 @@
 import {
+  APICallError,
   convertToModelMessages,
   generateId,
   generateText,
@@ -1140,7 +1141,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     generateMessageId: generateId,
     onError: (error) => {
       log.error(error, "chat stream failed");
-      return "Something went wrong while generating a reply.";
+      return replyError(error);
     },
     // the chat stops showing as working only once the whole reply is saved, so a reload then shows all of it
     onEnd: ({ responseMessage, outcome }) => {
@@ -1255,6 +1256,26 @@ export function steer(conversationId: string) {
   if (!running.has(conversationId)) return false;
   holdFor(conversationId, generateId());
   return true;
+}
+
+// What the card under a failed reply says: the common reasons in plain words (never the provider's raw text, which
+// can carry ids and internals), else the general line.
+export function replyError(error: unknown) {
+  const status = APICallError.isInstance(error) ? error.statusCode : undefined;
+  const text = error instanceof Error ? `${error.message} ${APICallError.isInstance(error) ? (error.responseBody ?? "") : ""}` : String(error);
+  if (/context length|context window|maximum context|too many tokens|prompt is too long|input is too long/i.test(text))
+    return "This chat got too long for the model. Start a new chat, or pick a model that takes more in Settings.";
+  if (status === 429 || /rate.?limit|too many requests/i.test(text)) return "The AI model is busy right now. Try again in a minute.";
+  if (status === 402 || /insufficient (credits|balance)|out of credits/i.test(text))
+    return "The AI provider account is out of credit. If you added your own OpenRouter key in Settings, top it up there.";
+  // before the key check: OpenRouter refuses a model its account has blocked with a 403 ("Model … is banned")
+  if (status === 404 || /no endpoints found|model .*not (found|available)|is not a valid model|is banned/i.test(text))
+    return "This model isn't available right now. Pick another one in Settings.";
+  if (status === 401 || status === 403 || /invalid api key|no auth credentials|user not found/i.test(text))
+    return "The AI provider turned the request down. If you added your own OpenRouter key in Settings, check it's still valid.";
+  if ((status && status >= 500) || /timed? ?out|ETIMEDOUT|ECONNRESET|overloaded|upstream/i.test(text))
+    return "The AI provider had a problem on its side. Try again in a moment.";
+  return "Something went wrong while generating a reply.";
 }
 
 export async function chatRoutes(app: FastifyInstance) {

@@ -82,13 +82,15 @@ const read = async (path: string, b: Blob): Promise<Out> => (isBinary(path) ? { 
 
 // The entries of a zip we want, unzipped with the browser's own inflate. Reads the central directory at the end,
 // then only the wanted entries' bytes.
-// ponytail: no ZIP64; a zip over 4 GB says nothing found, and they can unzip it and pick the folder instead
+// ponytail: no ZIP64; a zip that needs it (over 4 GB, or 65,535 entries) says so, and they unzip it and pick what's inside
 async function unzip(file: File, keep: (path: string, size: number) => boolean): Promise<Out[]> {
   const tail = new DataView(await file.slice(Math.max(0, file.size - 65_557)).arrayBuffer());
   let end = -1;
   for (let i = tail.byteLength - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { end = i; break; }
   if (end < 0) return [];
   const count = tail.getUint16(end + 10, true);
+  if (file.size >= 0xffffffff || count === 0xffff || tail.getUint32(end + 16, true) === 0xffffffff)
+    throw new Error(`${file.name} is too big to open here (over 4 GB). Unzip it on your computer, then pick the files inside.`);
   const dir = new DataView(await file.slice(tail.getUint32(end + 16, true), tail.getUint32(end + 16, true) + tail.getUint32(end + 12, true)).arrayBuffer());
   const out: Out[] = [];
   for (let i = 0, at = 0; i < count; i++) {

@@ -1,7 +1,7 @@
 import type { Approval } from "@emplio/shared";
 import { expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
-import { approve, decide, outcome, waitingIn } from "./approvals";
+import { approve, decide, moveOn, outcome, waitingIn } from "./approvals";
 import { withoutCards } from "./chat";
 import { db } from "./db";
 import { approvals, conversations, jobs, users, workspaces } from "./db/schema";
@@ -84,4 +84,27 @@ test("in an automation's run, a saved tool it doesn't list (made later) runs; on
   expect(await approve(s, "gmail.send_email", {}, { own: { ...own, appName: "Gmail" } })).toContain("nobody is watching");
   // a run no automation started (a check-in) asks as before
   expect(await approve({ ...s, listedActions: undefined } as Session, "tools.leads.log_result", {}, { own })).toContain("nobody is watching");
+});
+
+test("a message in the chat a job's card is shown in skips that card too, not only one in the job's own chat", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `approvals-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `approvals-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const [main, jobChat] = [crypto.randomUUID(), crypto.randomUUID()];
+    await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: jobChat, ...who, title: "job", kind: "job" }]);
+    await db.insert(jobs).values({ ...who, conversationId: main, chatId: jobChat, depth: 1, name: "send it" });
+    const shown: Approval[] = [];
+    const s = { conversationId: jobChat, workspaceId: ws!.id, user: { id: user!.id, name: "Asha" }, settings: { approvals: "ask" }, notify: (a: Approval) => shown.push(a) } as unknown as Session;
+    const own = { title: "Send the invoice", readOnly: false, appName: "Mail", alwaysAsk: true, run: async () => {} };
+    const asked = approve(s, "mail.send", { to: "priya@acme.com" }, { own });
+    while (!shown.length) await new Promise((r) => setTimeout(r, 10));
+    expect(moveOn(crypto.randomUUID()).ids).toEqual([]); // another chat leaves it alone
+    expect(moveOn(main)).toEqual({ ids: [shown[0]!.id], waited: true });
+    expect(await asked).toContain("sent a message instead");
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
 });
