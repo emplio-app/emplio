@@ -8,13 +8,15 @@ import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CornerDownLeftIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
-  FolderUpIcon,
+  FileIcon,
+  FolderIcon,
   PaperclipIcon,
   PencilIcon,
   RefreshCcwIcon,
@@ -68,7 +70,8 @@ import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
-import { zipFolder } from "@/lib/zip-folder";
+import { readDropped, zipFolder } from "@/lib/zip-folder";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 // The server words the common failures for people (chat.ts replyError); anything else (a browser's "Failed to
@@ -690,8 +693,17 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       e.stopPropagation();
       dragDepth.current = 0;
       setDragging(false);
-      attachments.add([...e.dataTransfer.files]);
+      // a dropped folder goes as one zip, like a picked one; grab the entries now, they're gone after the first await
+      const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry());
+      const plain = [...e.dataTransfer.files].filter((_, i) => !entries[i]?.isDirectory);
+      if (plain.length) attachments.add(plain);
+      for (const dir of entries.filter((x) => x?.isDirectory)) void addFolder(readDropped(dir!));
     },
+  };
+  const addFolder = async (picked: Promise<{ file: File; path: string }[]>) => {
+    const zip = await zipFolder(await picked, 100 * 1024 * 1024);
+    if (zip) attachments.add([zip]);
+    else toast.error("That folder is empty or over 100 MB");
   };
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -1151,7 +1163,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     <PromptInput
       data-tip="chat"
       onSubmit={({ text }) => send(text)}
-      className="rounded-2xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
+      className="rounded-3xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:rounded-3xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
     >
       {(attachments.items.length > 0 || quotes.length > 0) && (
         <PromptInputHeader className="p-0">
@@ -1159,7 +1171,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           {attachments.items.length > 0 && <AttachmentTray items={attachments.items} onRemove={attachments.remove} onRetry={attachments.retry} />}
         </PromptInputHeader>
       )}
-      <div className="relative w-full">
+      {/* one line, send at its end; the tools sit under the box */}
+      <div className="flex w-full items-end">
+      <div className="relative min-w-0 flex-1">
         <HighlightLayer text={input} marks={marks} />
         <PromptInputTextarea
           value={input}
@@ -1179,12 +1193,26 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className="px-4 pt-4 text-[0.9rem]"
+          className="min-h-0 px-5 py-3.5 text-[0.9rem]"
         />
       </div>
+        {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
+        {/* while a reply streams: stop when the box is empty, queue when there's something to send */}
+        <PromptInputSubmit
+          status={busy && !canSend ? status : undefined}
+          onStop={stopAll}
+          aria-disabled={!busy && !canSend}
+          aria-label={busy ? (canSend ? "Queue message" : "Stop") : "Send"}
+          variant={busy && !canSend ? "default" : "ghost"}
+          className="m-1.5 size-9 rounded-full text-muted-foreground hover:text-foreground aria-disabled:opacity-40"
+        >
+          {busy && !canSend ? undefined : <CornerDownLeftIcon className="size-4.5" />}
+        </PromptInputSubmit>
+      </div>
+    </PromptInput>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
           buttons out from under the finger before it lifts, and the tap is lost. */}
-      <PromptInputFooter className="px-3 pb-3" onMouseDown={(e) => e.preventDefault()}>
+      <div className="mt-1.5 flex items-center justify-between gap-2 px-2" onMouseDown={(e) => e.preventDefault()}>
         <PromptInputTools>
           <input
             ref={fileInput}
@@ -1196,57 +1224,49 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               e.currentTarget.value = "";
             }}
           />
+          {/* touch screens can't pick folders, so there the clip opens files straight away */}
           <PromptInputButton
-            tooltip="Attach images, PDFs or text files"
             aria-label="Attach files"
             onClick={() => fileInput.current?.click()}
-            className="rounded-full text-muted-foreground"
+            className="rounded-full text-muted-foreground pointer-fine:hidden"
           >
             <PaperclipIcon className="size-4" />
           </PromptInputButton>
-          {/* a whole folder goes as one zip with its sub-folders kept. Not on touch screens: phones can't pick folders */}
+          {/* a browser picker takes files or a folder, never both, so the one clip asks which */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<PromptInputButton aria-label="Attach" className="hidden rounded-full text-muted-foreground pointer-fine:inline-flex" />}
+            >
+              <PaperclipIcon className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start">
+              <DropdownMenuItem onClick={() => fileInput.current?.click()}>
+                <FileIcon /> Files
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => folderInput.current?.click()}>
+                <FolderIcon /> Folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* a whole folder goes as one zip with its sub-folders kept */}
           <input
             ref={folderInput}
             type="file"
             className="hidden"
             {...{ webkitdirectory: "" }}
             onChange={async (e) => {
-              const picked = [...(e.currentTarget.files ?? [])];
+              const picked = [...(e.currentTarget.files ?? [])].map((file) => ({ file, path: file.webkitRelativePath || file.name }));
               e.currentTarget.value = "";
-              if (!picked.length) return;
-              const zip = await zipFolder(picked, 100 * 1024 * 1024);
-              if (zip) attachments.add([zip]);
-              else toast.error("That folder is empty or over 100 MB");
+              if (picked.length) await addFolder(Promise.resolve(picked));
             }}
           />
-          <PromptInputButton
-            tooltip="Attach a folder"
-            aria-label="Attach a folder"
-            onClick={() => folderInput.current?.click()}
-            className="hidden rounded-full text-muted-foreground pointer-fine:inline-flex"
-          >
-            <FolderUpIcon className="size-4" />
-          </PromptInputButton>
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
-          {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
-          <span className="hidden pl-1 text-xs text-muted-foreground sm:pointer-fine:inline">
-            <kbd className="font-sans">Enter</kbd> to send ·{" "}
-            <kbd className="font-sans">Shift + Enter</kbd> for a new line
-          </span>
         </PromptInputTools>
-        {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
-        {/* while a reply streams: stop when the box is empty, queue when there's something to send */}
-        <PromptInputSubmit
-          status={busy && !canSend ? status : undefined}
-          onStop={stopAll}
-          aria-disabled={!busy && !canSend}
-          aria-label={busy ? (canSend ? "Queue message" : "Stop") : "Send"}
-          className="size-8 rounded-full aria-disabled:opacity-40"
-        >
-          {busy && !canSend ? undefined : <ArrowUpIcon className="size-4" />}
-        </PromptInputSubmit>
-      </PromptInputFooter>
-    </PromptInput>
+        {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
+        <span className="hidden text-xs text-muted-foreground sm:pointer-fine:inline">
+          <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
+        </span>
+      </div>
     </div>
   );
 
