@@ -18,17 +18,18 @@ const crc32 = (bytes: Uint8Array) => {
 };
 
 // null when what's left of the folder is over `max` bytes (nothing is read then) or empty
-export async function zipFolder(picked: File[], max: number): Promise<File | null> {
-  const files = picked.filter((f) => !JUNK.test(f.webkitRelativePath || f.name));
-  if (!files.length || files.reduce((s, f) => s + f.size, 0) > max) return null;
+// each file with its path inside the folder ("Photos/2024/a.jpg"): webkitRelativePath when picked, the entry's path when dropped
+export async function zipFolder(picked: { file: File; path: string }[], max: number): Promise<File | null> {
+  const files = picked.filter((f) => !JUNK.test(f.path));
+  if (!files.length || files.reduce((s, f) => s + f.file.size, 0) > max) return null;
   const enc = new TextEncoder();
   const body: BlobPart[] = [];
   const dir: BlobPart[] = [];
   let at = 0;
   let dirSize = 0;
   for (const f of files) {
-    const name = enc.encode(f.webkitRelativePath || f.name);
-    const data = new Uint8Array(await f.arrayBuffer());
+    const name = enc.encode(f.path);
+    const data = new Uint8Array(await f.file.arrayBuffer());
     const crc = crc32(data);
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);
@@ -59,6 +60,24 @@ export async function zipFolder(picked: File[], max: number): Promise<File | nul
   end.setUint16(10, files.length, true);
   end.setUint32(12, dirSize, true);
   end.setUint32(16, at, true);
-  const root = (files[0]!.webkitRelativePath || "folder").split("/")[0];
+  const root = files[0]!.path.split("/")[0] || "folder";
   return new File([...body, ...dir, end], `${root}.zip`, { type: "application/zip" });
+}
+
+// a folder dragged in: every file under it with its path, skipping junk folders before walking into them
+export async function readDropped(entry: FileSystemEntry, out: { file: File; path: string }[] = []) {
+  if (JUNK.test(entry.fullPath)) return out;
+  if (entry.isFile) {
+    const file = await new Promise<File>((ok, fail) => (entry as FileSystemFileEntry).file(ok, fail));
+    out.push({ file, path: entry.fullPath.replace(/^\//, "") });
+  } else if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader();
+    // readEntries hands them over in batches until an empty one
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((ok, fail) => reader.readEntries(ok, fail));
+      if (!batch.length) break;
+      for (const e of batch) await readDropped(e, out);
+    }
+  }
+  return out;
 }
