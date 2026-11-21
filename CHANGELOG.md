@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.6 (2026-11-21)
+
+### What's new
+
+- When Emplio fills a saved login into a website, it now presses Enter afterwards, so most sign-in pages go straight through without a separate click.
+
+### For developers
+
+- `backend/src/logins.ts` `fill` sends Enter (`Input.dispatchKeyEvent`) to the box typed last, except when a single `field` was named. Its reply and the agent instructions in `sandbox.ts` say to press the button only if the page hasn't moved on (#332).
+
 ## 1.3.5 (2026-11-21)
 
 ### What's new
