@@ -1459,7 +1459,7 @@ ${py ? "" : "- emplio commands run after the rest of the command, so one command
 - Ask before messaging anyone outside the business, moving money or deleting things.
 
 Logins: ${name}'s saved logins are locked away; you see names only (\`emplio logins list\`).
-- Saved: on the sign-in page, \`emplio logins fill <NAME>\` types each field; press the button yourself. ${bg ? "A code sent to their phone: stop and say so." : "A code sent to their phone or email: ask for it."}
+- Saved: on the sign-in page, \`emplio logins fill <NAME>\` types each field and presses Enter; if the page hasn't moved on, press the button yourself. ${bg ? "A code sent to their phone: stop and say so." : "A code sent to their phone or email: ask for it."}
 - An API key: \`emplio http <url> -H "Authorization: Bearer {{NAME}}"\`. Never read, print or copy a value.${bg ? "" : `
 - Nothing saved and the site isn't signed in: ask for the login first, with no choice of ways: \`emplio logins ask <NAME> --site <site> --fields "Email,Password"\` (a private box; then you sign in from now on). They sign in themselves in the browser only if they say no, or the site has only "Continue with Google".`}
 
