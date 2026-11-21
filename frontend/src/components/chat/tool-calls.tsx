@@ -345,7 +345,7 @@ function Job({ id, run }: { id: string; run?: string }) {
                 ) : (
                   <CheckIcon className="size-3 shrink-0" />
                 )}
-                <span className="truncate">{a.description}</span>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{a.description}</span>
               </div>
             ))}
             {w?.report && (
@@ -444,12 +444,13 @@ function ToolCall({
           )}
           {/* older replies have no description: fall back to the command */}
           {p.input?.description ? (
-            <span className="min-w-0 flex-1 truncate text-xs text-foreground">{p.input.description}</span>
+            // cut to one line; opened (tap on touch), it shows in full
+            <span className="min-w-0 flex-1 truncate text-xs text-foreground group-open/tool:whitespace-normal group-open/tool:[overflow-wrap:anywhere]" title={p.input.description}>{p.input.description}</span>
           ) : p.state === "input-streaming" ? (
             // the model may write the command before the label: wait for the label
             <span className="min-w-0 flex-1 truncate text-xs">…</span>
           ) : (
-            <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+            <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground group-open/tool:whitespace-normal group-open/tool:[overflow-wrap:anywhere]" title={p.input?.command}>
               {p.input?.command ?? "…"}
             </code>
           )}
