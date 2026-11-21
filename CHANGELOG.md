@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.4 (2026-11-21)
+
+### What's new
+
+- New here? Each part of Emplio now shows a short tip the first time you open it: your chat, Work, a task, Memory, Team, your menu, Integrations, the first job an agent takes on, the first file Emplio makes for you, sharing a file, and the first time Emplio asks for your OK. Step through with Back and Next; see them all again from your menu, under Product tour.
+- On the phone app, Emplio asks to send you notifications after your first message, not as soon as you sign in.
+- The menu's "Help guides" is now just "Help".
+
+### For developers
+
+- `frontend/src/components/tour.tsx` replaces `tips.tsx`: a list of short tours (`TOURS`), each with a `when()` and steps that point at `data-tip="<id>"` elements. A tour starts the first time its part is on screen, skips steps whose target isn't there, dims the rest of the page lightly and leaves it usable. Seen tours are kept per device in localStorage (`emplio-tours`); only people who came through the welcome dialog get them. To add one: mark the element with `data-tip` and add an entry to `TOURS`.
+- Push permission is checked (not requested) at sign-in; `first-run.tsx` `Offers` asks after the first message.
+
 ## 1.3.3 (2026-11-21)
 
 ### What's new
