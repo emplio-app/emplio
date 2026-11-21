@@ -33,14 +33,15 @@ export function BottomTabs() {
   ).length;
   const onChat = pathname.startsWith("/chat") || pathname.startsWith("/home");
 
-  const tab = (href: string, label: string, icon: React.ReactNode, active: boolean, mark?: React.ReactNode) => (
+  // tip: what a product tour step points at here (tour.tsx), the icon, ringed round
+  const tab = (href: string, label: string, icon: React.ReactNode, active: boolean, mark?: React.ReactNode, tip?: string) => (
     <Link
       href={href}
       onClick={() => setOpenMobile(false)}
       aria-current={active ? "page" : undefined}
       className={cn(TAB, active ? "text-primary" : "text-muted-foreground")}
     >
-      <span className="relative">
+      <span className="relative rounded-full" data-tip={tip}>
         {icon}
         {mark && <span className="absolute -top-1 -right-2.5">{mark}</span>}
       </span>
@@ -61,6 +62,7 @@ export function BottomTabs() {
           ) : main?.unread && !onChat ? (
             <span className="block size-2 rounded-full bg-primary" aria-label="New message" />
           ) : undefined,
+          "chat-nav",
         )}
         {tab(
           "/tasks",
@@ -70,9 +72,10 @@ export function BottomTabs() {
           needsMe ? (
             <span className="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.65rem] leading-none text-primary-foreground">{needsMe}</span>
           ) : undefined,
+          "work",
         )}
-        {tab("/knowledge", "Memory", <BookOpenIcon />, pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database"))}
-        {tab("/team", "Team", <UsersIcon />, pathname.startsWith("/team"))}
+        {tab("/knowledge", "Memory", <BookOpenIcon />, pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database"), undefined, "memory")}
+        {tab("/team", "Team", <UsersIcon />, pathname.startsWith("/team"), undefined, "team")}
       </div>
     </nav>
   );

@@ -92,12 +92,12 @@ export function TeamPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3" data-tip="team-page" data-tip-side="bottom">
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Team</h1>
         <div className="ml-auto flex items-center gap-2">
           {canManage && (
-            <Button size="sm" className="gap-1.5" onClick={() => setAdding(true)} aria-label="Add person">
+            <Button size="sm" className="gap-1.5" onClick={() => setAdding(true)} aria-label="Add person" data-tip="team-add" data-tip-side="bottom">
               <UserPlusIcon className="size-3.5" /> <span className="hidden sm:inline">Add person</span>
             </Button>
           )}

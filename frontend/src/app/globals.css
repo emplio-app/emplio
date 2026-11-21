@@ -538,6 +538,24 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     scroll-behavior: smooth;
   }
 }
+/* what a tip points at (tour.tsx) breathes a soft ring; with reduced motion it just holds one */
+[data-tip-active] {
+  animation: tip-ring 1.8s ease-out infinite;
+}
+@keyframes tip-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-tip-active] {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+}
 /* the empty chat's category chips (first-run.tsx JobCards): a bar that fills, then the next category shows */
 @keyframes chip-fill {
   from {

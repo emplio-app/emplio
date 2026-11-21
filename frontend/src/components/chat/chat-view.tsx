@@ -46,7 +46,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
-import { JobCards, TelegramOffer, WelcomeDialog } from "@/components/chat/first-run";
+import { JobCards, Offers, WelcomeDialog } from "@/components/chat/first-run";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing, isStep } from "@/components/chat/tool-calls";
@@ -1140,6 +1140,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         </div>
       )}
     <PromptInput
+      data-tip="chat"
       onSubmit={({ text }) => send(text)}
       className="rounded-2xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
     >
@@ -1439,7 +1440,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   <TelegramOnly />
                 ) : (
                   <>
-                    {!job && <TelegramOffer messages={messages} />}
+                    {!job && <Offers messages={messages} />}
                     {composer}
                   </>
                 )}

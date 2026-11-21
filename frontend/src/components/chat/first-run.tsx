@@ -7,6 +7,7 @@ import type { UIMessage } from "ai";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRightIcon,
+  BellIcon,
   CalendarClockIcon,
   FileTextIcon,
   GlobeIcon,
@@ -20,11 +21,12 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ChannelsDialog, type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { api, useMe } from "@/lib/api";
+import { skipTour, startTour } from "@/components/tour";
 
 type Capability = { icon: LucideIcon; title: string; what: string; job: string };
 // jobs a chat app can't do (its own browser, your apps, on a schedule, the whole team); the same for every business
@@ -160,6 +162,19 @@ export function JobCards({ onPick, paused }: { onPick: (job: string) => void; pa
 
 // The login page sets this when someone has just signed up (or joined a team), for the chat they land on.
 export const JUST_JOINED = "emplio-just-joined";
+const TOUR = "emplio-tour";
+
+// The product tour again (account menu): the welcome dialog in the main chat, then the guided tour (tour.tsx).
+// Already in the main chat, it opens there; anywhere else, the main chat opens it when it loads.
+export function takeTour(mainChat: string, pathname: string, go: (path: string) => void) {
+  track("tour_replayed");
+  skipTour();
+  if (pathname === mainChat) return void dispatchEvent(new Event(TOUR));
+  try {
+    sessionStorage.setItem(JUST_JOINED, "1");
+  } catch {}
+  go(mainChat);
+}
 
 export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; busy: boolean }) {
   const { data: me } = useMe();
@@ -174,18 +189,29 @@ export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; b
       return false;
     }
   });
+  useEffect(() => {
+    const again = () => setOpen(true);
+    addEventListener(TOUR, again);
+    return () => removeEventListener(TOUR, again);
+  }, []);
   const business = me?.workspaces[0];
   if (!business) return null;
   const owner = business.role === "owner";
   // no free trial (switched off, or the day's are gone): nothing runs until a plan is picked
   const paused = !!credit?.paused;
+  // closing it in any way but Skip starts the guided tour, before they really start
+  const close = (tour: boolean) => {
+    setOpen(false);
+    if (tour) startTour();
+    else track("tour_skipped", { step: -1 });
+  };
   const tryIt = (c: Capability) => {
     track("welcome_try_clicked", { card: c.title });
-    setOpen(false);
+    close(true);
     onTry(c.job);
   };
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close(true))}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading text-2xl">{owner ? "Meet Emplio, your new employee" : `Welcome to ${business.name}`}</DialogTitle>
@@ -202,7 +228,8 @@ export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; b
             {owner ? "Free trials are paused right now. Pick a plan and Emplio starts work straight away." : "Emplio is paused until the owner picks a plan."}
           </div>
         )}
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {/* on a phone the first four, so the sheet fits the screen without scrolling */}
+        <div className="grid grid-cols-1 gap-2 max-sm:[&>:nth-child(n+5)]:hidden sm:grid-cols-2">
           {CAPABILITIES.map((c) => (
             <div key={c.title} className="flex items-start gap-3 rounded-xl border p-3">
               <c.icon className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -222,11 +249,69 @@ export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; b
           {paused && owner ? (
             <SeePlans />
           ) : (
-            <Button onClick={() => setOpen(false)}>{busy ? "Back to my job" : "I'll type my own"}</Button>
+            <>
+              <Button variant="ghost" className="text-muted-foreground" onClick={() => close(false)}>
+                Skip tour
+              </Button>
+              <Button onClick={() => close(true)}>Show me around</Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// In the iPhone app. Notifications are asked for once they've given Emplio a job, the moment a ping is worth having:
+// iOS asks only once, so asking at sign-in, on top of the welcome dialog, mostly got a reflex "Don't Allow".
+type PhonePush = {
+  checkPermissions(): Promise<{ receive: string }>;
+  requestPermissions(): Promise<{ receive: string }>;
+  register(): Promise<void>;
+};
+export const phonePush = () =>
+  (window as { Capacitor?: { Plugins?: { PushNotifications?: PhonePush } } }).Capacitor?.Plugins?.PushNotifications;
+
+const NOTIFY_ASKED = "emplio-notify-asked";
+function useNotifyOffer(sent: number) {
+  const [ask, setAsk] = useState(false);
+  useEffect(() => {
+    const push = phonePush();
+    try {
+      if (!push || sent < 1 || localStorage.getItem(NOTIFY_ASKED)) return;
+    } catch {
+      return;
+    }
+    // not decided yet: iOS hasn't asked
+    void push.checkPermissions().then((p) => setAsk(p.receive.startsWith("prompt")), () => {});
+  }, [sent]);
+  const answer = (yes: boolean) => {
+    setAsk(false);
+    try {
+      localStorage.setItem(NOTIFY_ASKED, "1");
+    } catch {}
+    track("notify_offer_answered", { yes });
+    // granted: the app layout's listener sends the server this phone's address
+    if (yes) void phonePush()?.requestPermissions().then((p) => (p.receive === "granted" ? phonePush()?.register() : undefined));
+  };
+  return { ask, answer };
+}
+
+// Under the empty composer, one at a time: notifications in the iPhone app first, then Telegram.
+export function Offers({ messages }: { messages: UIMessage[] }) {
+  const notify = useNotifyOffer(messages.filter((m) => m.role === "user").length);
+  if (!notify.ask) return <TelegramOffer messages={messages} />;
+  return (
+    <div className="mb-2 flex items-center gap-3 rounded-2xl border bg-card px-4 py-2.5 text-sm shadow-sm">
+      <BellIcon className="size-4 shrink-0 text-primary" />
+      <span className="min-w-0 flex-1 text-muted-foreground">Get a ping when Emplio finishes a job or needs your OK.</span>
+      <Button size="sm" className="shrink-0 rounded-full" onClick={() => notify.answer(true)}>
+        Turn on
+      </Button>
+      <button type="button" onClick={() => notify.answer(false)} aria-label="Not now" className="grid size-8 place-items-center rounded-full text-muted-foreground hover:text-foreground">
+        <XIcon className="size-3.5" />
+      </button>
+    </div>
   );
 }
 

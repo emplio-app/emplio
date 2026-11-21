@@ -12,7 +12,7 @@ export function MemoryTabs() {
   // the server refuses staff anyway; this just doesn't offer them a tab that would say so
   const role = me?.workspaces[0]?.role;
   return (
-    <nav className="flex items-center gap-1" aria-label="Memory">
+    <nav className="flex items-center gap-1" aria-label="Memory" data-tip="memory-page" data-tip-side="bottom">
       {[
         { href: "/knowledge", label: "Notes" },
         { href: "/files", label: "Files" },

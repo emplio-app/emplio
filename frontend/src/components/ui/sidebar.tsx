@@ -279,6 +279,8 @@ function SidebarTrigger({
     <Button
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
+      data-tip="menu"
+      data-tip-side="bottom"
       variant="ghost"
       size="icon-sm"
       // on a phone: the menu (search, usage, the account), top left on every page, a bigger target for a thumb
