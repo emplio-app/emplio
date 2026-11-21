@@ -381,7 +381,7 @@ export const SETTING_FIELDS = [
     label: "Background rounds",
     help: "How often it looks around on its own during the working day, works through what it noticed in chats, and tells you only what needs you.",
     type: "choice",
-    default: "2h",
+    default: "4h",
     options: [
       { value: "off", label: "Off", hint: "Only works when messaged. No rounds, briefs or reports." },
       { value: "1h", label: "Every hour", hint: "Fastest to notice, costs most." },
