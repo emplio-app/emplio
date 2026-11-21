@@ -17,8 +17,9 @@ import {
   CornerDownRightIcon,
   FileIcon,
   FolderIcon,
-  SlashIcon,
+  SquareSlashIcon,
   PaperclipIcon,
+  PlusIcon,
   PencilIcon,
   RefreshCcwIcon,
   SendIcon,
@@ -521,6 +522,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     setInput("");
     setQuotes([]);
     mentionMenu.clear();
+    // on a phone the keyboard goes once it's sent, so the reply has the whole screen
+    if (!matchMedia("(pointer: fine)").matches) box.current?.blur();
   };
 
   // Waiting in line, sent as their own message when the reply ends. The running reply is told, so it ends
@@ -1190,6 +1193,30 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       )}
       {/* one line, send at its end; the tools sit under the box */}
       <div className="flex w-full items-end">
+      {/* on a phone a row under the box is wasted height: attach, skill and mention fold into one + in it */}
+      <div className="hidden h-12 items-center pl-2 pointer-coarse:flex" onMouseDown={(e) => e.preventDefault()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<PromptInputButton aria-label="More" className="rounded-full text-muted-foreground" />}>
+            <PlusIcon className="size-5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" sideOffset={10}>
+            <DropdownMenuItem onClick={() => fileInput.current?.click()}>
+              <PaperclipIcon /> Attach
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}>
+              <SquareSlashIcon /> Commands
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
+                typeIn(text, text.length);
+              }}
+            >
+              <AtSignIcon /> Mention
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <div className="relative min-w-0 flex-1">
         <HighlightLayer text={input} marks={marks} />
         <PromptInputTextarea
@@ -1208,10 +1235,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             e.preventDefault();
             attachments.add(files);
           }}
-          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for a skill, @ for a person, file or app" : "Ask Emplio anything…")}
+          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for commands, @ to mention" : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className={cn("px-5 py-3 text-[0.9rem] leading-6", empty ? "min-h-24" : "min-h-0")} // a new chat gets room for a few lines
+          className={cn("px-5 py-3 text-[0.9rem] leading-6 placeholder:truncate pointer-coarse:px-1", empty ? "min-h-24" : "min-h-0")} // a new chat gets room for a few lines
         />
       </div>
         {/* mic and send share one row, centred on each other and on the first line of text */}
@@ -1236,7 +1263,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     </PromptInput>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
           buttons out from under the finger before it lifts, and the tap is lost. */}
-      <div className="mt-1.5 flex items-center justify-between gap-2 px-2" onMouseDown={(e) => e.preventDefault()}>
+      <div className="mt-1 flex items-center justify-between gap-2 px-2 pointer-coarse:hidden" onMouseDown={(e) => e.preventDefault()}>
         <PromptInputTools>
           <input
             ref={fileInput}
@@ -1248,18 +1275,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               e.currentTarget.value = "";
             }}
           />
-          {/* touch screens can't pick folders, so there the clip opens files straight away */}
-          <PromptInputButton
-            aria-label="Attach files"
-            onClick={() => fileInput.current?.click()}
-            className="rounded-full text-muted-foreground pointer-fine:hidden"
-          >
-            <PaperclipIcon className="size-4" />
-          </PromptInputButton>
           {/* a browser picker takes files or a folder, never both, so the one clip asks which */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={<PromptInputButton aria-label="Attach" className="hidden rounded-full text-muted-foreground pointer-fine:inline-flex" />}
+              render={<PromptInputButton aria-label="Attach" className="rounded-full text-muted-foreground" />}
             >
               <PaperclipIcon className="size-4" />
             </DropdownMenuTrigger>
@@ -1286,16 +1305,16 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           />
           {/* the same menus typing / or @ opens, for people who don't know to type them */}
           <PromptInputButton
-            tooltip="Use a skill"
-            aria-label="Use a skill"
+            tooltip="Commands"
+            aria-label="Commands"
             onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}
             className="rounded-full text-muted-foreground"
           >
-            <SlashIcon className="size-4" />
+            <SquareSlashIcon className="size-4" />
           </PromptInputButton>
           <PromptInputButton
-            tooltip="Mention a person, file or app"
-            aria-label="Mention a person, file or app"
+            tooltip="Mention"
+            aria-label="Mention"
             onClick={() => {
               const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
               typeIn(text, text.length);
@@ -1502,7 +1521,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,var(--safe-bottom))] max-md:pb-3">
+              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(0.25rem,var(--safe-bottom))] max-md:pb-3 md:pointer-coarse:pb-[max(0.75rem,var(--safe-bottom))]">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}

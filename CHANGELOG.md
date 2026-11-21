@@ -2,6 +2,23 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.7 (2026-11-21)
+
+### What's new
+
+- A cleaner message box: one line inside a chat, a few lines on a new chat, with the mic and a filled send button inside it.
+- Buttons under the box for attaching, commands (/) and mentioning (@), so you don't need to know what to type. On a phone they sit behind a + in the box, and the keyboard closes once you send.
+- Attach a folder from the same attach button, or drag a folder into the chat. It's sent as one zip with its sub-folders kept.
+- Late at night or early in the morning, the greeting changes: "Working late?", "Still up?", "Up early?".
+- A step's name that's too long for its row can now be read in full: hover over it, or open the step (tap it on a phone).
+- When a job asks for your OK on many things at once, the first card shows in full with "N more waiting after this" under it; answering it brings up the next.
+
+### For developers
+
+- `chat-view.tsx` composer: single-row input with mic and send inline, tool row under it on fine pointers, a + menu on coarse pointers; / and @ buttons put the character in and open the same menus (`useMentionMenu` returns `moveCaret`) (#344, #345, #346).
+- `zip-folder.ts`: `zipFolder` takes `{file, path}` pairs; `readDropped` walks a dropped folder entry (#344).
+- `tool-calls.tsx`: cut-off step labels get a `title` and wrap when the row is open (#334); waiting Allow cards show one at a time (#340).
+
 ## 1.3.6 (2026-11-21)
 
 ### What's new
