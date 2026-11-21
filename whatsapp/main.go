@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -164,7 +165,11 @@ func (s *Server) acct(fn handler) http.HandlerFunc {
 		if err != nil {
 			return nil, err
 		}
-		return fn(a, r)
+		if err := a.paced(r.Pattern); err != nil {
+			return nil, err
+		}
+		out, err := fn(a, r)
+		return out, a.overlimit(err)
 	})
 }
 
@@ -414,8 +419,12 @@ func (s *Server) Routes() *http.ServeMux {
 			return nil, err
 		}
 		jid, _ := types.ParseJID(chat)
-		g, err := a.client().GetGroupInfo(bg, jid)
+		g, err := a.groupInfo(jid)
 		if err != nil {
+			var ref *Refused
+			if errors.As(err, &ref) {
+				return nil, err
+			}
 			return nil, refuse(502, "WhatsApp didn't give the group's details: %v", err)
 		}
 		a.store.Chat(chat, g.Name, 0, -1)
@@ -435,6 +444,63 @@ func (s *Server) Routes() *http.ServeMux {
 			created = g.GroupCreated.UTC().Format(time.RFC3339)
 		}
 		return map[string]any{"chat": chat, "name": g.Name, "description": strPtr(g.Topic), "created": created, "participants": people}, nil
+	}))
+	// every group this number is in, from one request to WhatsApp; with: only those someone is in too
+	mux.HandleFunc("GET /accounts/{id}/groups", s.acct(func(a *Account, r *http.Request) (any, error) {
+		var with string
+		if raw := strings.TrimSpace(r.URL.Query().Get("with")); raw != "" {
+			chat, err := a.ChatFor(raw)
+			if err != nil {
+				return nil, err
+			}
+			if strings.HasSuffix(chat, "@g.us") {
+				return nil, refuse(400, "with: a person, not a group")
+			}
+			with = chat
+		}
+		if err := a.Ready(false); err != nil {
+			return nil, err
+		}
+		all, err := a.joinedGroups()
+		if err != nil {
+			var ref *Refused
+			if errors.As(err, &ref) {
+				return nil, err
+			}
+			return nil, refuse(502, "WhatsApp didn't give the groups: %v", err)
+		}
+		a.mu.Lock()
+		me := ""
+		if a.meta.Me != nil {
+			me = a.meta.Me.JID
+		}
+		a.mu.Unlock()
+		out := []map[string]any{}
+		for _, g := range all {
+			mine, theirs, in := false, any(nil), with == ""
+			for _, p := range g.Participants {
+				j := a.canon(p.JID, p.PhoneNumber).String()
+				if j == me {
+					mine = p.IsAdmin || p.IsSuperAdmin
+				}
+				if with != "" && j == with {
+					in, theirs = true, "member"
+					if p.IsAdmin || p.IsSuperAdmin {
+						theirs = "admin"
+					}
+				}
+			}
+			if !in {
+				continue
+			}
+			row := map[string]any{"chat": g.JID.String(), "name": g.Name, "members": len(g.Participants), "i_am_admin": mine}
+			if with != "" {
+				row["their_role"] = theirs
+			}
+			out = append(out, row)
+		}
+		sort.Slice(out, func(i, j int) bool { return fmt.Sprint(out[i]["name"]) < fmt.Sprint(out[j]["name"]) })
+		return map[string]any{"groups": out, "count": len(out)}, nil
 	}))
 	mux.HandleFunc("GET /accounts/{id}/media", s.acct(func(a *Account, r *http.Request) (any, error) {
 		q := r.URL.Query()

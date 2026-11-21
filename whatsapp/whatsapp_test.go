@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -360,4 +361,43 @@ func TestFullQuoteFromRaw(t *testing.T) {
 	eq(t, fullQuote(&Message{Quoted: &cut, Raw: raw}), long)
 	short := "hi"
 	eq(t, fullQuote(&Message{Quoted: &short, Raw: raw}), "hi")
+}
+
+func TestPacing(t *testing.T) {
+	a, err := OpenAccount(t.TempDir(), "00000000-0000-4000-8000-000000000010")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	for range AskMinute {
+		if err := a.paced("GET /accounts/{id}/profile"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a.paced("GET /accounts/{id}/profile") == nil {
+		t.Fatal("lookups past the minute's limit went through")
+	}
+	eq(t, a.paced("GET /accounts/{id}/messages"), nil) // saved chats aren't counted
+	for range ChangeHour {
+		if err := a.paced("POST /accounts/{id}/group/members"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a.paced("POST /accounts/{id}/group/members") == nil {
+		t.Fatal("group changes past the hour's limit went through")
+	}
+	// WhatsApp says too much: nothing reaches it, saved chats still read, sends wait too
+	if a.overlimit(errors.New("info query returned status 429: rate-overlimit")) == nil {
+		t.Fatal("rate-overlimit not caught")
+	}
+	if a.paced("POST /accounts/{id}/send") == nil || a.UnderLimit() == nil {
+		t.Fatal("sent while WhatsApp said too much")
+	}
+	eq(t, a.paced("GET /accounts/{id}/search"), nil)
+	// a change drops kept group details
+	a.keepGroups(true, &types.GroupInfo{JID: types.NewJID("123", types.GroupServer)})
+	a.p.changes, a.p.coolUntil = nil, time.Time{}
+	if err := a.change(); err != nil || a.p.groups != nil {
+		t.Fatal("kept group details survived a change", err)
+	}
 }

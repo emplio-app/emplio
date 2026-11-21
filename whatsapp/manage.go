@@ -384,9 +384,6 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return nil, err
 		}
-		if err := a.UnderLimit(); err != nil {
-			return nil, err
-		}
 		if err := a.Ready(false); err != nil {
 			return nil, err
 		}
@@ -402,7 +399,6 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return nil, waRefused("couldn't make the group", err)
 		}
-		a.store.NoteSend(false)
 		a.store.Chat(g.JID.String(), g.Name, time.Now().UnixMilli(), -1)
 		return map[string]any{"chat": g.JID.String(), "name": g.Name, "members": a.outcomes(g.Participants)}, nil
 	})
@@ -416,11 +412,6 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return nil, err
 		}
-		if change == whatsmeow.ParticipantChangeAdd {
-			if err := a.UnderLimit(); err != nil {
-				return nil, err
-			}
-		}
 		jid, err := a.group(b["chat"])
 		if err != nil {
 			return nil, err
@@ -428,9 +419,6 @@ func (s *Server) manageRoutes(mux *http.ServeMux) {
 		res, err := a.client().UpdateGroupParticipants(bg, jid, people, change)
 		if err != nil {
 			return nil, waRefused("WhatsApp didn't make the change", err)
-		}
-		if change == whatsmeow.ParticipantChangeAdd {
-			a.store.NoteSend(false)
 		}
 		return map[string]any{"chat": jid.String(), "members": a.outcomes(res)}, nil
 	})
