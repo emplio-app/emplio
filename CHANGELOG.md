@@ -2,6 +2,18 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.6 (2026-11-21)
+
+### What's new
+
+- A step's name that's too long for its row can now be read in full: hover over it, or open the step (tap it on a phone).
+- When a job asks for your OK on many things at once, the first card shows in full with "N more waiting after this" under it; answering it brings up the next. Before, they stacked up and got cut off.
+
+### For developers
+
+- `tool-calls.tsx`: cut-off step labels get a `title` and wrap when the row is open; step names in an opened job list wrap instead of being cut (#334).
+- Waiting Allow cards show one at a time (#340).
+
 ## 1.3.5 (2026-11-21)
 
 ### What's new
