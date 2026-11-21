@@ -22,7 +22,7 @@ shows as needing a reconnect.
 - Account: get_account, check_numbers, get_privacy_settings, update_privacy_setting*, update_profile* (about, name,
   photo, default disappearing messages), get_my_contact_link* (wa.me/qr link; reset makes a new one)
 - Chats: list_chats, get_messages, get_message (reactions, ticks, poll votes, edited/deleted), list_recent_messages,
-  list_events, search_messages, list_contacts, get_group, download_media, load_older_messages* (asks the phone for
+  list_events, search_messages, list_contacts, get_group, list_groups, download_media, load_older_messages* (asks the phone for
   history older than the link copy)
 - Sending: send_message*, reply_to_message* (its own action: small models miss send_message's reply_to),
   reply_privately* (WhatsApp's "Reply privately": a group message answered in the sender's own chat, quoted),

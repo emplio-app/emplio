@@ -74,7 +74,7 @@ test("the sign-in goes to our own QR page, and only a code that page made finish
 });
 
 test("reads run unasked, writes ask", async () => {
-  const reads = ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "download_media", "get_message", "check_numbers", "list_events"];
+  const reads = ["get_account", "list_chats", "get_messages", "list_recent_messages", "search_messages", "list_contacts", "get_group", "list_groups", "download_media", "get_message", "check_numbers", "list_events"];
   const moreReads = ["list_labels", "list_join_requests", "preview_group_link", "list_community_groups", "get_profile", "list_blocked", "get_privacy_settings", "list_channels", "get_channel", "get_channel_messages"];
   for (const a of [...reads, ...moreReads])
     expect((await own.getAction(`whatsapp_linked.${a}`))?.readOnly).toBe(true);

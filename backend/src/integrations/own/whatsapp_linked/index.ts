@@ -182,8 +182,15 @@ export const whatsapp_linked: OwnApp = {
       }),
       run: async (i: { query?: string; limit: number }, key) => wa("GET", `/accounts/${account(key)}/contacts?${q(i)}`),
     },
+    list_groups: {
+      description:
+        "Every group this WhatsApp is in, with member counts and whether it's an admin there (only admins can add people), from one request. with: only the groups that person is in too, and their role. Use this, not get_group group by group, for anything across many groups.",
+      readOnly: true,
+      input: z.object({ with: z.string().max(200).optional().describe("A person: phone number with country code, chat id, or their exact chat name") }),
+      run: async (i: { with?: string }, key) => wa("GET", `/accounts/${account(key)}/groups?${q(i)}`),
+    },
     get_group: {
-      description: "A group's name, description and members (numbers, names, who's admin).",
+      description: "A group's name, description and members (numbers, names, who's admin). Kept for 10 minutes. For many groups use list_groups.",
       readOnly: true,
       input: z.object({ chat }),
       run: async (i: { chat: string }, key) => wa("GET", `/accounts/${account(key)}/group?${q(i)}`),
