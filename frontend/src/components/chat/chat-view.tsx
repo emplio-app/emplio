@@ -8,7 +8,7 @@ import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  CornerDownLeftIcon,
+  AtSignIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -17,6 +17,7 @@ import {
   CornerDownRightIcon,
   FileIcon,
   FolderIcon,
+  SlashIcon,
   PaperclipIcon,
   PencilIcon,
   RefreshCcwIcon,
@@ -129,11 +130,17 @@ const sentLinks = (message: UIMessage) =>
     ),
   );
 
-function greeting() {
+// after 9pm and before 6am it asks, rather than greets
+function greeting(name?: string) {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  const [words, end] =
+    hour < 4 ? ["Still up", "?"]
+    : hour < 6 ? ["Up early", "?"]
+    : hour < 12 ? ["Good morning", ""]
+    : hour < 18 ? ["Good afternoon", ""]
+    : hour < 21 ? ["Good evening", ""]
+    : ["Working late", "?"];
+  return `${words}${name ? `, ${name}` : ""}${end}`;
 }
 
 // job: this is a job's own chat (backend jobs.ts): its header names the agent, and it closes out of the sidebar
@@ -706,6 +713,16 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     else toast.error("That folder is empty or over 100 MB");
   };
   const fileInput = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // puts text in the box with the cursor at `at`, so the / or @ menu opens as if typed
+  const typeIn = (text: string, at: number) => {
+    setInput(text);
+    mentionMenu.moveCaret(at);
+    requestAnimationFrame(() => {
+      box.current?.focus();
+      box.current?.setSelectionRange(at, at);
+    });
+  };
   const folderInput = useRef<HTMLInputElement>(null);
 
   // Like Claude/ChatGPT: a just-sent prompt scrolls to the top and the reply fills in below it.
@@ -1176,6 +1193,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       <div className="relative min-w-0 flex-1">
         <HighlightLayer text={input} marks={marks} />
         <PromptInputTextarea
+          ref={box}
           value={input}
           onChange={(e) => setInput(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -1190,12 +1208,18 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             e.preventDefault();
             attachments.add(files);
           }}
-          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
+          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for a skill, @ for a person, file or app" : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className="min-h-0 px-5 py-3.5 text-[0.9rem]"
+          className={cn("px-5 py-3 text-[0.9rem] leading-6", empty ? "min-h-24" : "min-h-0")} // a new chat gets room for a few lines
         />
       </div>
+        {/* mic and send share one row, centred on each other and on the first line of text */}
+        <div className="flex h-12 items-center gap-1 pr-2">
+        {/* a press keeps the focus in the box */}
+        <div className="flex" onMouseDown={(e) => e.preventDefault()}>
+          <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
+        </div>
         {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
         {/* while a reply streams: stop when the box is empty, queue when there's something to send */}
         <PromptInputSubmit
@@ -1203,11 +1227,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           onStop={stopAll}
           aria-disabled={!busy && !canSend}
           aria-label={busy ? (canSend ? "Queue message" : "Stop") : "Send"}
-          variant={busy && !canSend ? "default" : "ghost"}
-          className="m-1.5 size-9 rounded-full text-muted-foreground hover:text-foreground aria-disabled:opacity-40"
+          className="size-8 rounded-full aria-disabled:opacity-40"
         >
-          {busy && !canSend ? undefined : <CornerDownLeftIcon className="size-4.5" />}
+          {busy && !canSend ? undefined : <ArrowUpIcon className="size-4" />}
         </PromptInputSubmit>
+        </div>
       </div>
     </PromptInput>
       {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
@@ -1260,12 +1284,29 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               if (picked.length) await addFolder(Promise.resolve(picked));
             }}
           />
-          <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
+          {/* the same menus typing / or @ opens, for people who don't know to type them */}
+          <PromptInputButton
+            tooltip="Use a skill"
+            aria-label="Use a skill"
+            onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}
+            className="rounded-full text-muted-foreground"
+          >
+            <SlashIcon className="size-4" />
+          </PromptInputButton>
+          <PromptInputButton
+            tooltip="Mention a person, file or app"
+            aria-label="Mention a person, file or app"
+            onClick={() => {
+              const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
+              typeIn(text, text.length);
+            }}
+            className="rounded-full text-muted-foreground"
+          >
+            <AtSignIcon className="size-4" />
+          </PromptInputButton>
         </PromptInputTools>
         {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
-        <span className="hidden text-xs text-muted-foreground sm:pointer-fine:inline">
-          <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift + Enter</kbd> for a new line
-        </span>
+        <span className="hidden text-xs text-muted-foreground sm:pointer-fine:inline">Shift + Enter for a new line</span>
       </div>
     </div>
   );
@@ -1371,7 +1412,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               {/* my-auto, not justify-center: centred when it fits, scrolls from the top when it doesn't */}
               <div className="my-auto w-full max-w-2xl">
                 <h2 className="mb-1.5 text-center text-2xl font-semibold sm:mb-2 sm:text-4xl">
-                  {greeting()}, {firstName}
+                  {greeting(firstName)}
                 </h2>
                 <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
                 {composer}
