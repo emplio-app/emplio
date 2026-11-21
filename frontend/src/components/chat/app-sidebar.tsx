@@ -10,6 +10,7 @@ import {
   ClipboardListIcon,
   ChevronDownIcon,
   CircleHelpIcon,
+  CompassIcon,
   XIcon,
   KeyRoundIcon,
   LogOutIcon,
@@ -30,6 +31,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useDraft } from "@/components/chat/draft";
+import { takeTour } from "@/components/chat/first-run";
 import { AutomationsDialog } from "@/components/chat/automations-dialog";
 import { ChannelNudge, ChannelsDialog } from "@/components/chat/channels-dialog";
 import { MacNudge } from "@/components/chat/mac-nudge";
@@ -178,6 +180,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={!!main && pathname === `/chat/${main.id}`}
+              data-tip="chat-nav"
+              data-tip-side="right"
               render={
                 <Link href={main ? `/chat/${main.id}` : "/home"} onClick={() => setOpenMobile(false)} />
               }
@@ -213,6 +217,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={pathname.startsWith("/tasks")}
+              data-tip="work"
+              data-tip-side="right"
               render={
                 <Link href="/tasks" onClick={() => setOpenMobile(false)} />
               }
@@ -245,6 +251,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}
+              data-tip="memory"
+              data-tip-side="right"
               render={
                 <Link href="/knowledge" onClick={() => setOpenMobile(false)} />
               }
@@ -258,6 +266,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={pathname.startsWith("/team")}
+              data-tip="team"
+              data-tip-side="right"
               render={<Link href="/team" onClick={() => setOpenMobile(false)} />}
               className="h-9 font-medium"
             >
@@ -535,6 +545,9 @@ export function RenameInput({
 
 function UserMenu() {
   const { data: me } = useMe();
+  const { data: conversations } = useConversations();
+  const pathname = usePathname();
+  const { setOpenMobile } = useSidebar();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [automationsOpen, setAutomationsOpen] = useState(false);
@@ -575,6 +588,8 @@ function UserMenu() {
             <SidebarMenuButton
               size="lg"
               className="data-popup-open:bg-sidebar-accent"
+              data-tip="account"
+              data-tip-side="right"
             />
           }
         >
@@ -625,19 +640,19 @@ function UserMenu() {
             </DropdownMenuItem>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setAppsOpen(true)}>
+          <DropdownMenuItem onClick={() => setAppsOpen(true)} data-tip="m-apps" data-tip-side="right">
             <BlocksIcon />
             Integrations
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setAutomationsOpen(true)}>
+          <DropdownMenuItem onClick={() => setAutomationsOpen(true)} data-tip="m-automations" data-tip-side="right">
             <ZapIcon />
             Automations
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setChannelsOpen(true)}>
+          <DropdownMenuItem onClick={() => setChannelsOpen(true)} data-tip="m-channels" data-tip-side="right">
             <MessageCircleIcon />
             Channels
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push("/logins")}>
+          <DropdownMenuItem onClick={() => router.push("/logins")} data-tip="m-logins" data-tip-side="right">
             <KeyRoundIcon />
             Passwords & keys
           </DropdownMenuItem>
@@ -649,6 +664,22 @@ function UserMenu() {
           <DropdownMenuItem onClick={() => setWhatsNewOpen(true)}>
             <SparklesIcon />
             What&apos;s new
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-tip="m-tour"
+            data-tip-side="right"
+            onClick={() => {
+              const main = conversations?.find((c) => c.kind === "main");
+              setOpenMobile(false);
+              takeTour(main ? `/chat/${main.id}` : "/home", pathname, router.push);
+            }}
+          >
+            <CompassIcon />
+            Product tour
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => window.open("https://docs.emplio.app", "_blank", "noopener")}>
+            <CircleHelpIcon />
+            Help
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => logout.mutate()}

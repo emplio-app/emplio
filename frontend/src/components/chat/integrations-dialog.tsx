@@ -327,6 +327,8 @@ function Browse({
           <Input
             placeholder="Search apps"
             aria-label="Search apps"
+            data-tip="apps"
+            data-tip-side="bottom"
             autoFocus
             className="h-10 pl-9"
             value={search}

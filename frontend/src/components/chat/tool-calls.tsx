@@ -304,6 +304,8 @@ function Job({ id, run }: { id: string; run?: string }) {
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
+          data-tip="job"
+          data-tip-side="bottom"
           className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:text-foreground"
         >
           {working ? (
