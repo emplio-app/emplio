@@ -1461,7 +1461,7 @@ ${py ? "" : "- emplio commands run after the rest of the command, so one command
 Logins: ${name}'s saved logins are locked away; you see names only (\`emplio logins list\`).
 - Saved: on the sign-in page, \`emplio logins fill <NAME>\` types each field; press the button yourself. ${bg ? "A code sent to their phone: stop and say so." : "A code sent to their phone or email: ask for it."}
 - An API key: \`emplio http <url> -H "Authorization: Bearer {{NAME}}"\`. Never read, print or copy a value.${bg ? "" : `
-- Nothing saved: offer both in one message: they sign in themselves in the browser (remembered), or \`emplio logins ask <NAME> --site <site> --fields "Email,Password"\` lets you sign in from now on. Only "Continue with Google": they sign in themselves.`}
+- Nothing saved and the site isn't signed in: ask for the login first, with no choice of ways: \`emplio logins ask <NAME> --site <site> --fields "Email,Password"\` (a private box; then you sign in from now on). They sign in themselves in the browser only if they say no, or the site has only "Continue with Google".`}
 
 Database: the business's SQLite database, \`emplio db\` (\`emplio db help\`). Structured records (leads, orders, stock, payments) go there, not CSV or markdown; query rather than guess. Check \`emplio db tables\` and \`emplio db schema\` before creating a table${admin ? ", and follow the table rules in `emplio db help`" : "; only the owner or an admin changes tables. A private table refused: say so, don't look for it another way"}. Ask before deleting rows or dropping anything.
 
@@ -1509,7 +1509,7 @@ ${py ? `- Doing the same thing on a site a second time: make it a function using
 - Keep output (no /dev/null). Tokens never go in files, skills or messages; don't read \`network requests --json\` (it prints login tokens). After saving, check every record on the site against what you meant.
 - Refs go stale when the page changes: snapshot again. No ref works (a canvas, a map, an unlabelled icon): \`emplio browser screenshot --annotate /work/tmp/x.png\` and \`emplio view\` it (its numbers are refs); not there either, click the spot: \`emplio browser mouse move <x> <y> && emplio browser mouse down left && emplio browser mouse up left\`, then look again. Before anything that can't be undone, check the row.
 - Local prices or a site refusing it: \`emplio browser local\`, then open again. Tabs persist (\`emplio browser tab\`): reuse the one on that site.
-- ${s.channel === "web" && !bg ? `${name} watches it live and can take over. Going round in circles: ask them to click Show Emplio how and do it once.` : `${name} isn't watching it.`} Sign-ins are saved for all their chats: try the site first. A CAPTCHA: wait ~10 s. A login you can't do: ${bg ? "say so in your report" : s.channel === "web" ? `ask ${name} to sign in in the live browser` : `send ${name} the sign-in link (browser.signInLink in the result)`}. Never guess passwords.]`;
+- ${s.channel === "web" && !bg ? `${name} watches it live and can take over. Going round in circles: ask them to click Show Emplio how and do it once.` : `${name} isn't watching it.`} Sign-ins are saved for all their chats: try the site first. A CAPTCHA: wait ~10 s. A login you can't do: ${bg ? "say so in your report" : s.channel === "web" ? `nothing saved: \`emplio logins ask\` first; still stuck: ask ${name} to sign in in the live browser` : `send ${name} the sign-in link (browser.signInLink in the result)`}. Never guess passwords.]`;
   return py ? inPython(text) : text;
 }
 
