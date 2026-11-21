@@ -351,3 +351,13 @@ func TestReplyingPrivatelyNeedsAGroupMessage(t *testing.T) {
 	code, msg = post(`{"chat":"123@g.us","message":"g1","text":"ok"}`)
 	eq(t, code == 409 && strings.Contains(msg, "not linked"), true)
 }
+
+func TestFullQuoteFromRaw(t *testing.T) {
+	long := strings.Repeat("a", 500)
+	raw, _ := proto.Marshal(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("This one"),
+		ContextInfo: &waE2E.ContextInfo{QuotedMessage: &waE2E.Message{Conversation: proto.String(long)}}}})
+	cut := long[:300] + "…"
+	eq(t, fullQuote(&Message{Quoted: &cut, Raw: raw}), long)
+	short := "hi"
+	eq(t, fullQuote(&Message{Quoted: &short, Raw: raw}), "hi")
+}

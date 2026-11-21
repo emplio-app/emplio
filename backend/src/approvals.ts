@@ -24,11 +24,11 @@ import type { Session } from "./sandbox";
 const WAIT_MS = 10 * 60_000;
 const VALID_MS = 2 * 60 * 60_000;
 
-type Waiting = { workspaceId: string; userId: string; conversationId: string; decide: (d: NonNullable<Approval["decision"]>) => void };
+type Waiting = { workspaceId: string; userId: string; conversationId: string; showIn: string | null; decide: (d: NonNullable<Approval["decision"]>) => void };
 // ponytail: in memory, so a server restart drops pending asks (their rows are closed at the next start, approvalRoutes);
 // fine for one server
 const waiting = new Map<string, Waiting>();
-type Later = { workspaceId: string; userId: string; conversationId: string; card: Approval; run: () => Promise<unknown> };
+type Later = { workspaceId: string; userId: string; conversationId: string; showIn: string | null; card: Approval; run: () => Promise<unknown> };
 // ponytail: in memory too; after a restart a late answer gets "expired"
 const later = new Map<string, Later>();
 
@@ -130,7 +130,8 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     expiresAt: new Date(Date.now() + VALID_MS).toISOString(),
     ...(asks && { oneOff: true }),
   };
-  await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn: await startedIn(s.conversationId), card });
+  const showIn = await startedIn(s.conversationId);
+  await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card });
   notify(s.user.id);
   s.notify(card);
   const decision = await new Promise<NonNullable<Approval["decision"]>>((resolve) => {
@@ -142,11 +143,11 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     const timer = setTimeout(() => done("timeout"), WAIT_MS);
     // Stop pressed: counts as no
     s.signal?.addEventListener("abort", () => done("deny"), { once: true });
-    waiting.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, decide: done });
+    waiting.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, decide: done });
   });
   if (decision === "timeout") {
     const run = own?.run ?? (() => runAction({ workspaceId: s.workspaceId, userId: s.user.id }, action, input, { conversationId: s.conversationId, account }));
-    later.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, card, run });
+    later.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card, run });
     setTimeout(() => later.get(card.id) && (later.delete(card.id), void keep(card.id, s.user.id, { decision: "timeout" }).catch(() => {})), VALID_MS - WAIT_MS);
     return `error: no answer from ${s.user.name} yet, so ${action} wasn't run. Their card stays up for ${VALID_MS / 3_600_000} hours: if they tap Allow it's done then and you'll see it in this chat; after that it expires. Say in a few words that it's waiting for their OK; don't ask it again.`;
   }
@@ -162,15 +163,16 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     : `error: ${action} wasn't run.`;
 }
 
-// The person wrote a message instead of tapping: their open cards in that chat are skipped (not done, no buttons),
+// The person wrote a message instead of tapping: their open cards in that chat (asked there, or by an agent and shown there) are skipped (not done, no buttons),
 // and a command waiting on one goes on, so the reply can end and their message go in. The skipped cards' ids, and
 // whether a command was waiting.
 export function moveOn(conversationId: string | null) {
   const ids: string[] = [];
   let waited = false;
-  for (const [id, w] of waiting) if (w.conversationId === conversationId) ids.push(id), (waited = true), w.decide("skipped");
+  const here = (c: { conversationId: string; showIn: string | null }) => c.conversationId === conversationId || (!!conversationId && c.showIn === conversationId);
+  for (const [id, w] of waiting) if (here(w)) ids.push(id), (waited = true), w.decide("skipped");
   for (const [id, l] of later)
-    if (l.conversationId === conversationId) ids.push(id), later.delete(id), void keep(id, l.userId, { decision: "skipped" }).catch(() => {});
+    if (here(l)) ids.push(id), later.delete(id), void keep(id, l.userId, { decision: "skipped" }).catch(() => {});
   return { ids, waited };
 }
 

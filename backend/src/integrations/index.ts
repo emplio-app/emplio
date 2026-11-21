@@ -392,7 +392,8 @@ export async function disconnect(who: Who, app: string, account?: string, connec
 // Run an action as this person, and record it whatever happens.
 // account: which of the person's accounts of the app (label), when they have several
 // quiet: only failures go in the run history (polling triggers call every few minutes)
-const MAX_FILE = 25 * 1024 * 1024;
+// the same as Emplio's own files (files.ts MAX_FILE_SIZE); held in memory while it goes through
+const MAX_FILE = 100 * 1024 * 1024;
 
 // {"file": "<path>"} anywhere in an action's input: that file from the agent's computer, read by `read`.
 // ponytail: an app input that is itself an object with only a string "file" key would be taken for one
@@ -405,7 +406,7 @@ const attachFiles = (input: unknown, read?: (path: string) => Promise<Uint8Array
     const bytes = await read(path).catch(() => {
       throw new AppsError(`no file ${path} (give its full path, like /work/tmp/report.xlsx)`);
     });
-    if (bytes.length > MAX_FILE) throw new AppsError(`${path} is over 25 MB`);
+    if (bytes.length > MAX_FILE) throw new AppsError(`${path} is over 100 MB`);
     const name = basename(path);
     return new AppFile(name, Bun.file(name).type.split(";")[0]!, bytes);
   });

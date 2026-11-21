@@ -14,6 +14,7 @@ import {
   CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
+  FolderUpIcon,
   PaperclipIcon,
   PencilIcon,
   RefreshCcwIcon,
@@ -67,6 +68,13 @@ import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
+import { zipFolder } from "@/lib/zip-folder";
+import { toast } from "sonner";
+
+// The server words the common failures for people (chat.ts replyError); anything else (a browser's "Failed to
+// fetch", a JSON body) gets the general line.
+const replyFailed = (message: string) =>
+  /^[A-Z][^{}<>]{10,300}\.$/.test(message.trim()) ? message.trim() : "Something went wrong while generating a reply.";
 import {
   approvalsQueryKey,
   api,
@@ -686,6 +694,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     },
   };
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
 
   // Like Claude/ChatGPT: a just-sent prompt scrolls to the top and the reply fills in below it.
   // The latest turn is made at least one viewport tall so there's room to scroll it up.
@@ -1071,7 +1080,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 {error && !reconnecting && (
                   <div className="flex items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">
                     <TriangleAlertIcon className="size-4 shrink-0 text-destructive" />
-                    <span className="flex-1">{paused ? pausedNote(error.message) : "Something went wrong while generating a reply."}</span>
+                    <span className="flex-1">{paused ? pausedNote(error.message) : replyFailed(error.message)}</span>
                     {/* what it did before failing is saved: carry on from there instead of redoing it */}
                     {paused && me?.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
                     {!paused && messages.at(-1)?.role === "assistant" && (
@@ -1194,6 +1203,29 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             className="rounded-full text-muted-foreground"
           >
             <PaperclipIcon className="size-4" />
+          </PromptInputButton>
+          {/* a whole folder goes as one zip with its sub-folders kept. Not on touch screens: phones can't pick folders */}
+          <input
+            ref={folderInput}
+            type="file"
+            className="hidden"
+            {...{ webkitdirectory: "" }}
+            onChange={async (e) => {
+              const picked = [...(e.currentTarget.files ?? [])];
+              e.currentTarget.value = "";
+              if (!picked.length) return;
+              const zip = await zipFolder(picked, 100 * 1024 * 1024);
+              if (zip) attachments.add([zip]);
+              else toast.error("That folder is empty or over 100 MB");
+            }}
+          />
+          <PromptInputButton
+            tooltip="Attach a folder"
+            aria-label="Attach a folder"
+            onClick={() => folderInput.current?.click()}
+            className="hidden rounded-full text-muted-foreground pointer-fine:inline-flex"
+          >
+            <FolderUpIcon className="size-4" />
           </PromptInputButton>
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
           {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}

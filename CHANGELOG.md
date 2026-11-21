@@ -2,6 +2,46 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.3 (2026-11-21)
+
+### What's new
+
+- Long WhatsApp messages that were quoted before 1.3.2 now reach Emplio in full too, not cut after 300 characters.
+- Emplio knows it can fetch older WhatsApp messages from your phone when a chat has little saved.
+
+### For developers
+
+- `whatsapp/account.go` `fullQuote`: quotes saved cut ("…") are read again from the saved raw message. Takes effect once the WhatsApp worker is redeployed.
+- `whatsapp_linked` `list_chats`, `get_messages` and `search_messages` point to `load_older_messages`.
+- Next.js 16.4.2 → 16.4.6 (#336).
+
+## 1.3.2 (2026-11-21)
+
+### What's new
+
+- When a reply fails, the message says why when it's a common reason (the model is busy, the chat got too long, the model isn't available) instead of only "Something went wrong".
+- Replying in your main chat now closes the Allow cards an agent showed there, the same as replying in the agent's own chat.
+- Voice input types into the box your cursor is in, so it works in a reply box too.
+- Notification popups show at most 4 lines.
+- Files up to 100 MB can go to and come from your apps (Google Drive uploads, Gmail attachments), up from 25 MB.
+- Emplio's thinking shows headings, bold text and lists properly.
+- Tables in replies look cleaner, and long ones show in full instead of in a small scrolling box.
+- Attach a whole folder on a computer: it goes as one zip, with its sub-folders kept.
+- A zip too big to import now says so, instead of "Nothing in what you picked".
+- A long WhatsApp message someone replies to reaches Emplio in full, not cut after 300 characters.
+- Background rounds run every 4 hours by default instead of every 2.
+
+### For developers
+
+- `approvals.ts` `moveOn` also skips cards shown in the chat (`showIn`), not only cards asked there (#325).
+- `chat.ts` `replyError` maps common provider failures (429, 402, 401/403, 404 and "banned" models, context length, 5xx and timeouts) to plain messages; the chat's error card shows them (#321, #314).
+- `voice-input.tsx` writes into a focused reply note (`data-quote-note`) (#323); the in-app toast title is clamped to 4 lines (#320).
+- App file limit 25 → 100 MB in `integrations/index.ts` and `composio.ts` (#315).
+- Thinking text renders with `MessageResponse` (#312); Streamdown tables restyled in `globals.css`, 300px height cap removed (#313).
+- `lib/zip-folder.ts`: picked folders become one stored zip (#309); the import page reports ZIP64 zips as too big (#322).
+- `whatsapp/text.go` `QuotedOf` keeps up to 4000 characters (#327). Takes effect once the WhatsApp worker is redeployed.
+- Background rounds default to every 4 hours (#308).
+
 ## 1.3.1 (2026-11-20)
 
 ### What's new

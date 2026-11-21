@@ -683,3 +683,32 @@ html[data-desktop]:not([data-desktop="darwin"]) [data-slot="sidebar-inset"] head
 .pdf-words .markedContent { display: contents; }
 .pdf-words ::selection { background: color-mix(in oklab, var(--color-primary, #2563eb) 30%, transparent); }
 .pdf-words br::selection { background: transparent; }
+
+/* Tables in replies (Streamdown's own markup): one light frame instead of a box in a box, the whole table shown
+   instead of a 300px scroll box that cut the last row, softer row lines, cells that don't squeeze to one word. */
+[data-streamdown="table-wrapper"]:not([data-streamdown="table-fullscreen"] > *) {
+  @apply gap-1 border-0 bg-transparent p-0;
+}
+[data-streamdown="table-wrapper"] > div:last-child {
+  max-height: none !important;
+  @apply rounded-lg border-border/70;
+}
+[data-streamdown="table"],
+[data-streamdown="table-body"] {
+  @apply divide-y-0;
+}
+[data-streamdown="table-header"] {
+  @apply bg-muted/50;
+}
+[data-streamdown="table-row"] {
+  @apply border-b border-border/50 last:border-b-0;
+}
+[data-streamdown="table-header"] [data-streamdown="table-row"] {
+  @apply border-b-border/70;
+}
+[data-streamdown="table-header-cell"] {
+  @apply px-3 py-2 text-xs font-medium text-muted-foreground;
+}
+[data-streamdown="table-cell"] {
+  @apply min-w-24 px-3 py-2 align-top leading-relaxed;
+}
