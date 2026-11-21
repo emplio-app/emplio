@@ -1457,9 +1457,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 {asks.length ? (
                   // waiting for their tap: here whatever they're typing or Emplio is doing, until answered
                   <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 flex max-h-[min(28rem,50dvh)] flex-col gap-2 pb-2">
-                    {asks.map((a) => (
-                      <ApprovalAsk key={a.id} approval={a} />
-                    ))}
+                    {/* one at a time: stacked, each shrank to a clipped title (ten from one job) */}
+                    <ApprovalAsk key={asks[0].id} approval={asks[0]} />
+                    {asks.length > 1 && <p className="text-center text-xs text-muted-foreground">{asks.length - 1} more waiting after this</p>}
                   </div>
                 ) : (
                   nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
