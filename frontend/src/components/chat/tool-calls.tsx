@@ -16,6 +16,7 @@ import { PlanCard } from "@/components/chat/plan-card";
 
 // a file the command made (backend made.ts); older messages have no id
 type Saved = { id?: string; url: string; filename: string; mediaType?: string };
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
@@ -174,7 +175,13 @@ function Thought({ text, thinking, ms }: { text: string; thinking: boolean; ms?:
       >
         <div className="min-h-0 overflow-hidden">
           <div className="mt-1.5 flex max-h-72 flex-col-reverse overflow-y-auto border-l pl-3 [contain:content]">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{text.trim()}</p>
+            {/* its markdown drawn like a reply's, kept small and quiet: headings no bigger than the text */}
+            <MessageResponse
+              isAnimating={thinking}
+              className="text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere] [&_h1,&_h2,&_h3,&_h4,&_h5,&_h6]:my-2 [&_h1,&_h2,&_h3,&_h4,&_h5,&_h6]:text-sm [&_h1,&_h2,&_h3,&_h4,&_h5,&_h6]:font-semibold"
+            >
+              {text.trim()}
+            </MessageResponse>
           </div>
         </div>
       </div>

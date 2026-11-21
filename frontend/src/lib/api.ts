@@ -149,7 +149,8 @@ export function useLiveEvents() {
         const frame = JSON.parse(e.data as string) as { type: string; body?: string; path?: string };
         if (frame.type === "note" && frame.body && frame.path) {
           const path = frame.path;
-          toast(frame.body, { duration: 8000, action: { label: "Open", onClick: () => router.push(path) } });
+          // a long reply would cover the chat: 4 lines, then cut
+          toast(frame.body, { duration: 8000, classNames: { title: "line-clamp-4" }, action: { label: "Open", onClick: () => router.push(path) } });
         }
       };
       socket.onclose = () => {
