@@ -132,7 +132,7 @@ export const whatsapp_linked: OwnApp = {
     },
     list_chats: {
       description:
-        "The WhatsApp's chats, newest activity first, groups included, with unread counts. Use query to find a person or group by name or number. Only messages from about when it was linked (plus the recent history WhatsApp copied over then) are there.",
+        "The WhatsApp's chats, newest activity first, groups included, with unread counts. Use query to find a person or group by name or number. Only messages from about when it was linked (plus the recent history WhatsApp copied over then) are there; load_older_messages fetches earlier ones.",
       readOnly: true,
       input: z.object({
         query: z.string().max(200).optional().describe("Part of a name or phone number to look for"),
@@ -144,7 +144,7 @@ export const whatsapp_linked: OwnApp = {
         wa("GET", `/accounts/${account(key)}/chats?${q({ query: i.query, kind: i.kind, unread: i.unread_only || undefined, limit: i.limit })}`),
     },
     get_messages: {
-      description: "Messages in one chat, oldest first (the latest `limit` of them, or those in a time range). Voice notes, photos and files show as labels; fetch them with download_media.",
+      description: "Messages in one chat, oldest first (the latest `limit` of them, or those in a time range). Voice notes, photos and files show as labels; fetch them with download_media. Older messages: load_older_messages first.",
       readOnly: true,
       input: z.object({
         chat,
@@ -164,7 +164,7 @@ export const whatsapp_linked: OwnApp = {
       run: async (i: { after?: string; limit: number }, key) => wa("GET", `/accounts/${account(key)}/recent?${q(i)}`),
     },
     search_messages: {
-      description: "Search every chat's messages (or one chat's) for words, newest first. Each word must appear.",
+      description: "Search every chat's messages (or one chat's) for words, newest first. Each word must appear. Only saved messages are searched; load_older_messages fetches earlier ones in a chat.",
       readOnly: true,
       input: z.object({
         query: z.string().min(1).max(500).describe("Words to find"),
