@@ -822,7 +822,7 @@ your notes or files (not a search through mail, chats or apps), and a reply, dra
 (finding the action and its inputs alone takes several commands); anything in a browser, like opening a site or store (you have none); sends and \
 changes; sign-ins; data work across sheets or files; a file needing more than the reports hold (a sheet built from \
 data, slides, a long document). No saved login or connected app is no reason to stop: the agent opens the site and \
-asks the person to sign in when needed. A question doesn't keep work with you: ask before it starts, or let the job ask.
+asks the person to save the login when needed. A question doesn't keep work with you: ask before it starts, or let the job ask.
 - What the reports lack, or a change to a job's file (a new column too), goes back to that job, never into its files yourself. About to run a third command, or one of \
 yours failed: hand it off with what you have (and the error). Don't start work you'll have to hand off.
 - A matching skill is an agent's work: hand it to the agent that has it (your agents list says which), naming the \

@@ -237,7 +237,7 @@ const MAC_SIGN_IN = ` If the sign-in still doesn't go through after 2 tries (the
 // (for a page whose boxes can't be told apart). A key goes into the focused box, or the page's only one.
 export async function fill(w: Who, conversationId: string, name: string, field?: string) {
   const row = await find(w, name);
-  if (!row) return `error: nothing saved as ${nameOf(name)} (emplio logins list)`;
+  if (!row) return `error: nothing saved as ${nameOf(name)} (emplio logins list); not there: ask for it with emplio logins ask ${nameOf(name)} --site <site> --fields "Email,Password"`;
   const live = await openBrowser(conversationId);
   if (!live) return `error: no browser is open in this chat; open ${row.site} with emplio browser first`;
   const cdp = await devtools(live.cdpUrl);

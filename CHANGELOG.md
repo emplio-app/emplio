@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.5 (2026-11-21)
+
+### What's new
+
+- When a site isn't signed in and no login is saved, Emplio asks you to save the login first instead of asking how you want to sign in. Once saved, it signs in by itself next time. Signing in yourself in the browser is still there if you'd rather not save it.
+
+### For developers
+
+- Agent instructions (`sandbox.ts`, `jobs.ts`): with nothing saved, `emplio logins ask` comes first; browser sign-in only if the person declines or the site has only "Continue with Google" (#331).
+- `emplio logins fill` with nothing saved now points to `emplio logins ask`.
+
 ## 1.3.4 (2026-11-21)
 
 ### What's new
