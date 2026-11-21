@@ -851,7 +851,7 @@ func (a *Account) Present(m Message) map[string]any {
 		"type": m.Type, "text": m.Text, "has_media": media[m.Type],
 	}
 	if m.Quoted != nil {
-		out["replying_to"] = *m.Quoted
+		out["replying_to"] = fullQuote(&m)
 	}
 	if m.FromMe && m.Ack > 0 && m.Ack < len(ackNames) {
 		out["status"] = ackNames[m.Ack]
@@ -975,6 +975,21 @@ func (a *Account) Send(chat string, msg *waE2E.Message) (any, error) {
 		return map[string]any{"sent": true}, nil
 	}
 	return a.Present(kept), nil
+}
+
+// fullQuote is a saved message's quote, whole: ones saved before Nov 21 2026 were cut at 300 characters, and the
+// message as WhatsApp sent it still has them in full.
+func fullQuote(m *Message) string {
+	if !strings.HasSuffix(*m.Quoted, "…") || m.Raw == nil {
+		return *m.Quoted
+	}
+	var w waE2E.Message
+	if proto.Unmarshal(m.Raw, &w) == nil {
+		if q := QuotedOf(&w); q != "" {
+			return q
+		}
+	}
+	return *m.Quoted
 }
 
 // Raw is a saved message as WhatsApp sent it.
