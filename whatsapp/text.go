@@ -131,14 +131,15 @@ func contextOf(m *waE2E.Message) *waE2E.ContextInfo {
 	return nil
 }
 
-// QuotedOf is the message quoted in a reply, short.
+// QuotedOf is the message quoted in a reply: whole, as a long one ("Read more" in WhatsApp) cut at 300 characters
+// was read as all there was. Only a very long one is cut, and says so.
 func QuotedOf(m *waE2E.Message) string {
 	_, t, ok := TextOf(contextOf(m).GetQuotedMessage())
 	if !ok {
 		return ""
 	}
-	if r := []rune(t); len(r) > 300 {
-		return string(r[:300]) + "…"
+	if r := []rune(t); len(r) > 4000 {
+		return string(r[:4000]) + "… (cut here; the full message is earlier in the chat)"
 	}
 	return t
 }
