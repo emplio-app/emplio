@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.3 (2026-11-21)
+
+### What's new
+
+- Long WhatsApp messages that were quoted before 1.3.2 now reach Emplio in full too, not cut after 300 characters.
+- Emplio knows it can fetch older WhatsApp messages from your phone when a chat has little saved.
+
+### For developers
+
+- `whatsapp/account.go` `fullQuote`: quotes saved cut ("…") are read again from the saved raw message. Takes effect once the WhatsApp worker is redeployed.
+- `whatsapp_linked` `list_chats`, `get_messages` and `search_messages` point to `load_older_messages`.
+- Next.js 16.4.2 → 16.4.6 (#336).
+
 ## 1.3.2 (2026-11-21)
 
 ### What's new
