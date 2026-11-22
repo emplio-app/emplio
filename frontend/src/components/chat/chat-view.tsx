@@ -39,6 +39,7 @@ import {
   MessageAction,
   MessageActions,
   MessageContent,
+  MessageResponse,
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
@@ -1005,8 +1006,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         ) : (message.role === "assistant" || text) && (
           <MessageContent className="text-[0.9rem] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
             {message.role === "user" ? (
-              <LongText>
-                <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
+              <LongText markdown={fromEmplio || MARKDOWN.test(text)}>
+                {/* Emplio's briefs, and anything typed with markdown (bold, lists, headings, code), show formatted;
+                    plain messages keep their @mention and /command highlights */}
+                {fromEmplio || MARKDOWN.test(text) ? (
+                  <MessageResponse className="leading-relaxed [&_li]:my-1">{userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)}</MessageResponse>
+                ) : (
+                  <QuotedText text={userFacingText(text)} marks={sentMarks(message)} links={sentLinks(message)} />
+                )}
               </LongText>
             ) : isLast && busy && message.parts.every((p) => p.type !== "text" && !isStep(p.type) && !(p.type === "reasoning" && p.text.trim())) ? (
               thinking(message)
@@ -1663,8 +1670,11 @@ function EditableTitle({ id, title }: { id: string; title: string }) {
 }
 
 // A long sent message folds to its first lines; "Show more" opens it.
-function LongText({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLParagraphElement>(null);
+// enough markdown in a sent message to be worth formatting: **bold**, `code`, a list, a heading or a fenced block
+const MARKDOWN = /\*\*\S|`[^`\n]+`|^\s*(?:[-*+]|\d+\.)\s+\S|^#{1,6}\s|^```/m;
+
+function LongText({ children, markdown }: { children: React.ReactNode; markdown?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -1673,9 +1683,9 @@ function LongText({ children }: { children: React.ReactNode }) {
   }, [children, open]);
   return (
     <>
-      <p ref={ref} className={cn("whitespace-pre-wrap [overflow-wrap:anywhere]", !open && "line-clamp-8")}>
+      <div ref={ref} className={cn("[overflow-wrap:anywhere]", !markdown && "whitespace-pre-wrap", !open && "line-clamp-8")}>
         {children}
-      </p>
+      </div>
       {long && (
         <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-sm font-medium text-muted-foreground hover:text-foreground">
           {open ? "Show less" : "Show more"}
