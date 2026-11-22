@@ -5,7 +5,6 @@ import type { Client, ClientInput, ClientStage, Task, TeamMember } from "@emplio
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRightIcon,
-  ChevronDownIcon,
   Building2Icon,
   CalendarIcon,
   CheckIcon,
@@ -22,13 +21,17 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxValue,
+  useComboboxAnchor,
+} from "@/components/ui/combobox";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -429,8 +432,6 @@ function ClientDetails({
   const [name, setName] = useState(c.name);
   const open = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
   const handlerIds = c.handlers.map((h) => h.id);
-  const toggleHandler = (id: string) =>
-    onChange({ handlerIds: handlerIds.includes(id) ? handlerIds.filter((h) => h !== id) : [...handlerIds, id] });
   return (
     <>
       <SheetHeader className="gap-3 border-b pr-12">
@@ -477,30 +478,7 @@ function ClientDetails({
             </SelectContent>
           </Select>
           <Label className="text-muted-foreground">Handled by</Label>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={!admin}
-              render={<Button variant="outline" className="w-full justify-between gap-2 px-3 font-normal" />}
-            >
-              <span className="truncate">
-                {c.handlers.length ? c.handlers.map((h) => h.name).join(", ") : <span className="text-muted-foreground">Pick who looks after them</span>}
-              </span>
-              <ChevronDownIcon className="text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-64">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Who looks after {c.name}</DropdownMenuLabel>
-                {team.map((m) => (
-                  <DropdownMenuCheckboxItem key={m.id} checked={handlerIds.includes(m.id)} onCheckedChange={() => toggleHandler(m.id)} closeOnClick={false}>
-                    <span className="grid min-w-0">
-                      <span className="truncate">{m.name ?? m.email}</span>
-                      {m.name && <span className="truncate text-xs text-muted-foreground">{m.email}</span>}
-                    </span>
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <HandlerPicker clientName={c.name} team={team} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlerIds: ids })} />
         </div>
 
         <section className="grid gap-2">
@@ -561,5 +539,48 @@ function ClientDetails({
         </Button>
       </SheetFooter>
     </>
+  );
+}
+
+// Who looks after a client: type to find someone, pick as many as handle them, remove with the x.
+function HandlerPicker({ clientName, team, value, disabled, onChange }: { clientName: string; team: TeamMember[]; value: string[]; disabled: boolean; onChange: (ids: string[]) => void }) {
+  const anchor = useComboboxAnchor();
+  const chosen = team.filter((m) => value.includes(m.id));
+  return (
+    <Combobox
+      multiple
+      items={team}
+      value={chosen}
+      onValueChange={(next: TeamMember[]) => onChange(next.map((m) => m.id))}
+      itemToStringLabel={(m: TeamMember) => `${m.name ?? ""} ${m.email}`}
+      isItemEqualToValue={(a: TeamMember, b: TeamMember) => a.id === b.id}
+      disabled={disabled}
+    >
+      <ComboboxChips ref={anchor} className="min-h-9 w-full">
+        <ComboboxValue>
+          {(picked: TeamMember[]) => (
+            <>
+              {picked.map((m) => (
+                <ComboboxChip key={m.id}>{m.name ?? m.email}</ComboboxChip>
+              ))}
+              <ComboboxChipsInput placeholder={picked.length ? "Add someone" : `Who looks after ${clientName}?`} />
+            </>
+          )}
+        </ComboboxValue>
+      </ComboboxChips>
+      <ComboboxContent anchor={anchor} className="min-w-(--anchor-width)">
+        <ComboboxEmpty>Nobody on the team matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(m: TeamMember) => (
+            <ComboboxItem key={m.id} value={m}>
+              <span className="grid min-w-0">
+                <span className="truncate">{m.name ?? m.email}</span>
+                {m.name && <span className="truncate text-xs text-muted-foreground">{m.email}</span>}
+              </span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   );
 }
