@@ -15,7 +15,8 @@ if (!res.ok) {
 }
 const page = (await res.text()).replace(/\\\\n/g, " ").replace(/\\"/g, '"');
 const listed = (key: string) => {
-  const from = page.indexOf(`"${key}":[`);
+  // the page may start with an empty "<key>":[] before the real list
+  const from = page.indexOf(`"${key}":[{`) >= 0 ? page.indexOf(`"${key}":[{`) : page.indexOf(`"${key}":[`);
   if (from < 0) return [];
   const part = page.slice(from);
   const end = part.search(/\}\],"/);

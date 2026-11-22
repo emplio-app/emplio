@@ -6,7 +6,7 @@ description: Build a complete Emplio integration of our own from just an app's n
 # New integration
 
 Input: an app's name. Output: one PR where that app connects, can do everything its API allows, and can start
-automations from everything it can report.
+automations from everything it can report, plus its public page on the website (a second PR, in `cloud/`).
 
 **Coverage is the job.** Six actions and one trigger is a broken integration, because Emplio will tell people it can't
 do the other forty things. Every operation becomes an action and every event becomes a trigger, unless `COVERAGE.md`
@@ -165,6 +165,28 @@ Also register app-wide webhooks in the app's dashboard if that's the only way it
 
 If the app hosts code, one line in `HOSTS` in `git-proxy.ts` plus its login gives `git` on Emplio's computer too.
 
+**Website page and docs.** Every app also gets a public page at `emplio.app/integrations/<app>`, which is how people find
+it in search. It's part of the job, not a follow-up.
+
+- `cloud/frontend/seo/apps.ts` (the private `cloud/` repo): one `AppPage` (type in `seo/base.ts`). Copy a neighbour
+  of the same kind (ClickUp for projects, HubSpot for CRM, Zoho Desk for support) for shape and length, then write it fresh:
+  title, description, headline, answer, a short story, a chat scene with an approval card, four `can`, `starts` from the
+  real triggers, four `asks`, a one-line `connect`, and FAQs ending with the shared `ASKS`. Put it next to related apps.
+- Only what the connection really does: read the catalog line, `COVERAGE.md` and the triggers before writing.
+- Everyday business words, "Emplio", global example names (Northwind, Sarah), and nothing about what Emplio lacks or where
+  another tool wins.
+- `cloud/frontend/components/site-page.tsx`: add the app's name to `LOGOS` (`"<Name>": "<app>.svg"`, served from
+  `frontend/public/logos`).
+- `docs/guide/integrations.mdx`: add it to the "Apps you can connect" table. If it's well known, add it to the app chips
+  in `cloud/frontend/seo/guides.ts` too.
+- Typecheck the cloud frontend. `cloud/` is its own git repo: it gets its own branch and PR.
+
+**Changelog.** Going live means a new `CHANGELOG.md` version (see CONTRIBUTING.md). Its "What's new" line says in everyday
+words what people can now get done, and ends with a picture: `frontend/public/whats-new/<version>-<name>.webp`, 1920×1080,
+in the style of `1.2.91-integrations.webp` (a headline on the left, the apps' logos in white tiles on the right). Draw it
+as an HTML page, screenshot it with headless Chrome, convert with `cwebp`, and look at it before using it. Several apps
+going live together share one line and one picture.
+
 ## 6. Check it
 
 ```bash
@@ -224,4 +246,4 @@ read -rs "S?<App> client secret: "; printf '\n<APP>_CLIENT_ID=<id>\n<APP>_CLIENT
 - Work on a branch. Commit and push only when asked, with no AI attribution anywhere.
 - PR, the user merges, then production, and ask before it goes live.
 - Words people see say "Emplio", in plain business language. UI uses shadcn components only.
-- Close by telling the user what's left for them: the OAuth secret, and anything not tested live.
+- Close by telling the user what's left for them: the OAuth secret, the website page's PR in `cloud/`, and anything not tested live.

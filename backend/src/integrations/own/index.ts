@@ -64,6 +64,21 @@ import { zoho_mail } from "./zoho_mail";
 import { postgresql } from "./postgresql";
 import { mysql } from "./mysql";
 import { whatsapp_linked } from "./whatsapp_linked";
+import { harvest } from "./harvest";
+import { toggl } from "./toggl";
+import { clockify } from "./clockify";
+import { jira } from "./jira";
+import { linear } from "./linear";
+import { monday } from "./monday";
+import { pandadoc } from "./pandadoc";
+import { shiprocket } from "./shiprocket";
+import { gohighlevel } from "./gohighlevel";
+import { productive } from "./productive";
+import { pipedrive } from "./pipedrive";
+import { zendesk } from "./zendesk";
+import { freshdesk } from "./freshdesk";
+import { dropbox_sign } from "./dropbox_sign";
+import { trello } from "./trello";
 
 export type OwnAction = {
   description: string;
@@ -134,7 +149,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
