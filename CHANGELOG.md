@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.8 (2026-11-22)
+
+### What's new
+
+- Emplio can list every WhatsApp group you're in at once, or only the ones a given person is in, and see where you're an admin, instead of checking groups one by one.
+- Your linked WhatsApp is protected from asking WhatsApp too much: lookups are capped at 30 a minute and 300 an hour, group changes at 30 an hour and 100 a day, and if WhatsApp ever says "too many", Emplio stops reaching it for 15 minutes and tells you, while your saved chats stay readable.
+
+### For developers
+
+- `whatsapp/limits.go`: per-account pacing by route (`r.Pattern`): live lookups 30/min and 300/hour, group changes 30/hour and 100/day, a 15-minute pause on "rate-overlimit" that also stops sends; local reads are never counted.
+- Group details are kept for 10 minutes (`groupInfo`, `joinedGroups`); any group change drops them.
+- New `GET /accounts/{id}/groups?with=` and `whatsapp_linked.list_groups`. Group adds and new groups no longer count as sends; they count as group changes.
+- Takes effect once the WhatsApp worker is redeployed.
+
 ## 1.3.7 (2026-11-21)
 
 ### What's new

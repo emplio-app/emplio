@@ -92,6 +92,7 @@ type Account struct {
 	// closed once WhatsApp has handed over what came in while it was away
 	caughtUp chan struct{}
 	stopLink context.CancelFunc
+	p        pace
 }
 
 func OpenAccount(dataDir, id string) (*Account, error) {
@@ -920,12 +921,15 @@ func (a *Account) replying(jid string) bool {
 // Knows: a person or group this account already chats with, or has in its contacts.
 func (a *Account) Knows(jid string) bool { return a.store.HasChat(jid) || a.store.NameOf(jid) != "" }
 
-// UnderLimit: not too many sends (and group adds, statuses, channel posts) lately.
+// UnderLimit: not too many sends (and statuses, channel posts) lately. Group changes have their own (limits.go).
 func (a *Account) UnderLimit() error { return a.limit(false) }
 
 // limit: replies count every send against the higher limits; anything else counts only the other non-replies.
 // ponytail: so the busiest hour is 60 replies plus 20 others; one shared cap if that ever matters
 func (a *Account) limit(reply bool) error {
+	if err := a.cooling(); err != nil {
+		return err
+	}
 	hour, day, what := LimitHour, LimitDay, " to chats that haven't written in the last day"
 	if reply {
 		hour, day, what = ReplyHour, ReplyDay, ""
