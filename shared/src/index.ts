@@ -585,10 +585,30 @@ export type Task = {
   // the AI is working on it right now (its work chat is replying)
   running: boolean;
   chases: number;
+  // the client it's for (clients.ts)
+  clientId: string | null;
+  clientName: string | null;
   createdAt: string;
   doneAt: string | null;
 };
-export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null };
+export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; clientId?: string | null };
+
+// A client of the business (backend clients.ts): the Clients page and `emplio clients`. Their notes are the file
+// company/knowledge/clients/<slug>.md.
+export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
+export type ClientStage = (typeof CLIENT_STAGES)[number];
+export type Client = {
+  id: string;
+  slug: string;
+  name: string;
+  stage: ClientStage;
+  handlers: { id: string; name: string }[];
+  // tasks not done or cancelled, and how many of them wait on someone
+  openTasks: number;
+  waitingTasks: number;
+  updatedAt: string;
+};
+export type ClientInput = { name?: string; stage?: ClientStage; handlerIds?: string[] };
 
 // A file the AI employee made (backend made.ts): the Files page and the previews in the chat.
 export type MadeFile = {

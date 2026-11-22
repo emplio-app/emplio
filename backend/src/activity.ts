@@ -23,6 +23,7 @@ export type Kind =
   | "settings"
   | "connection"
   | "task"
+  | "client"
   | "problem";
 
 type Entry = {

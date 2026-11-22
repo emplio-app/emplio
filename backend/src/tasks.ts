@@ -21,7 +21,8 @@ import { isReplying } from "./live";
 import { chatLink, heldBack, mainChat, post, sendTo } from "./channels";
 import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
-import { conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
+import { clients, conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
+import { findClient } from "./clients";
 import { listTeam } from "./team";
 
 type Who = { workspaceId: string; userId: string; role: Role };
@@ -60,6 +61,8 @@ async function agentNames(rows: Row[], workspaceId: string) {
 async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
   const names = new Map((await listTeam(workspaceId)).map((m) => [m.id, m.name ?? m.email]));
   const agents = await agentNames(rows, workspaceId);
+  const ids = [...new Set(rows.flatMap((t) => (t.clientId ? [t.clientId] : [])))];
+  const clientNames = new Map(ids.length ? (await db.select({ id: clients.id, name: clients.name }).from(clients).where(inArray(clients.id, ids))).map((c) => [c.id, c.name]) : []);
   return rows.map((t) => withName({
     id: t.id,
     title: t.title,
@@ -77,6 +80,8 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
     // "doing" says it was picked up, not that a run is going now (a run cut off, or set by hand)
     running: !!t.workConversationId && isReplying(t.workConversationId),
     chases: t.chases,
+    clientId: t.clientId,
+    clientName: t.clientId ? (clientNames.get(t.clientId) ?? null) : null,
     createdAt: t.createdAt.toISOString(),
     doneAt: t.doneAt?.toISOString() ?? null,
     assigneeName: t.assigneeId ? (names.get(t.assigneeId) ?? "(left the team)") : AI,
@@ -84,8 +89,8 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
 }
 const withName = (t: Task): Task => (t.agentName ? { ...t, assigneeName: `the ${t.agentName} agent` } : t);
 
-// assignee: a user id, null for the AI, undefined for anyone. open: not done or cancelled. due: due by now.
-export async function listTasks(w: Who, f: { assignee?: string | null; open?: boolean; due?: boolean; mine?: boolean } = {}) {
+// assignee: a user id, null for the AI, undefined for anyone. open: not done or cancelled. due: due by now. client: theirs only.
+export async function listTasks(w: Who, f: { assignee?: string | null; open?: boolean; due?: boolean; mine?: boolean; client?: string } = {}) {
   const where: (SQL | undefined)[] = [eq(tasks.workspaceId, w.workspaceId)];
   // ponytail: direct reports only; walk the whole chain below them if teams get deep
   if (f.mine) where.push(or(eq(tasks.assigneeId, w.userId), eq(tasks.requesterId, w.userId)));
@@ -94,6 +99,7 @@ export async function listTasks(w: Who, f: { assignee?: string | null; open?: bo
   else if (f.assignee) where.push(eq(tasks.assigneeId, f.assignee));
   if (f.open) where.push(inArray(tasks.status, OPEN));
   if (f.due) where.push(lte(tasks.dueAt, new Date()));
+  if (f.client) where.push(eq(tasks.clientId, f.client));
   const rows = await db
     .select()
     .from(tasks)
@@ -112,6 +118,10 @@ async function check(w: Who, input: TaskInput) {
       where: and(eq(workspaceMembers.workspaceId, w.workspaceId), eq(workspaceMembers.userId, input.assigneeId)),
     });
     if (!m) return "that person isn't on the team";
+  }
+  if (input.clientId) {
+    const c = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, input.clientId)) });
+    if (!c) return "no such client (emplio clients list)";
   }
   if (input.agent) {
     if (input.assigneeId) return "a task goes to a person or to an agent, not both";
@@ -145,6 +155,7 @@ export async function addTask(w: Who, input: TaskInput, conversationId?: string)
       requesterId: w.userId,
       dueAt: input.dueAt ? parseDue(input.dueAt, await timezoneOf(w.userId)) : null,
       conversationId: conversationId || null,
+      clientId: input.clientId ?? null,
       doneAt: status === "done" ? new Date() : null,
     })
     .returning();
@@ -174,6 +185,7 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
   if (input.title !== undefined) set.title = input.title.trim();
   if (input.notes !== undefined) set.notes = input.notes?.trim() || null;
   if (input.waitingOn !== undefined) set.waitingOn = input.waitingOn?.trim() || null;
+  if (input.clientId !== undefined) set.clientId = input.clientId;
   if (input.assigneeId !== undefined) set.assigneeId = input.assigneeId;
   // a person or an agent: picking one drops the other
   if (input.assigneeId) set.agent = null;
@@ -449,9 +461,10 @@ export async function chase() {
 
 // --- `emplio tasks` ---
 
-const USAGE = `usage: emplio tasks list [--all] [--ai] [--who <name or email>] [--due] [--done]
+const USAGE = `usage: emplio tasks list [--all] [--ai] [--who <name or email>] [--client <name>] [--due] [--done]
                                         open tasks, soonest due first (staff: theirs only; --all: everyone's,
-                                        owner and admins; --ai: yours; --due: due by now; --done: finished too)
+                                        owner and admins; --ai: yours; --client: one client's, everyone's you
+                                        may see; --due: due by now; --done: finished too)
        emplio tasks search <words>                tasks with every word in the title, notes or waiting-on, done ones too
        emplio tasks show <id>                     one task in full
        emplio tasks add <title> [options]         a new task, asked for by this chat's person
@@ -462,7 +475,8 @@ options: --to <email, name, me or ai>  who does it (default: ai)
          --due <YYYY-MM-DD[ HH:MM]>    when it's due, on this chat's person's clock (a date alone: 6 pm); "none" clears it
          --notes <text>                how to do it: steps, the skill to follow, links
          --status todo|doing|waiting|done|cancelled
-         --waiting <text>              who or what it's waiting on
+         --waiting <text>              who or what it's waiting on (a client: their name)
+         --client <name>               the client it's for (emplio clients list); "none" clears it
          --agent <name>                the agent of yours that does it (emplio agents list); "none": you
                                        do it yourself
          --actions a,b                 with --every: every app action its runs take that sends or changes something
@@ -480,12 +494,12 @@ export const line = (t: Task, tz: string) =>
     t.status,
     t.dueAt ? when(new Date(t.dueAt), tz) : "no due date",
     t.assigneeName,
-    t.title + (t.waitingOn ? ` (waiting on ${t.waitingOn})` : "") + (t.requesterName ? ` [asked by ${t.requesterName}]` : ""),
+    (t.clientName ? `${t.clientName}: ` : "") + t.title + (t.waitingOn ? ` (waiting on ${t.waitingOn})` : "") + (t.requesterName ? ` [asked by ${t.requesterName}]` : ""),
   ].join("\t");
 
 // A repeating task is an automation underneath (automations.ts): `repeat` saves one, as this chat's person.
 // asked by code (the Python library): a task as data
-const asData = (t: Task) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt ? new Date(t.dueAt).toISOString() : null, assignee: t.assigneeName, agent: t.agentName, waiting_on: t.waitingOn ?? null, asked_by: t.requesterName ?? null });
+const asData = (t: Task) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt ? new Date(t.dueAt).toISOString() : null, assignee: t.assigneeName, agent: t.agentName, waiting_on: t.waitingOn ?? null, asked_by: t.requesterName ?? null, client: t.clientName ?? null });
 
 export async function tasksCommand(w: Who, conversationId: string, args: string[], repeat?: (name: string, file: string) => Promise<string>, data = false) {
   const [sub, ...rest] = args;
@@ -495,7 +509,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
     // list's options are on/off but --who; the others take a value (add's --due is a date)
-    if (a.startsWith("--")) opts[a.slice(2)] = sub === "list" && a !== "--who" ? "" : (rest[++i] ?? "");
+    if (a.startsWith("--")) opts[a.slice(2)] = sub === "list" && a !== "--who" && a !== "--client" ? "" : (rest[++i] ?? "");
     else words.push(a);
   }
   const team = await listTeam(w.workspaceId);
@@ -510,10 +524,20 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     if (loose.length === 1) return loose[0]!.id;
     return `error: ${loose.length ? `"${s}" matches ${loose.map((m) => m.name ?? m.email).join(", ")}; use their email` : `nobody on the team matches "${s}" (emplio team list)`}`;
   };
-  const input = (): TaskInput | string => {
+  // the client named in --client: its id, null for "none", undefined when not given, or "error: ..."
+  const client = async (): Promise<string | null | undefined> => {
+    if (opts.client === undefined) return undefined;
+    if (opts.client.trim().toLowerCase() === "none") return null;
+    const c = await findClient(w.workspaceId, opts.client);
+    return typeof c === "string" ? `error: ${c}` : c.id;
+  };
+  const input = async (): Promise<TaskInput | string> => {
     const to = person(opts.to);
     if (typeof to === "string" && to.startsWith("error:")) return to;
+    const c = await client();
+    if (c?.startsWith("error:")) return c;
     const i: TaskInput = {};
+    if (c !== undefined) i.clientId = c;
     if (to !== undefined) i.assigneeId = to;
     if (opts.due !== undefined) i.dueAt = opts.due === "none" ? null : opts.due;
     if (opts.notes !== undefined) i.notes = opts.notes;
@@ -534,11 +558,14 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   if (sub === "list") {
     const who = person(opts.who);
     if (typeof who === "string" && who.startsWith("error:")) return who;
+    const c = await client();
+    if (c?.startsWith("error:")) return c;
     const list = await listTasks(w, {
       assignee: "ai" in opts ? null : (who ?? undefined),
       open: !("done" in opts),
       due: "due" in opts,
-      mine: !("all" in opts) && !("ai" in opts) && who === undefined,
+      mine: !("all" in opts) && !("ai" in opts) && who === undefined && !c,
+      client: c ?? undefined,
     });
     // the repeating and event ones too, so the work list is one list (only in the plain list, not a filtered one)
     const plain = !Object.keys(opts).length;
@@ -578,13 +605,13 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     return await repeat(name, file);
   }
   if (sub === "add" && words.length) {
-    const i = input();
+    const i = await input();
     if (typeof i === "string") return i;
     const r = await addTask(w, { assigneeId: null, ...i, title: words.join(" ") }, conversationId);
     return r.ok ? `added ${show(r.task)}` : `error: ${r.error}`;
   }
   if (sub === "update" && words[0]) {
-    const i = input();
+    const i = await input();
     if (typeof i === "string") return i;
     if (!Object.keys(i).length) return USAGE;
     const r = await updateTask(w, words[0], i, conversationId);
@@ -611,6 +638,7 @@ const BODY = {
     assigneeId: { type: ["string", "null"], format: "uuid" },
     agent: { type: ["string", "null"], maxLength: 100 },
     dueAt: { type: ["string", "null"], maxLength: 40 },
+    clientId: { type: ["string", "null"], format: "uuid" },
   },
 };
 

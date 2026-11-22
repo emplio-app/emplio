@@ -15,6 +15,7 @@ import { listPaths } from "./gitea";
 import { availableApps } from "./integrations";
 import { listTeam } from "./team";
 import { listAgents } from "./agents";
+import { listClients, notesPath } from "./clients";
 
 type Who = Pick<Ctx, "workspaceId" | "userId" | "role">;
 const PER_KIND = 4;
@@ -42,6 +43,13 @@ async function fileMentions(who: Who): Promise<Mention[]> {
     if (record) return [{ kind: "record", id: `${dir}/${path}`, label: pretty(record[2]!), detail: RECORD_KIND[record[1] as keyof typeof RECORD_KIND] }];
     return [{ kind: "file", id: `${dir}/${path}`, label: path.split("/").pop()!, detail: `${dir}/${path.split("/").slice(0, -1).join("/")}`.replace(/\/$/, "") }];
   });
+}
+
+// clients from the Clients list, plus any notes file under knowledge/clients/ not on it yet; id is the notes path
+async function clientMentions(who: Who, files: Mention[]): Promise<Mention[]> {
+  const listed = (await listClients(who).catch(() => [])).map((c): Mention => ({ kind: "record", id: notesPath(c), label: c.name, detail: `Client · ${c.stage}` }));
+  const ids = new Set(listed.map((m) => m.id));
+  return [...listed, ...files.filter((f) => f.kind === "record" && !ids.has(f.id))];
 }
 
 async function chatMentions(who: Who, q: string): Promise<Mention[]> {
@@ -134,7 +142,8 @@ export async function searchMentions(who: Who, query: string): Promise<Mention[]
     q ? safe(tables(who)) : Promise.resolve([]),
     q ? safe(taskMentions(who)) : Promise.resolve([]),
   ]);
-  const all = [...rank(team.filter((m) => m.id !== who.userId), q), ...rank(agentList, q), ...rank(files, q), ...chats, ...rank(connected, q), ...rank(tbls, q), ...rank(tsks, q)];
+  const withClients = [...(q ? await safe(clientMentions(who, files)) : []), ...files.filter((f) => f.kind !== "record")];
+  const all = [...rank(team.filter((m) => m.id !== who.userId), q), ...rank(agentList, q), ...rank(withClients, q), ...chats, ...rank(connected, q), ...rank(tbls, q), ...rank(tsks, q)];
   // letters in order or a typo only count when nothing matches properly, so they never crowd out what was meant
   const proper = all.filter((m) => scoreOf(m, q) < FUZZY);
   const shown = proper.length ? proper : all;
@@ -153,7 +162,7 @@ export async function describeMentions(who: Who, picked: unknown): Promise<strin
     await Promise.all([
       need("person") ? safe(people(who)) : [],
       need("agent") ? safe(agents(who)) : [],
-      need("file") || need("record") ? safe(fileMentions(who)) : [],
+      need("file") || need("record") ? safe(fileMentions(who).then(async (f) => [...(await clientMentions(who, f)), ...f])) : [],
       need("app") ? safe(apps(who)) : [],
       need("table") ? safe(tables(who)) : [],
       need("task") ? safe(taskMentions(who)) : [],
@@ -176,7 +185,9 @@ export async function describeMentions(who: Who, picked: unknown): Promise<strin
       case "agent":
         return [`- @${m.label}: your agent ${m.label}; this work is for it: emplio hand ${m.id}.`];
       case "record":
-        return [`- @${m.label}: ${m.detail?.toLowerCase()}; their notes are in /work/${m.id}: read it first.`];
+        return m.detail?.startsWith("Client")
+          ? [`- @${m.label}: the client ${m.label}; their notes are in /work/${m.id} (may not exist yet) and their open tasks and who handles them: emplio clients show "${m.label}". Read both first.`]
+          : [`- @${m.label}: ${m.detail?.toLowerCase()}; their notes are in /work/${m.id}: read it first.`];
       case "file":
         return [`- @${m.label}: the file /work/${m.id}; use this exact one.`];
       case "chat":

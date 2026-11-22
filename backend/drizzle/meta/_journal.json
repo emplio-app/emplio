@@ -71,6 +71,13 @@
       "when": 1795030376837,
       "tag": "20261118193256_connection_problems",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795341615547,
+      "tag": "20261122100015_clients",
+      "breakpoints": true
     }
   ]
 }

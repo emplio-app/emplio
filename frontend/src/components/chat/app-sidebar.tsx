@@ -250,7 +250,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
-              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}
+              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/clients") || pathname.startsWith("/files") || pathname.startsWith("/database")}
               data-tip="memory"
               data-tip-side="right"
               render={

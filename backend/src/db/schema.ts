@@ -174,6 +174,8 @@ export const conversations = pgTable(
     // button reopens (browser.ts)
     browserUsedAt: timestamp({ withTimezone: true }),
     browserPage: text(),
+    // the client it's about, if any (the reader labels it)
+    clientId: uuid().references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -542,6 +544,26 @@ export const paidSites = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.site] })],
 );
 
+// Clients (clients.ts): who the business works for, and who on the team handles each. Their story (what happened,
+// who's who there) stays in their notes file, company/knowledge/clients/<slug>.md; this row is what tasks and chats
+// point at.
+export const clients = pgTable(
+  "clients",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // the notes file's name: knowledge/clients/<slug>.md
+    slug: text().notNull(),
+    name: text().notNull(),
+    stage: text({ enum: ["prospect", "active", "past"] }).notNull().default("active"),
+    // the teammates who look after them (user ids); empty: nobody named yet
+    handlerIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug)],
+);
+
 // Tasks (tasks.ts): everything to be done in a business, by a person or by the AI (assigneeId null). Who
 // asked is told when one is two days late; people are reminded on their channel once it's due.
 export const tasks = pgTable(
@@ -563,6 +585,8 @@ export const tasks = pgTable(
     dueAt: timestamp({ withTimezone: true }),
     // the chat it came from
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
+    // the client it's for, if any
+    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
     // the AI's own: the chat it last worked on it in
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
     // reminders sent to the assignee, and when the asker was told it's late; reset when the due date moves
@@ -573,7 +597,7 @@ export const tasks = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.workspaceId, t.status, t.dueAt)],
+  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.clientId)],
 );
 
 // Saved passwords and keys (logins.ts): one person's, in one business. The value is encrypted (secrets.ts) and

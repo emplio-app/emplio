@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ConversationSummary, MeResponse, Task } from "@emplio/shared";
+import type { Client, ConversationSummary, MeResponse, Task } from "@emplio/shared";
 import { WebSocketChatTransport } from "ai";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -34,9 +34,15 @@ export async function api<T>(
 export const meQueryKey = ["me"];
 export const conversationsQueryKey = ["conversations"];
 export const tasksQueryKey = ["tasks"];
+export const clientsQueryKey = ["clients"];
 // each chat's Allow cards (approval-card.tsx), under ["approvals", chat id]
 export const approvalsQueryKey = ["approvals"];
 export const versionQueryKey = ["version"];
+
+// The business's clients (backend clients.ts), for the Clients page and the task pickers.
+export function useClients() {
+  return useQuery({ queryKey: clientsQueryKey, queryFn: () => api<Client[]>("/clients") });
+}
 
 // Every task this person may see (owner and admins: all), for the Tasks page and the sidebar's count.
 export function useTasks() {

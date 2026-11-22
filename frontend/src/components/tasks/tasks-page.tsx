@@ -10,6 +10,7 @@ import type {
 } from "@emplio/shared";
 import {
   BotIcon,
+  Building2Icon,
   CalendarIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -68,7 +69,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
-import { api, tasksQueryKey, useMe, useTasks } from "@/lib/api";
+import { api, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Repeating } from "@/components/tasks/repeating";
@@ -107,6 +108,7 @@ const matches = (t: Task, words: string[]) => {
     t.title,
     t.notes,
     t.waitingOn,
+    t.clientName,
     t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio"),
     t.requesterName,
   ]
@@ -224,7 +226,14 @@ export function TasksPage() {
     queryKey: ["agents"],
     queryFn: () => api<AgentInfo[]>("/agents"),
   });
+  const clients = useClients();
   const [show, setShow] = useState("all");
+  // /tasks?client=<id> (from the Clients page): that client's
+  const [client, setClient] = useState(useSearchParams().get("client") ?? "all");
+  const clientItems = [
+    { value: "all", label: "All clients" },
+    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.id === client).map((c) => ({ value: c.id, label: c.name })),
+  ];
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
   // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
@@ -248,6 +257,11 @@ export function TasksPage() {
                   dueAt:
                     body.dueAt &&
                     new Date(`${body.dueAt}T18:00:00+05:30`).toISOString(),
+                }),
+                ...(body.clientId !== undefined && {
+                  clientName:
+                    clients.data?.find((c) => c.id === body.clientId)?.name ??
+                    null,
                 }),
                 ...(body.agent !== undefined && {
                   agentName:
@@ -295,6 +309,7 @@ export function TasksPage() {
           ? !t.assigneeId
           : true,
     )
+    .filter((t) => client === "all" || t.clientId === client)
     .filter((t) => matches(t, words))
     .sort(byDue);
   const openTasks = all.filter(isOpen);
@@ -390,6 +405,12 @@ export function TasksPage() {
           </span>
         )}
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {t.clientName && client === "all" && (
+            <span className="inline-flex max-w-48 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.7rem] font-medium text-foreground/80">
+              <Building2Icon className="size-3 shrink-0 text-muted-foreground" />
+              <span className="truncate">{t.clientName}</span>
+            </span>
+          )}
           <Person t={t} />
           <Due t={t} />
           {t.requesterName && t.requesterId !== t.assigneeId && (
@@ -430,6 +451,32 @@ export function TasksPage() {
           Work
         </h1>
         <div className="ml-auto flex items-center gap-2">
+          {clientItems.length > 1 && (
+            <Select
+              items={clientItems}
+              value={client}
+              onValueChange={(v) => v && setClient(v)}
+            >
+              <SelectTrigger
+                size="sm"
+                aria-label="Which client"
+                className={cn(
+                  "w-32 sm:w-44",
+                  client !== "all" && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <Building2Icon className="text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {clientItems.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select
             items={SHOW}
             value={show}
@@ -566,6 +613,7 @@ export function TasksPage() {
               key={current.id}
               t={current}
               people={people}
+              clients={(clients.data ?? []).map((c) => ({ value: c.id, label: c.name }))}
               onChange={(body) => update.mutate({ id: current.id, ...body })}
               onRemove={() =>
                 confirm({
@@ -745,6 +793,7 @@ function QuickAdd({ people }: { people: People }) {
 function TaskDetails({
   t,
   people,
+  clients,
   onChange,
   onRemove,
   onStart,
@@ -753,6 +802,7 @@ function TaskDetails({
 }: {
   t: Task;
   people: People;
+  clients: People;
   onChange: (body: TaskInput) => void;
   onRemove: () => void;
   onStart: () => void;
@@ -831,6 +881,26 @@ function TaskDetails({
             onChange={(v) => onChange(pick(v))}
             className="w-full"
           />
+          <Label className="text-muted-foreground">Client</Label>
+          <Select
+            items={[{ value: "none", label: "No client" }, ...clients]}
+            value={t.clientId ?? "none"}
+            onValueChange={(v) =>
+              v && onChange({ clientId: v === "none" ? null : v })
+            }
+          >
+            <SelectTrigger aria-label="Client" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No client</SelectItem>
+              {clients.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Label htmlFor="task-due" className="text-muted-foreground">
             Due
           </Label>

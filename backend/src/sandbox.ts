@@ -32,6 +32,7 @@ import { webCommand } from "./exa";
 import { imageCommand } from "./image";
 import { channelsCommand } from "./channels";
 import { tasksCommand } from "./tasks";
+import { clientsCommand } from "./clients";
 import { previewSkill, skillsCommand } from "./skill-store";
 import { agentsCommand, TOOL_NAME } from "./agents";
 import { siteCallsFrom, sitesCommand } from "./site-calls";
@@ -726,6 +727,7 @@ usage() {
   echo "       emplio db                                      the business's own SQL database: emplio db help"
   echo "       emplio plan                                    the checklist the person sees for a job of several steps: emplio plan help"
   echo "       emplio tasks                                   tasks for people and for you, with due dates: emplio tasks help"
+  echo "       emplio clients                                 who the business works for, and who handles each: emplio clients help"
   echo "       emplio files                                   everything you've made (from out/), in any chat: emplio files help"
   echo "       emplio skills                                  read one whole (use <name>), or find and install skills others wrote: emplio skills help"
   echo "       emplio logins                                  saved passwords and keys, used by name: emplio logins help"
@@ -1033,6 +1035,9 @@ PY
   tasks)
     shift
     req TASK "$@" ;;
+  clients)
+    shift
+    req CLIENT "$@" ;;
   files)
     shift
     req FILES "$@" ;;
@@ -2321,6 +2326,10 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const repeat = (name: string, file: string) => automationsCommand(who, ["add", name, file], () => catchUp(box, s, reposFor(s)[0]!), (a) => askToAllow(s, a));
       lines.push(await tasksCommand(who, s.conversationId, args, repeat, s.data));
     }
+    else if (line.startsWith(`CLIENT:${key}\t`)) {
+      const args = Buffer.from(line.slice(`CLIENT:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
+      lines.push(await clientsCommand({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, s.conversationId, args, s.data));
+    }
     else if (line.startsWith(`LOGIN:${key}\t`)) {
       const args = Buffer.from(line.slice(`LOGIN:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
       const reply = await loginsCommand({ workspaceId: s.workspaceId, userId: s.user.id }, s.conversationId, s.channel, args);
@@ -2408,7 +2417,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|CLIENT|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.
