@@ -14,14 +14,14 @@ import { events, receive, triggers, wanted, watch, webhookSetup } from "./trigge
 const VERSION = "2026-01-01";
 const HOSTS = { sandbox: "https://sandbox.cashfree.com/pg", production: "https://api.cashfree.com/pg" } as const;
 type Env = keyof typeof HOSTS;
-const FORMAT = "paste the Client ID and Client Secret joined by a colon, like CF12345abcde:cfsk_ma_prod_xxxx";
+const FORMAT = "enter the Client ID and the Client Secret";
 
 export function parseKey(key: string) {
   const [id = "", secret = "", mode = ""] = key.split(":").map((s) => s.trim());
   if (!id || !secret) throw new AppsError(FORMAT);
   const m = mode.toLowerCase();
   const explicit: Env | undefined = m === "sandbox" || m === "test" ? "sandbox" : m === "production" || m === "prod" || m === "live" ? "production" : undefined;
-  if (mode && !explicit) throw new AppsError(`after the secret, add only :sandbox or :production (got "${mode}")`);
+  if (mode && !explicit) throw new AppsError(`pick Sandbox or Production as the mode (got "${mode}")`);
   const env: Env = explicit ?? (/^TEST/i.test(id) || /_test_/i.test(secret) ? "sandbox" : "production");
   return { id, secret, env, explicit: Boolean(explicit) };
 }
@@ -79,15 +79,17 @@ export const cashfree: OwnApp = {
   logo: "/logos/cashfree.svg",
   keyField: {
     label: "Client ID and Client Secret",
-    help: "Cashfree Merchant Dashboard → Payment Gateway → Developers → API Keys → Generate API Keys (switch to Test mode first for sandbox keys). Paste both as one line, Client ID first, joined by a colon: CLIENT_ID:CLIENT_SECRET. Test keys are spotted by themselves; add :sandbox or :production at the end if Emplio guesses wrong.",
+    help: "Cashfree Merchant Dashboard → Payment Gateway → Developers → API Keys → Generate API Keys (switch to Test mode first for sandbox keys). Test keys are spotted by themselves; pick the mode only if Emplio guesses wrong.",
     placeholder: "CF12345abcdef:cfsk_ma_prod_xxxxxxxxxxxx",
+    sep: ":",
+    parts: [{label:"Client ID",placeholder:"CF12345abcdef"},{label:"Client Secret",secret:true,placeholder:"cfsk_ma_prod_xxxxxxxxxxxx"},{label:"Mode",optional:true,options:[{value:"",label:"Tell from the keys"},{value:"sandbox",label:"Sandbox (test)"},{value:"production",label:"Production"}]}],
   },
   async check(key) {
     const { id, secret, env, explicit } = parseKey(key);
     const label = `${env === "sandbox" ? "Sandbox (test)" : "Production"} · ${id.slice(0, 8)}…`;
     if (await accepted(id, secret, env)) return label;
     const other: Env = env === "sandbox" ? "production" : "sandbox";
-    if (!explicit && (await accepted(id, secret, other))) throw new AppsError(`these are ${other} keys: paste them again with :${other} at the end`);
+    if (!explicit && (await accepted(id, secret, other))) throw new AppsError(`these are ${other} keys: connect again and pick ${other} as the mode`);
     throw new AppsError(`Cashfree didn't accept this Client ID and Client Secret for ${env}. Check both were copied in full from Developers → API Keys`);
   },
   actions: { ...actions, ...setup },

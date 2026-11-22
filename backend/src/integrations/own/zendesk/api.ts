@@ -22,7 +22,7 @@ export function parseKey(key: string): Login {
   const site = rest.find((p) => /zendesk\.com|^https?:/i.test(p)) ?? [...rest].sort((a, b) => a.length - b.length)[0];
   const token = rest.find((p) => p !== site);
   if (parts.length !== 3 || !email || !site || !token)
-    throw new AppsError("paste three things separated by spaces: your Zendesk subdomain (acme for acme.zendesk.com), the email you sign in with, and an API token");
+    throw new AppsError("enter your Zendesk subdomain (acme for acme.zendesk.com), the email you sign in with, and an API token");
   return { host: host(site), email, token };
 }
 

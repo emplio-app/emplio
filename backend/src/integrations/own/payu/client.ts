@@ -9,7 +9,7 @@ import type { OwnAction } from "../index";
 
 export type Creds = { key: string; salt: string; test: boolean };
 
-const FORMAT = "paste the merchant key and salt joined by a colon, like aBcD12:yourSalt (add :test at the end for test-mode keys)";
+const FORMAT = "enter the merchant key and the salt (and pick Test for test-mode keys)";
 
 // The saved login: KEY:SALT for the live account, KEY:SALT:test for PayU's test environment.
 export function creds(secret: string): Creds {

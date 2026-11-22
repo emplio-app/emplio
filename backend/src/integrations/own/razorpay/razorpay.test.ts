@@ -122,7 +122,7 @@ test("Razorpay's reason reaches the person; a 401 asks for reconnecting", async 
 
 test("connecting needs both halves, and checks them with Razorpay", async () => {
   const calls = stub(() => ({ body: { items: [] } }));
-  expect((await fails(razorpay.check("rzp_test_abc"))).message).toContain("joined by a colon");
+  expect((await fails(razorpay.check("rzp_test_abc"))).message).toContain("Key ID and the Key Secret");
   expect(calls).toHaveLength(0);
   await razorpay.check(KEY);
   expect(calls[0]!.url.href).toBe("https://api.razorpay.com/v1/payments?count=1");

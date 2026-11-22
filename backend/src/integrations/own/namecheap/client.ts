@@ -15,7 +15,7 @@ export const ipText = () => clientIp() || "this Emplio server's public IP addres
 // The key is "APIUSER:APIKEY", or "APIUSER:APIKEY:USERNAME" when the account acted on isn't the API user's own
 export function parseKey(key: string) {
   const [apiUser = "", apiKey = "", userName] = key.split(":").map((s) => s.trim());
-  if (!apiUser || !apiKey) throw new AppsError("paste your Namecheap username and API key joined by a colon, like myname:0123456789abcdef");
+  if (!apiUser || !apiKey) throw new AppsError("enter your Namecheap username and API key");
   return { apiUser, apiKey, userName: userName || apiUser };
 }
 

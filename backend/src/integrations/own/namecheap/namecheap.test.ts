@@ -71,7 +71,7 @@ test("the key is checked with the balance, sent as ApiUser/ApiKey/UserName with 
   expect(await namecheap.check("apiuser:abc123:client1")).toBe("client1");
   expect(calls[0]!.url).toBe("https://api.namecheap.com/xml.response");
   expect(calls[0]!.form).toMatchObject({ ApiUser: "apiuser", ApiKey: "abc123", UserName: "client1", ClientIp: "203.0.113.7", Command: "namecheap.users.getBalances" });
-  await expect(namecheap.check("justakey")).rejects.toThrow(/colon/);
+  await expect(namecheap.check("justakey")).rejects.toThrow(/username and API key/);
   expect(namecheap.keyField!.help).toContain("203.0.113.7");
 });
 

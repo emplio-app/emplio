@@ -36,7 +36,17 @@ export type UpdateMemberRequest = { role?: "admin" | "member"; reportsTo?: strin
 // problem: why it isn't (fully) working, said to the person, such as permissions left out when it was connected
 export type Connection = { id: string; app: string; name: string; label: string; logo?: string; keyField?: KeyField; signIn?: boolean; status: "pending" | "active" | "expired" | "failed"; problem?: string; createdAt: string };
 // keyField: the app is connected by pasting a key (shown as a form), not by signing in on its page
-export type KeyField = { label: string; help: string; placeholder?: string };
+// parts: asked as separate boxes, then joined into the one key the app reads: the filled-in parts, each after its sep
+// (or the field's, a space by default). options: a choice instead of a box ("" for the usual one, left out of the key).
+export type KeyPart = { label: string; placeholder?: string; secret?: boolean; optional?: boolean; sep?: string; options?: { value: string; label: string }[] };
+export type KeyField = { label: string; help: string; placeholder?: string; parts?: KeyPart[]; sep?: string };
+export const joinKey = (field: KeyField, values: string[]) =>
+  (field.parts ?? []).reduce((key, part, i) => {
+    const v = (values[i] ?? "").trim();
+    return !v ? key : key ? `${key}${part.sep ?? field.sep ?? " "}${v}` : v;
+  }, "");
+// every part that isn't optional is filled in
+export const keyReady = (field: KeyField, values: string[]) => (field.parts ?? []).every((p, i) => p.optional || (values[i] ?? "").trim());
 // signIn: besides the key, can be signed in to on the app's own page
 export type AppInfo = { app: string; name: string; description: string; logo?: string; category?: AppCategory; keyField?: KeyField; signIn?: boolean };
 // shown in the chat when the agent asks someone to connect an app; path is our own /connect link on the API

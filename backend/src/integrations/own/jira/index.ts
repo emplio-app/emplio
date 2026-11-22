@@ -26,7 +26,7 @@ export function parseKey(key: string): Login {
   const site = parts.find((p) => p !== email && /atlassian\.net|jira\.com|^https?:/i.test(p));
   const token = parts.find((p) => p !== email && p !== site);
   if (parts.length !== 3 || !email || !site || !token)
-    throw new AppsError("paste three things separated by spaces: your Jira site (yourcompany.atlassian.net), the email you sign in with, and an API token");
+    throw new AppsError("enter your Jira site (yourcompany.atlassian.net), the email you sign in with, and an API token");
   return { site: siteHost(site), email, token };
 }
 
@@ -106,8 +106,10 @@ export const jira: OwnApp = {
   logo: "/logos/jira.svg",
   keyField: {
     label: "Site, email and API token",
-    help: "Paste three things on one line, separated by spaces: 1) your Jira site, the address you open Jira at (yourcompany.atlassian.net); 2) the email you sign in to Jira with; 3) an API token. Make the token at id.atlassian.com/manage-profile/security/api-tokens → Create API token (not the one \"with scopes\"), name it Emplio, and copy it. Emplio can then do whatever your Jira account can.",
+    help: "Your site is the address you open Jira at; the email is the one you sign in to Jira with. Make the API token at id.atlassian.com/manage-profile/security/api-tokens → Create API token (not the one \"with scopes\"), name it Emplio, and copy it. Emplio can then do whatever your Jira account can.",
     placeholder: "yourcompany.atlassian.net you@company.com ATATT3xFfGF0...",
+    sep: " ",
+    parts: [{label:"Site",placeholder:"yourcompany.atlassian.net"},{label:"Email",placeholder:"you@company.com"},{label:"API token",secret:true,placeholder:"ATATT3xFfGF0..."}],
   },
   async check(key) {
     const { site } = parseKey(key);

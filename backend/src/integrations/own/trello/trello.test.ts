@@ -48,7 +48,7 @@ test("a key and token are checked and labelled, and a bad pair is refused as dea
 
 test("a key without its token is refused before calling Trello", async () => {
   const calls = stub(() => json({}));
-  await expect(own.connectWithKey!("trello", "k123")).rejects.toThrow(/KEY:TOKEN/);
+  await expect(own.connectWithKey!("trello", "k123")).rejects.toThrow(/API key and the token/);
   expect(calls).toHaveLength(0);
 });
 

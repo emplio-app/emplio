@@ -35,7 +35,7 @@ test("the key is the site, email and token, in any order; a site outside Atlassi
   expect(parseKey(KEY)).toEqual({ site: "acme.atlassian.net", email: "asha@acme.com", token: "tok123" });
   expect(parseKey(" tok123  https://acme.atlassian.net/jira/your-work asha@acme.com ")).toEqual(parseKey(KEY));
   expect(() => parseKey("evil.com asha@acme.com tok")).toThrow(AppsError);
-  expect(() => parseKey("acme.atlassian.net tok")).toThrow(/three things/);
+  expect(() => parseKey("acme.atlassian.net tok")).toThrow(/site .*email .*API token/);
 });
 
 test("a login is checked against the site with basic auth and labelled; a bad one is refused as dead", async () => {

@@ -8,7 +8,7 @@ export type Login = { host: string; key: string };
 // whole address (https://acme.chargebee.com) and a test site's name ends in -test.
 export function parseKey(raw: string): Login {
   const m = /^(?:https?:\/\/)?([^\s:/]+)(?:\/[^\s:]*)?[\s:]+(\S+)$/i.exec(raw.trim());
-  if (!m) throw new AppsError("paste your Chargebee site and API key joined by a colon, like acme:live_a1b2c3 (acme from acme.chargebee.com)");
+  if (!m) throw new AppsError("enter your Chargebee site (acme from acme.chargebee.com) and an API key");
   const site = m[1]!.toLowerCase();
   const host = site.includes(".") ? site : `${site}.chargebee.com`;
   // only Chargebee's own hosts: the key decides where the API key is sent

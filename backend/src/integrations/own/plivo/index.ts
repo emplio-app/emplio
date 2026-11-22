@@ -18,13 +18,15 @@ export const plivo: OwnApp = {
   logo: "/logos/plivo.svg",
   keyField: {
     label: "Auth ID and Auth Token",
-    help: "console.plivo.com → Overview shows your Auth ID and Auth Token. Paste both as one line, Auth ID first, joined by a colon: AUTH_ID:AUTH_TOKEN",
+    help: "console.plivo.com → Overview shows your Auth ID and Auth Token.",
     placeholder: "MAXXXXXXXXXXXXXXXXXX:your-auth-token",
+    sep: ":",
+    parts: [{label:"Auth ID",placeholder:"MAXXXXXXXXXXXXXXXXXX"},{label:"Auth Token",secret:true,placeholder:"your-auth-token"}],
   },
   // the account's own details; wrong credentials get a 401, which marks the connection for reconnecting
   async check(key) {
     const [id, token] = key.split(":");
-    if (!id || !token) throw new AppsError("paste the Auth ID and Auth Token joined by a colon, like MAXXXXXXXXXXXXXXXXXX:your-auth-token");
+    if (!id || !token) throw new AppsError("enter both the Auth ID and the Auth Token");
     await call(api, key, { method: "GET", path: "/", query: [], headers: [] }, {});
   },
   actions: { ...accountActions, ...messagingActions, ...voiceActions, ...numberActions, ...zentrunkActions },

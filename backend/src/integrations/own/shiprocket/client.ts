@@ -29,7 +29,7 @@ export function credentials(key: string) {
   const at = key.indexOf(":");
   const email = key.slice(0, at).trim();
   const password = key.slice(at + 1);
-  if (at < 1 || !email.includes("@") || !password) throw new AppsError("paste the API user's email and password joined by a colon, like you@shop.com:password");
+  if (at < 1 || !email.includes("@") || !password) throw new AppsError("enter the API user's email and password");
   return { email, password };
 }
 

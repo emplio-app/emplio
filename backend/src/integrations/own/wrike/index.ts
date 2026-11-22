@@ -105,8 +105,10 @@ export const wrike: OwnApp = {
   logo: "/logos/wrike.svg",
   keyField: {
     label: "Permanent access token",
-    help: "In Wrike, click your picture (top right) → Apps & Integrations → API. Create a new app (any name, like Emplio), then under Permanent access token click Create token, confirm with your password and copy it. If you open Wrike at app-eu.wrike.com, paste eu: before the token (us2: for app-us2.wrike.com). Emplio can then see and change whatever your Wrike user can.",
-    placeholder: "eyJ0dCI6InAi... (or eu:eyJ0dCI6InAi...)",
+    help: "In Wrike, click your picture (top right) → Apps & Integrations → API. Create a new app (any name, like Emplio), then under Permanent access token click Create token, confirm with your password and copy it. Pick the address you open Wrike at. Emplio can then see and change whatever your Wrike user can.",
+    placeholder: "eyJ0dCI6InAi...",
+    sep: ":",
+    parts: [{label:"Wrike address",optional:true,options:[{value:"",label:"app.wrike.com"},{value:"eu",label:"app-eu.wrike.com"},{value:"us2",label:"app-us2.wrike.com"}]},{label:"Permanent access token",secret:true,placeholder:"eyJ0dCI6InAi..."}],
   },
   async check(key) {
     const { host, token, region } = parseKey(key);

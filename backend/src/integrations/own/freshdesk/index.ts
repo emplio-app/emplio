@@ -18,8 +18,10 @@ export const freshdesk: OwnApp = {
   logo: "/logos/freshdesk.svg",
   keyField: {
     label: "Helpdesk address and API key",
-    help: "In Freshdesk, click your profile picture → Profile settings → View API key. Paste your helpdesk address and that key joined by a colon: yourco.freshdesk.com:YOUR_API_KEY. Emplio can then do whatever your agent account can, so use an admin for set-up tasks.",
+    help: "In Freshdesk, click your profile picture → Profile settings → View API key. Your helpdesk address is the one you open Freshdesk at, like yourco.freshdesk.com. Emplio can then do whatever your agent account can, so use an admin for set-up tasks.",
     placeholder: "yourco.freshdesk.com:AbCdEf123456",
+    sep: ":",
+    parts: [{label:"Helpdesk address",placeholder:"yourco.freshdesk.com"},{label:"API key",secret:true,placeholder:"AbCdEf123456"}],
   },
   // who the key belongs to; a wrong key gets a 401, which marks the connection for reconnecting
   async check(key) {

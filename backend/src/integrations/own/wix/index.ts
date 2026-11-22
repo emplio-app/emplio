@@ -9,7 +9,7 @@ import { type Api, call, specActions } from "../openapi";
 // "<api key> <site id> [<account id>]", as pasted on one line
 export function parseKey(key: string) {
   const [apiKey, siteId, accountId] = key.trim().split(/\s+/);
-  if (!apiKey || !siteId) throw new AppsError("paste the API key, then a space and the site id (and, for account-wide work, a space and the account id)");
+  if (!apiKey || !siteId) throw new AppsError("enter the API key and the site id");
   return { apiKey, siteId, accountId };
 }
 
@@ -35,9 +35,11 @@ export const wix: OwnApp = {
   name: "Wix",
   logo: "/logos/wix.svg",
   keyField: {
-    label: "API key, site id (and account id)",
-    help: "manage.wix.com/account/api-keys → Generate API Key, tick the site and every permission Emplio should have. The site id is in your site's dashboard address (after /dashboard/), the account id on the same API keys page. Paste them on one line, separated by spaces: API key, site id, then the account id if Emplio should also manage your sites and domains.",
+    label: "API key and site id",
+    help: "manage.wix.com/account/api-keys → Generate API Key, tick the site and every permission Emplio should have. The site id is in your site's dashboard address (after /dashboard/), the account id on the same API keys page. The account id is only needed if Emplio should also manage your sites and domains.",
     placeholder: "IST.eyJ... 1a2b3c4d-site-id 9f8e7d6c-account-id",
+    sep: " ",
+    parts: [{label:"API key",secret:true,placeholder:"IST.eyJ..."},{label:"Site id",placeholder:"1a2b3c4d-..."},{label:"Account id",optional:true,placeholder:"9f8e7d6c-..."}],
   },
   // the site's own name; a wrong key gets a 401, a key without this site a 403 or 404
   async check(key) {

@@ -62,8 +62,8 @@ test("a wrong salt is refused and asks for reconnecting; a malformed key says ho
   expect(e.expired).toBe(true);
   stub(() => new Response("Sorry, Some Problem Occurred.", { headers: { "content-type": "text/html" } }));
   expect((await fails(payu.check(LIVE))).expired).toBe(true);
-  expect((await fails(payu.check("justakey"))).message).toContain("joined by a colon");
-  expect((await fails(payu.check(`${LIVE}:prod`))).message).toContain("joined by a colon");
+  expect((await fails(payu.check("justakey"))).message).toContain("merchant key and the salt");
+  expect((await fails(payu.check(`${LIVE}:prod`))).message).toContain("merchant key and the salt");
 });
 
 // --- actions ---

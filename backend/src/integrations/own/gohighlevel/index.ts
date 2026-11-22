@@ -47,8 +47,10 @@ export const gohighlevel: OwnApp = {
   logo: "/logos/gohighlevel.svg",
   keyField: {
     label: "Private integration token and Location ID",
-    help: "In your HighLevel sub-account: Settings → Private Integrations → Create new integration, name it Emplio, tick every scope Emplio should use (all of them lets it do everything), and copy the token. Then Settings → Business Profile, copy the Location ID. Paste both with a space between: the token, then the Location ID. For a whole agency, paste an agency private integration token on its own.",
+    help: "In your HighLevel sub-account: Settings → Private Integrations → Create new integration, name it Emplio, tick every scope Emplio should use (all of them lets it do everything), and copy the token. Then Settings → Business Profile, copy the Location ID. For a whole agency, use an agency private integration token and leave the Location ID empty.",
     placeholder: "pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  AbCdEf123456",
+    sep: " ",
+    parts: [{label:"Private integration token",secret:true,placeholder:"pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"},{label:"Location ID",optional:true,placeholder:"AbCdEf123456"}],
   },
   async check(key) {
     const { token, location } = parseKey(key);

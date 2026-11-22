@@ -71,7 +71,7 @@ test("a token refused by a classic-key API says to add the key, without marking 
   stub(() => json({ code: "UNABLE_TO_AUTHENTICATE", message: "Could not authenticate API key/secret" }, 401));
   const e = await fails(run("auctions_get_payment_profiles", { customerId: "MY" }));
   expect(e.expired).toBe(false);
-  expect(e.message).toContain("add KEY:SECRET");
+  expect(e.message).toContain("with a classic key and secret");
   // the same 401 on an API the token is for means the token is dead
   expect((await fails(run("list_domains", {}))).expired).toBe(true);
 });

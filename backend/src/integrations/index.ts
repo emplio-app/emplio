@@ -9,7 +9,7 @@
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { record } from "../activity";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { APP_CATEGORIES, type ActionRun, type AppCategory, type AppInfo, type ConnectCard, type Connection } from "@emplio/shared";
+import { APP_CATEGORIES, type ActionRun, type AppCategory, type AppInfo, type ConnectCard, type Connection, type KeyField, joinKey } from "@emplio/shared";
 import { CATALOG, catalogApp } from "./catalog";
 import { context, currentUser, type Ctx } from "../auth";
 import { db } from "../db";
@@ -749,20 +749,31 @@ const SOMETHING_WRONG = "Something went wrong on our side. Try again in a minute
 export const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 // The page a phone link opens for an app connected with a key: the key box, or `done` (a result) instead of it.
 // t: the link's token, for the sign-in button of an app that also signs in on its own page.
+// the key box, or one box (or choice) for each part of a key that's several things
+const keyInputs = (f: KeyField) =>
+  f.parts
+    ? f.parts
+        .map((p, i) =>
+          p.options
+            ? `<label>${esc(p.label)}<select name="p${i}">${p.options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select></label>`
+            : `<label>${esc(p.label)}${p.optional ? ' <span class="m">(optional)</span>' : ""}<input name="p${i}" type="${p.secret ? "password" : "text"}" autocomplete="off"${p.optional ? "" : " required"}${i ? "" : " autofocus"} placeholder="${esc(p.placeholder ?? "")}"></label>`,
+        )
+        .join("")
+    : `<label>${esc(f.label)}<input name="key" type="password" autocomplete="off" required autofocus placeholder="${esc(f.placeholder ?? "")}"></label>`;
 async function keyPage(app: string, error?: string | null, done?: string, t?: string) {
   const info = done ? null : await offered(app).catch(() => null);
   const body = done
     ? `<p>${done}</p>`
     : info?.keyField
       ? `<h1>${info.logo ? `<img src="${esc(new URL(info.logo, FRONTEND_URL()).href)}" alt="">` : ""}Connect ${esc(info.name)}</h1>${info.signIn && t ? `<a class="b" href="/connect/${esc(app)}?t=${encodeURIComponent(t)}&amp;signin=1">Sign in with ${esc(info.name)}</a><p class="m">Or paste a key instead.</p>` : ""}<p class="m">${esc(info.keyField.help)}</p>
-<form method="post"><label>${esc(info.keyField.label)}<input name="key" type="password" autocomplete="off" required autofocus placeholder="${esc(info.keyField.placeholder ?? "")}"></label>
+<form method="post">${keyInputs(info.keyField)}
 ${error ? `<p class="e">${esc(error)}</p>` : ""}<button onclick="this.textContent='Checking…'">Connect</button></form><p class="m">Stored encrypted. Emplio uses it but never sees it.</p>`
       : "<p>This app can't be connected here.</p>";
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Connect</title>
 <style>body{font:15px system-ui;max-width:420px;margin:0 auto;padding:24px 16px;color:#111;background:#fff}h1{font-size:18px;display:flex;gap:10px;align-items:center}h1 img{width:28px;height:28px;object-fit:contain}
-.m{color:#666;font-size:13px}.e{color:#c00}label{display:grid;gap:6px;font-weight:500}input{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px}
+.m{color:#666;font-size:13px}.e{color:#c00}form{display:grid;gap:12px}label{display:grid;gap:6px;font-weight:500}input,select{font:inherit;padding:10px;border:1px solid #ccc;border-radius:8px}
 button,.b{display:block;box-sizing:border-box;text-align:center;text-decoration:none;font:inherit;margin-top:12px;width:100%;padding:11px;border:0;border-radius:8px;background:#111;color:#fff}
-@media(prefers-color-scheme:dark){body{background:#111;color:#eee}input{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
+@media(prefers-color-scheme:dark){body{background:#111;color:#eee}input,select{background:#1c1c1c;color:#eee;border-color:#333}button,.b{background:#eee;color:#111}.m{color:#999}}</style>${body}`;
 }
 
 // What Emplio does with each Google app, said on our own page right before Google's (Google's Workspace user data
@@ -916,14 +927,15 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: 8192 }, (_req, body, done) =>
     done(null, Object.fromEntries(new URLSearchParams(body as string))),
   );
-  app.post<{ Params: { app: string }; Querystring: { t?: string }; Body: { key?: string } }>("/connect/:app", async (req, reply) => {
+  app.post<{ Params: { app: string }; Querystring: { t?: string }; Body: Record<string, string | undefined> }>("/connect/:app", async (req, reply) => {
     const link = req.query.t ? fromLink(req.query.t) : null;
     const name = req.params.app.toLowerCase();
     if (!link)
       return reply
         .type("text/html")
         .send(await keyPage(name, null, req.query.t ? "This link has expired. Ask for a new one." : "Open this page from the link Emplio sent you in the chat."));
-    const key = String(req.body?.key ?? "").trim();
+    const field = (await offered(name).catch(() => null))?.keyField;
+    const key = field?.parts ? joinKey(field, field.parts.map((_, i) => String(req.body?.[`p${i}`] ?? ""))) : String(req.body?.key ?? "").trim();
     try {
       if (!key || key.length > 2000) throw new AppsError("Paste the key first.");
       const c = await connectWithKey({ workspaceId: link.w, userId: link.u }, name, key, link.c);

@@ -43,8 +43,10 @@ export const chargebee: OwnApp = {
   logo: "/logos/chargebee.svg",
   keyField: {
     label: "Site and API key",
-    help: "Paste your Chargebee site and an API key joined by a colon, like acme:live_a1b2c3. The site is the first part of the address you open Chargebee at (acme for acme.chargebee.com; a test site is acme-test). To make the key, open Settings → Configure Chargebee → API keys and webhooks → API keys, click Add API key, choose Full-access key, name it Emplio and copy it. A read-only key works too, but then Emplio can only look things up and can't react to events.",
+    help: "The site is the first part of the address you open Chargebee at (acme for acme.chargebee.com; a test site is acme-test). To make the key, open Settings → Configure Chargebee → API keys and webhooks → API keys, click Add API key, choose Full-access key, name it Emplio and copy it. A read-only key works too, but then Emplio can only look things up and can't react to events.",
     placeholder: "acme:live_a1b2c3d4e5f6...",
+    sep: ":",
+    parts: [{label:"Site",placeholder:"acme"},{label:"API key",secret:true,placeholder:"live_a1b2c3d4e5f6..."}],
   },
   async check(key) {
     const { host } = parseKey(key);

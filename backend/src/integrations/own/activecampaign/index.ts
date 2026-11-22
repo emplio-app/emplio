@@ -72,8 +72,10 @@ export const activecampaign: OwnApp = {
   logo: "/logos/activecampaign.svg",
   keyField: {
     label: "API URL and key",
-    help: "In ActiveCampaign, open Settings (bottom left) → Developer. Copy the URL (like https://acme.api-us1.com) and the Key, and paste both on one line with a space between. The key works as your ActiveCampaign user, so Emplio can see and change whatever you can; to have Emplio react to events the moment they happen, use an admin's key.",
+    help: "In ActiveCampaign, open Settings (bottom left) → Developer. Copy the URL (like https://acme.api-us1.com) and the Key. The key works as your ActiveCampaign user, so Emplio can see and change whatever you can; to have Emplio react to events the moment they happen, use an admin's key.",
     placeholder: "https://acme.api-us1.com 1a2b3c4d5e6f...",
+    sep: " ",
+    parts: [{label:"API URL",placeholder:"https://acme.api-us1.com"},{label:"API key",secret:true,placeholder:"1a2b3c4d5e6f..."}],
   },
   async check(key) {
     const { origin } = parseKey(key);

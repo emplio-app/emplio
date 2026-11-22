@@ -54,12 +54,14 @@ export const trello: OwnApp = {
   logo: "/logos/trello.svg",
   keyField: {
     label: "API key and token",
-    help: "1. Open trello.com/power-ups/admin and click New (any name, like Emplio; any workspace) and Create. 2. Open API key → Generate a new API key, and copy the API key. 3. Click the Token link next to it, choose Allow, and copy the token. 4. Paste both here as KEY:TOKEN (the key, a colon, then the token). Emplio can then do whatever your Trello account can.",
-    placeholder: "API key:token",
+    help: "1. Open trello.com/power-ups/admin and click New (any name, like Emplio; any workspace) and Create. 2. Open API key → Generate a new API key, and copy the API key. 3. Click the Token link next to it, choose Allow, and copy the token. Emplio can then do whatever your Trello account can.",
+    placeholder: "API key and token",
+    sep: ":",
+    parts: [{label:"API key",placeholder:"a1b2c3..."},{label:"Token",secret:true,placeholder:"ATTA..."}],
   },
   async check(secret) {
     const { key, token } = split(secret);
-    if (!key || !token) throw new AppsError("paste the API key and the token together, as KEY:TOKEN (a colon between them)");
+    if (!key || !token) throw new AppsError("enter both the API key and the token");
     const me = (await call(api, secret, ME, { fields: "fullName,username" })) as { id: string; fullName?: string; username?: string };
     return me.fullName || me.username || me.id;
   },

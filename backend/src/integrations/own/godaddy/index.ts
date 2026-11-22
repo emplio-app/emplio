@@ -53,7 +53,7 @@ async function send(s: Send, key: string, input: Record<string, unknown>) {
     return await call(apiFor(s, key), key, s, input);
   } catch (e) {
     if (e instanceof AppsError && !e.expired && / \((401|403)\)$/.test(e.message) && SSO_FIRST.test(s.path) && !credentials(key).sso)
-      throw new AppsError(`${e.message}. This part of GoDaddy takes a classic key: add KEY:SECRET (classic-developer.godaddy.com/keys) to the GoDaddy connection`);
+      throw new AppsError(`${e.message}. This part of GoDaddy takes a classic key: reconnect GoDaddy with a classic key and secret too (classic-developer.godaddy.com/keys)`);
     throw e;
   }
 }
@@ -100,16 +100,18 @@ export const godaddy: OwnApp = {
   name: "GoDaddy",
   logo: "/logos/godaddy.svg",
   keyField: {
-    label: "Personal access token (and/or key:secret)",
+    label: "Personal access token or classic key",
     help:
       "developer.godaddy.com/personal-access-token → Generate Token: tick Domains & DNS plus anything else Emplio should run (Hosting, Email, Commerce), and pick the longest expiry. " +
-      "Certificates, auctions, orders and subscriptions still need a classic production key (classic-developer.godaddy.com/keys, not OTE): paste it as KEY:SECRET, after the token with a space if you have both.",
+      "Certificates, auctions, orders and subscriptions still need a classic production key (classic-developer.godaddy.com/keys, not OTE): enter its key and secret too. Fill in the token, the classic key, or both.",
     placeholder: "gd_pat_xxxxxxxx  KEY:SECRET",
+    sep: " ",
+    parts: [{label:"Personal access token",secret:true,optional:true,placeholder:"gd_pat_xxxxxxxx"},{label:"Classic key",optional:true,placeholder:"KEY"},{label:"Classic secret",secret:true,optional:true,sep:":",placeholder:"SECRET"}],
   },
   // whose account it is; a 403 means a working login without the shopper scope, which is fine
   async check(key) {
     const { pat, sso } = credentials(key);
-    if (!pat && !sso) throw new AppsError("Paste a GoDaddy personal access token, or a classic key as KEY:SECRET");
+    if (!pat && !sso) throw new AppsError("Enter a GoDaddy personal access token, or a classic key and secret");
     try {
       const me = (await send({ method: "GET", path: "/v1/shoppers/{shopperId}", query: [], headers: [] }, key, { shopperId: "MY" })) as { nameFirst?: string; nameLast?: string; email?: string; shopperId?: string };
       return [me.nameFirst, me.nameLast].filter(Boolean).join(" ") || me.email || me.shopperId;

@@ -5,7 +5,7 @@ import { AppFile, AppsError } from "../../types";
 import type { OwnAction } from "../index";
 import { type Api, call, rest } from "../openapi";
 
-const FORMAT = "paste your helpdesk address and API key joined by a colon, like yourco.freshdesk.com:YOUR_API_KEY";
+const FORMAT = "enter your helpdesk address (yourco.freshdesk.com) and API key";
 
 // the helpdesk host and API key in a connection's key; throws when it isn't a *.freshdesk.com address
 export function login(key: string) {

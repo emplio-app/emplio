@@ -161,7 +161,7 @@ test("a malformed key is refused before any request; https URLs are taken as the
   for (const bad of ["APIabc secret", "myproj.livekit.cloud APIabc secret", "ftp://x APIabc secret"]) {
     const e = await fails(livekit.check(bad));
     expect(e).toBeInstanceOf(AppsError);
-    expect(e.message).toContain("wss://myproj.livekit.cloud APIxxxx secretxxxx");
+    expect(e.message).toContain("Enter the project URL");
   }
   expect(calls).toHaveLength(0);
   await livekit.check(`https://myproj.livekit.cloud/ APIabc ${SECRET}`);

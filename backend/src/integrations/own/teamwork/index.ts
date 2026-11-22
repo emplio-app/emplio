@@ -23,7 +23,7 @@ export function parseKey(key: string) {
   const parts = key.trim().split(/\s+/).filter(Boolean);
   const site = parts.find((p) => /teamwork\.com|^https?:/i.test(p)) ?? [...parts].sort((a, b) => a.length - b.length)[0];
   const token = parts.find((p) => p !== site);
-  if (parts.length !== 2 || !site || !token) throw new AppsError("paste two things separated by a space: your Teamwork.com site (acme for acme.teamwork.com) and your API key");
+  if (parts.length !== 2 || !site || !token) throw new AppsError("enter your Teamwork.com site (acme for acme.teamwork.com) and your API key");
   return { host: host(site), token };
 }
 
@@ -44,8 +44,10 @@ export const teamwork: OwnApp = {
   logo: "/logos/teamwork.svg",
   keyField: {
     label: "Site and API key",
-    help: "Paste two things on one line, separated by a space: 1) your Teamwork.com site, the first part of the address you open Teamwork at (acme for acme.teamwork.com; EU sites: acme.eu.teamwork.com); 2) your API key. To get the key, click your profile picture → Edit my details → API & Mobile, then show or generate your API key and copy it. Emplio can then do whatever your Teamwork user can. To have Emplio react the moment tasks, projects or comments change, use a site administrator's key on a paid plan.",
+    help: "Your site is the first part of the address you open Teamwork at (acme for acme.teamwork.com; EU sites: acme.eu.teamwork.com). To get the API key, click your profile picture → Edit my details → API & Mobile, then show or generate your API key and copy it. Emplio can then do whatever your Teamwork user can. To have Emplio react the moment tasks, projects or comments change, use a site administrator's key on a paid plan.",
     placeholder: "acme tkn.v1_ABC123...",
+    sep: " ",
+    parts: [{label:"Site",placeholder:"acme"},{label:"API key",secret:true,placeholder:"tkn.v1_ABC123..."}],
   },
   async check(key) {
     const { host } = parseKey(key);

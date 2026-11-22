@@ -19,9 +19,11 @@ export const namecheap: OwnApp = {
     get help() {
       return `In Namecheap go to Profile → Tools → Namecheap API Access and switch API access ON (Namecheap only allows it once the account has $50 in its balance or $50 spent in the last 2 years, or 20+ domains). ` +
       `Then, on the same page, under Whitelisted IPs click Edit and add ${ipText()}, Emplio's server, or Namecheap will refuse every request. ` +
-      `Copy the API key and paste it here after your Namecheap username, joined by a colon: USERNAME:APIKEY`;
+      `Then copy the API key.`;
     },
     placeholder: "myusername:0123456789abcdef0123456789abcdef",
+    sep: ":",
+    parts: [{label:"Username",placeholder:"myusername"},{label:"API key",secret:true,placeholder:"0123456789abcdef0123456789abcdef"}],
   },
   // the balance: cheap, and it fails clearly on a wrong key, API access off, or our IP missing from the allow-list
   async check(key) {

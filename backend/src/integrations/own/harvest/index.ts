@@ -47,13 +47,15 @@ export const harvest: OwnApp = {
   logo: "/logos/harvest.svg",
   keyField: {
     label: "Account ID and personal access token",
-    help: "Go to id.getharvest.com/developers and click Create new personal access token. The page then shows your token and, under Account ID, the number for your Harvest account. Paste both as one line, Account ID first, joined by a colon: ACCOUNT_ID:TOKEN. Emplio can do whatever your own Harvest login can, so use an Administrator login if Emplio should manage invoices, people and settings.",
+    help: "Go to id.getharvest.com/developers and click Create new personal access token. The page then shows your token and, under Account ID, the number for your Harvest account. Emplio can do whatever your own Harvest login can, so use an Administrator login if Emplio should manage invoices, people and settings.",
     placeholder: "1234567:your-personal-access-token",
+    sep: ":",
+    parts: [{label:"Account ID",placeholder:"1234567"},{label:"Personal access token",secret:true,placeholder:"your-personal-access-token"}],
   },
   // the company's name labels the connection; a wrong token or account id gets a 401, which asks for reconnecting
   async check(key) {
     const { account, token } = parseKey(key);
-    if (!account || !token) throw new AppsError("paste the Account ID and the token joined by a colon, like 1234567:your-personal-access-token");
+    if (!account || !token) throw new AppsError("enter both the Account ID and the personal access token");
     const company = (await call(api, key, { method: "GET", path: "/company", query: [], headers: [] }, {})) as { name?: string };
     return company.name;
   },

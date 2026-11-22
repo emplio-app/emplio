@@ -48,7 +48,7 @@ export function parseKey(key: string): Site {
   const parts = key.trim().split(/\s+/);
   if (parts[0] === "wpcom" && parts.length === 3) return { kind: "wpcom", blog: parts[1]!, token: parts[2]! };
   const bad = (why: string) =>
-    new AppsError(`${why}. Paste the site's address, your username and the Application Password on one line, separated by spaces, like "https://example.com admin abcd EFGH 1234 ijkl MNOP 5678" (${HELP})`);
+    new AppsError(`${why}. Enter the site's address (like https://example.com), your username and the Application Password (${HELP})`);
   if (parts.length < 3) throw bad(`expected the address, username and password, got ${parts.length} part${parts.length === 1 ? "" : "s"}`);
   const grouped = parts.length >= 8 && parts.slice(-6).every((p) => /^[A-Za-z0-9]{4}$/.test(p));
   const password = grouped ? parts.slice(-6).join("") : parts.at(-1)!;
@@ -160,8 +160,10 @@ export const wordpress: OwnApp = {
   logo: "/logos/wordpress.svg",
   keyField: {
     label: "Site address, username and Application Password",
-    help: `${HELP}. Then paste your site's address, your WordPress username and the password it shows, on one line separated by spaces. Use an Administrator account so Emplio can manage plugins, users and settings; an Editor can handle posts, pages and comments. On WordPress.com, sign in instead.`,
+    help: `${HELP}. Then enter your site's address, your WordPress username and the password it shows. Use an Administrator account so Emplio can manage plugins, users and settings; an Editor can handle posts, pages and comments. On WordPress.com, sign in instead.`,
     placeholder: "https://example.com admin abcd EFGH 1234 ijkl MNOP 5678",
+    sep: " ",
+    parts: [{label:"Site address",placeholder:"https://example.com"},{label:"Username",placeholder:"admin"},{label:"Application Password",secret:true,placeholder:"abcd EFGH 1234 ijkl MNOP 5678"}],
   },
   // whose login it is, on which site; a wrong password gets a 401, which marks the connection for reconnecting
   async check(key) {

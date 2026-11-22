@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.2 (2026-11-22)
+
+### What's new
+
+- Apps that need more than one thing to connect, like Zendesk's subdomain, email and API token or Freshdesk's helpdesk address and API key, now ask for each in its own box, with a choice for things like the Wrike or Clockify region. No more pasting them together on one line. This covers Zendesk, Freshdesk, Jira, Harvest, Trello, Productive, HighLevel, ActiveCampaign, Chargebee, Teamwork.com, Wrike, Typeform, Cal.com, Clockify, Shiprocket, WordPress, Wix, Shopify, GoDaddy, Namecheap, LiveKit, Razorpay, Cashfree, PayU and Plivo.
+
+### For developers
+
+- `KeyField` (shared) takes optional `parts` (label, placeholder, secret, optional, options, sep) and `sep`. The web dialog and the phone connect page show one box (or choice) per part and join them with `joinKey` into the same key string the app always read, so saved connections and the apps' key parsing are unchanged.
+
 ## 1.4.1 (2026-11-22)
 
 ### What's new
