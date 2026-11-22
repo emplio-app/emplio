@@ -155,7 +155,7 @@ def _run(words, input=None):
 
 
 # commands that read stdin only after a "-", and how many words come before it
-_STDIN_AFTER = {("db", "sql"): 0, ("db", "script"): 0, ("automations", "add"): 1, ("automations", "update"): 1, ("apps", "run"): 1, ("mcp", "call"): 2}
+_STDIN_AFTER = {("db", "sql"): 0, ("db", "script"): 0, ("automations", "add"): 1, ("automations", "update"): 1, ("processes", "add"): 1, ("processes", "update"): 1, ("apps", "run"): 1, ("mcp", "call"): 2}
 
 
 class _Area:

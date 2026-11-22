@@ -407,17 +407,16 @@ export async function stepInfo(runIds: string[]) {
 
 // --- `emplio processes` ---
 
-const USAGE = `usage: emplio processes <command>
-  list                                         the processes (steps done the same way every time)
-  show <name>                                  one, with its file
-  add <name> - <<'MD' ... MD                   a new one (owner or admin): company/processes/<name>.md, as below
-  update <name> - <<'MD' ... MD                change it (runs already going keep their steps)
-  remove <name>                                remove it (runs going carry on)
-  start <name> --client <name>                 start one for a client (anyone on the team)
-  start <name> --for "<who or what>"           one for something else (a candidate, an opening)
-  runs [<name>] [--client <name>] [--all]      what's going (--all: finished and stopped ones too), and the step each is on
-  back <run> --note "<what to fix>"            an OK step not OK: back to the step it names, with what to fix
-  stop <run>                                   stop one; its open step is cancelled
+const USAGE = `usage: emplio processes list                                   the processes (steps done the same way every time)
+       emplio processes show <name>                            one, with its file
+       emplio processes add <name> - <<'MD' ... MD             a new one (owner or admin): company/processes/<name>.md, as below
+       emplio processes update <name> - <<'MD' ... MD          change it (runs already going keep their steps)
+       emplio processes remove <name>                          remove it (runs going carry on)
+       emplio processes start <name> --client <name>           start one for a client (anyone on the team)
+       emplio processes start <name> --for "<who or what>"     one for something else (a candidate, an opening)
+       emplio processes runs [--client <name>] [--all]         what's going (a process's name first: just that one; --all: finished ones too)
+       emplio processes back <run> --note "<what to fix>"      an OK step not OK: back to the step it names
+       emplio processes stop <run>                             stop one; its open step is cancelled
 A process file:
   ---
   title: Annual filing

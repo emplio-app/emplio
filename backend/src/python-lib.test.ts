@@ -23,6 +23,15 @@ test("input= reaches commands that read it after a '-'", () => {
   expect(app.args).toEqual(["apps", "run", "gmail.send", "-"]);
 });
 
+test("a process's text goes in with input=, as the command line's '-'", () => {
+  const { out, err } = py(`print(emplio.processes.add("onboarding", input="---\\ntitle: Onboarding\\n---"))\nprint(emplio.processes.start("onboarding", client="Northwind"))`);
+  expect(err).toBe("");
+  const [add, start] = out.trim().split("\n").map((l) => JSON.parse(l.replace(/'/g, '"')));
+  expect(add.args).toEqual(["processes", "add", "onboarding", "-"]);
+  expect(add.stdin).toContain("title: Onboarding");
+  expect(start.args).toEqual(["processes", "start", "onboarding", "--client", "Northwind"]);
+});
+
 test("a tool saved with /work paths works where /work is a folder in the person's home", () => {
   const work = mkdtempSync(join(tmpdir(), "work-"));
   mkdirSync(join(work, "company/toolset"), { recursive: true });
