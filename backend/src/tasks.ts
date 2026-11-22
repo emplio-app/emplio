@@ -22,7 +22,7 @@ import { chatLink, heldBack, mainChat, post, sendTo } from "./channels";
 import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
 import { clients, conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
-import { findClient } from "./clients";
+import { findClient, labelChat } from "./clients";
 import { listTeam } from "./team";
 
 type Who = { workspaceId: string; userId: string; role: Role };
@@ -160,6 +160,7 @@ export async function addTask(w: Who, input: TaskInput, conversationId?: string)
     })
     .returning();
   const task = await one(row!);
+  await labelChat(conversationId, task.clientId);
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "task", summary: `Added task "${task.title}" for ${task.assigneeName}` });
   if (!task.assigneeId) void startDueTasks().catch((error) => console.error("starting tasks failed", error));
   return { ok: true, task };

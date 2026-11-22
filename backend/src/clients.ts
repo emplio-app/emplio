@@ -2,13 +2,13 @@
 // Their story stays in their notes file, company/knowledge/clients/<slug>.md (the slug is this row's, kept when they're
 // renamed); the row is what tasks and chats point at. The web app's Clients page and `emplio clients` share these.
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins.
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { CLIENT_STAGES, type Client, type ClientInput, type ClientStage, type Role } from "@emplio/shared";
 import { record } from "./activity";
 import { context } from "./auth";
 import { db } from "./db";
-import { clients, tasks } from "./db/schema";
+import { clients, conversations, tasks } from "./db/schema";
 import { listTeam } from "./team";
 
 type Who = { workspaceId: string; userId: string; role: Role };
@@ -95,7 +95,7 @@ export async function addClient(w: Who, input: ClientInput, conversationId?: str
     .onConflictDoNothing()
     .returning();
   if (!row) return { ok: false, error: `already a client: emplio clients show ${slug}` };
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "client", summary: `Added client ${name}` });
+  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Added client ${name}` });
   return { ok: true, client: await one(row) };
 }
 
@@ -111,7 +111,7 @@ export async function updateClient(w: Who, q: string, input: ClientInput, conver
   if (input.stage !== undefined) set.stage = input.stage;
   if (input.handlerIds !== undefined) set.handlerIds = [...new Set(input.handlerIds)];
   const [row] = await db.update(clients).set(set).where(eq(clients.id, c.id)).returning();
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "client", summary: `Changed client ${row!.name}` });
+  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${row!.name}` });
   return { ok: true, client: await one(row!) };
 }
 
@@ -121,8 +121,33 @@ export async function removeClient(w: Who, q: string, conversationId?: string) {
   const c = await findClient(w.workspaceId, q);
   if (typeof c === "string") return { ok: false as const, error: c };
   await db.delete(clients).where(eq(clients.id, c.id));
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "client", summary: `Removed client ${c.name}` });
+  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Removed client ${c.name}` });
   return { ok: true as const, name: c.name };
+}
+
+// A chat is about the first client it's tied to (a task for them added in it, or them @mentioned); kept after that.
+export async function labelChat(conversationId: string | null | undefined, clientId: string | null | undefined) {
+  if (!conversationId || !clientId) return;
+  await db.update(conversations).set({ clientId }).where(and(eq(conversations.id, conversationId), isNull(conversations.clientId)));
+}
+
+// @mentioned clients (their notes path, mentions.ts) in a message: the first one labels the chat
+export async function labelFromMentions(workspaceId: string, conversationId: string, picked: unknown) {
+  const ids = (Array.isArray(picked) ? picked : []).flatMap((m) => {
+    const slug = m?.kind === "record" && typeof m.id === "string" ? new RegExp(`^company/${FOLDER}/([^/]+)\\.md$`).exec(m.id)?.[1] : null;
+    return slug ? [slug] : [];
+  });
+  if (!ids.length) return;
+  const c = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, workspaceId), eq(clients.slug, ids[0]!)) });
+  await labelChat(conversationId, c?.id);
+}
+
+// What the model is told each turn in a chat about one client: who they are and where the rest is.
+export async function clientNote(workspaceId: string, clientId: string) {
+  const row = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, workspaceId), eq(clients.id, clientId)) });
+  if (!row) return "";
+  const [c] = await toClients([row], workspaceId);
+  return `This chat is about the client ${c!.name} (${c!.stage}; handled by ${c!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c!.openTasks} open task${c!.openTasks === 1 ? "" : "s"}${c!.waitingTasks ? `, ${c!.waitingTasks} waiting` : ""}). Their notes: /work/${notesPath(c!)}; their open work: emplio clients show ${c!.slug}. Tasks you add here are for them (--client ${c!.slug}) unless plainly not.`;
 }
 
 // --- `emplio clients` ---

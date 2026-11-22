@@ -46,6 +46,7 @@ import { slashCommand } from "./skills";
 import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
+import { clientNote, labelFromMentions } from "./clients";
 import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
@@ -825,6 +826,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       job ? null : untoldReports(id).catch((error) => (log.error(error, "reading jobs' reports failed"), null)),
     ])
   ).filter((t): t is string => !!t);
+  const picked = (message.parts.find((p) => p.type === "data-mentions") as { data?: unknown } | undefined)?.data;
+  await labelFromMentions(ctx.workspaceId, id, picked).catch((error) => log.error(error, "labelling the chat's client failed"));
+  const clientId = (await db.query.conversations.findFirst({ where: eq(conversations.id, id), columns: { clientId: true } }))?.clientId;
   const setup = await onboarding({ workspaceId: ctx.workspaceId, userId: ctx.userId, role: ctx.role, name: ctx.userName, automation: session.automation, task: session.task }).catch(() => "");
   // on their own clock (time.ts)
   const tz = await timezoneOf(ctx.userId);
@@ -839,6 +843,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     date: `Today is ${today} (${tz} time).`,
     computer: computerNote(session),
     setup,
+    ...(clientId && { client: await clientNote(ctx.workspaceId, clientId).catch(() => "") }),
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
     agents: await agentsList(session.workspaceId, { userId: ctx.userId, admin: ctx.role !== "member" }).then(
