@@ -8,6 +8,7 @@ The newest version is at the top, and its heading is where Emplio's version numb
 
 - Emplio can list every WhatsApp group you're in at once, or only the ones a given person is in, and see where you're an admin, instead of checking groups one by one.
 - Your linked WhatsApp is protected from asking WhatsApp too much: lookups are capped at 30 a minute and 300 an hour, group changes at 30 an hour and 100 a day, and if WhatsApp ever says "too many", Emplio stops reaching it for 15 minutes and tells you, while your saved chats stay readable.
+- Messages you send with bold, lists, headings or code now show formatted instead of with raw asterisks.
 
 ### For developers
 
@@ -15,6 +16,7 @@ The newest version is at the top, and its heading is where Emplio's version numb
 - Group details are kept for 10 minutes (`groupInfo`, `joinedGroups`); any group change drops them.
 - New `GET /accounts/{id}/groups?with=` and `whatsapp_linked.list_groups`. Group adds and new groups no longer count as sends; they count as group changes.
 - Takes effect once the WhatsApp worker is redeployed.
+- `chat-view.tsx`: sent messages with markdown render through the markdown view; plain ones keep @mention and /command highlights (#347).
 
 ## 1.3.7 (2026-11-21)
 
