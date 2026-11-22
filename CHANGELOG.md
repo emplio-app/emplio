@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.1 (2026-11-22)
+
+### What's new
+
+- Fifteen more apps for client businesses, each connected by pasting a key: Klaviyo and ActiveCampaign for email marketing; Close, Apollo.io and lemlist for sales and outreach; Wrike, Teamwork.com and Smartsheet for projects; Karbon for accounting and bookkeeping firms; Everhour for time tracking; Cal.com for bookings; Typeform for forms; Figma for design; Webflow for websites; and Chargebee for subscriptions. Emplio can follow up with leads, run campaigns and outreach, move client work along, log hours, book meetings and keep sites up to date, and start work by itself when a form is filled in, a client comments on a design, a meeting is booked or a payment fails. ![](frontend/public/whats-new/1.4.1-more-client-apps.webp)
+
+### For developers
+
+- New own apps under `backend/src/integrations/own/`: `klaviyo`, `activecampaign`, `close`, `apollo`, `lemlist`, `wrike`, `teamwork`, `smartsheet`, `karbon`, `everhour`, `calcom`, `typeform`, `figma`, `webflow`, `chargebee`. Key sign-in only; each has `COVERAGE.md`, tests, and webhook triggers where the app allows them by API, polled ones otherwise.
+- Karbon needs Emplio's application key from Karbon's developer program in `KARBON_APP_KEY`; each firm pastes its own Access Key.
+- `automations.ts`: an event on the shared app webhook route that names no automation id also matches automations saved under `<app>:<connection>`. Zendesk (and any app whose webhook address carries only a token) didn't start its automations before.
+- `own/openapi.ts`: error messages also read `errorDescription` (Wrike).
+
 ## 1.4.0 (2026-11-22)
 
 ### What's new
