@@ -23,6 +23,7 @@ import {
   Trash2Icon,
   UserIcon,
   XIcon,
+  ChevronLeftIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -215,10 +216,9 @@ function StatusPill({ status }: { status: TaskStatus }) {
 // Everything to be done in the business, by people and by Emplio, read top to bottom like a morning check:
 // what needs you, what Emplio is on, what's coming up (and what repeats), and what got done this week.
 // Opening one shows all of it, editable. Emplio adds and updates them from chats too.
-export function TasksPage() {
-  const { data: me } = useMe();
+// What changing a task needs, shared by the Work page and the task panel opened elsewhere (the Clients page).
+function useTaskActions(onRemoved?: () => void) {
   const queryClient = useQueryClient();
-  const tasks = useTasks();
   const team = useQuery({
     queryKey: ["team"],
     queryFn: () => api<TeamMember[]>("/team"),
@@ -228,21 +228,6 @@ export function TasksPage() {
     queryFn: () => api<AgentInfo[]>("/agents"),
   });
   const clients = useClients();
-  const [show, setShow] = useState("all");
-  // /tasks?client=<id> (from the Clients page): that client's
-  const [client, setClient] = useState(useSearchParams().get("client") ?? "all");
-  const clientItems = [
-    { value: "all", label: "All clients" },
-    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.id === client).map((c) => ({ value: c.id, label: c.name })),
-  ];
-  const [query, setQuery] = useState("");
-  const [showDone, setShowDone] = useState(false);
-  // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
-  const [openId, setOpenId] = useState<string | null>(
-    useSearchParams().get("task"),
-  );
-  const [confirmDialog, confirm] = useConfirm();
-
   const update = useMutation({
     mutationFn: ({ id, ...body }: TaskInput & { id: string }) =>
       api<Task>(`/tasks/${id}`, body, "PATCH"),
@@ -282,7 +267,7 @@ export function TasksPage() {
   const remove = useMutation({
     mutationFn: (id: string) => api(`/tasks/${id}`, undefined, "DELETE"),
     onMutate: (id) => {
-      setOpenId(null);
+      onRemoved?.();
       queryClient.setQueryData<Task[]>(tasksQueryKey, (old) =>
         old?.filter((t) => t.id !== id),
       );
@@ -301,6 +286,28 @@ export function TasksPage() {
       label: m.name ?? m.email,
     })),
   ];
+  return { update, start, remove, people, clients };
+}
+
+export function TasksPage() {
+  const { data: me } = useMe();
+  const tasks = useTasks();
+  const { update, people, clients } = useTaskActions();
+  const [show, setShow] = useState("all");
+  // /tasks?client=<id> (from the Clients page): that client's
+  const [client, setClient] = useState(useSearchParams().get("client") ?? "all");
+  const clientItems = [
+    { value: "all", label: "All clients" },
+    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.id === client).map((c) => ({ value: c.id, label: c.name })),
+  ];
+  const [query, setQuery] = useState("");
+  const [showDone, setShowDone] = useState(false);
+  // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
+  const [openId, setOpenId] = useState<string | null>(
+    useSearchParams().get("task"),
+  );
+  const [confirmDialog, confirm] = useConfirm();
+
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const all = (tasks.data ?? [])
     .filter((t) =>
@@ -592,8 +599,30 @@ export function TasksPage() {
         </div>
       </div>
 
-      <Sheet open={!!current} onOpenChange={(o) => !o && setOpenId(null)}>
+      <TaskSheet id={openId} onClose={() => setOpenId(null)} />
+      {confirmDialog}
+    </div>
+  );
+}
+
+// One task's panel, by id (null: closed): on the Work page and wherever a task is clicked (the Clients page).
+export function TaskSheet({ id, onClose, back }: { id: string | null; onClose: () => void; back?: { label: string; onClick: () => void } }) {
+  const tasks = useTasks();
+  const { update, start, remove, people, clients } = useTaskActions(onClose);
+  const [confirmDialog, confirm] = useConfirm();
+  const current = tasks.data?.find((t) => t.id === id) ?? null;
+  return (
+    <>
+      <Sheet open={!!current} onOpenChange={(o) => !o && onClose()}>
         <SheetContent className="w-full gap-0 sm:max-w-md">
+          {back && (
+            <div className="border-b px-2 py-1.5 pr-12">
+              <Button variant="ghost" size="sm" onClick={back.onClick} className="max-w-full gap-1 text-muted-foreground">
+                <ChevronLeftIcon />
+                <span className="truncate">{back.label}</span>
+              </Button>
+            </div>
+          )}
           {current && (
             <TaskDetails
               key={current.id}
@@ -625,7 +654,7 @@ export function TasksPage() {
         </SheetContent>
       </Sheet>
       {confirmDialog}
-    </div>
+    </>
   );
 }
 

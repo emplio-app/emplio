@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { TaskSheet } from "@/components/tasks/tasks-page";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -136,6 +137,7 @@ function Handlers({ c }: { c: Client }) {
 // Who the business works for, read like a book of clients: who they are, how things stand, who looks after them and
 // what's open for them. Emplio keeps it from chats and email; anyone can add one, owners and admins change them.
 export function ClientsPage() {
+  const [taskId, setTaskId] = useState<string | null>(null);
   const { data: me } = useMe();
   const admin = me?.workspaces[0]?.role !== "member";
   const clients = useClients();
@@ -334,7 +336,7 @@ export function ClientsPage() {
         </div>
       </div>
 
-      <Sheet open={!!current} onOpenChange={(o) => !o && setOpenId(null)}>
+      <Sheet open={!!current && !taskId} onOpenChange={(o) => !o && setOpenId(null)}>
         <SheetContent className="w-full gap-0 sm:max-w-md">
           {current && (
             <ClientDetails
@@ -344,10 +346,20 @@ export function ClientsPage() {
               team={team.data ?? []}
               tasks={(tasks.data ?? []).filter((t) => t.clientId === current.id)}
               onChange={(body) => update.mutate({ id: current.id, ...body })}
+              onOpenTask={setTaskId}
             />
           )}
         </SheetContent>
       </Sheet>
+      {/* a task clicked in a client's open work: its own panel, over the client's */}
+      <TaskSheet
+        id={taskId}
+        onClose={() => {
+          setTaskId(null);
+          setOpenId(null);
+        }}
+        back={current ? { label: current.name, onClick: () => setTaskId(null) } : undefined}
+      />
     </div>
   );
 }
@@ -422,12 +434,14 @@ function ClientDetails({
   team,
   tasks,
   onChange,
+  onOpenTask,
 }: {
   c: Client;
   admin: boolean;
   team: TeamMember[];
   tasks: Task[];
   onChange: (body: ClientInput) => void;
+  onOpenTask: (id: string) => void;
 }) {
   const [name, setName] = useState(c.name);
   const open = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
@@ -495,7 +509,7 @@ function ClientDetails({
             <ul className="grid gap-1">
               {open.slice(0, 12).map((t) => (
                 <li key={t.id}>
-                  <Link href={`/tasks?task=${t.id}`} className="flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-muted/50">
+                  <button type="button" onClick={() => onOpenTask(t.id)} className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-muted/50">
                     <span
                       className={cn(
                         "mt-1 size-2 shrink-0 rounded-full",
@@ -515,7 +529,7 @@ function ClientDetails({
                         )}
                       </span>
                     </span>
-                  </Link>
+                  </button>
                 </li>
               ))}
             </ul>
