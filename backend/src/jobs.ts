@@ -18,7 +18,7 @@ import { personFor, woke } from "./automations";
 import { askOnPhone, closeOnPhone, mainChat, post, wroteFromPhone } from "./channels";
 import { generateReply, lastWords, loadMessages, quiet, replyFromNotification, replyUntil, steer, steered } from "./chat";
 import { db } from "./db";
-import { actionRuns, conversations, jobs } from "./db/schema";
+import { actionRuns, conversations, jobs, messages } from "./db/schema";
 import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, skillsUsed, toolsUsed } from "./agents";
 import { canReopen, liveView, REOPEN_MS } from "./browser";
 import { SILENT } from "./reader";
@@ -252,10 +252,13 @@ export async function expireAsking(now = Date.now()) {
 // ponytail: one server, so anything working at startup is dead; with several, claim each one first
 export async function markOrphanedJobs() {
   const cut = await db.select().from(jobs).where(eq(jobs.status, "working"));
-  // Emplio's own jobs started within their time carry on by themselves, so nobody has to say "start again".
+  // Emplio's own jobs asked something within their time carry on by themselves, so nobody has to say "start again".
+  // Timed from the last thing asked of it, not when it began: a job given a follow-up hours later is working on that.
   // Once only: one cut off again after carrying on fails as before (something in it may be what stops the server).
   const again = async (r: Row) => {
-    if (r.depth !== 1 || !r.chatId || Date.now() - r.createdAt.getTime() > JOB_MINUTES * 60_000) return false;
+    if (r.depth !== 1 || !r.chatId) return false;
+    const [last] = await db.select({ at: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, r.chatId), eq(messages.role, "user"))).orderBy(desc(messages.createdAt)).limit(1);
+    if (Date.now() - (last?.at ?? r.createdAt).getTime() > JOB_MINUTES * 60_000) return false;
     const prompt = (await loadMessages(r.chatId)).reverse().find((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
     return !prompt || textOf(prompt) !== FROM_EMPLIO + RESTARTED;
   };
