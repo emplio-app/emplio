@@ -69,6 +69,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
+import { ClientPicker } from "@/components/clients/client-picker";
 import { api, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -452,30 +453,15 @@ export function TasksPage() {
         </h1>
         <div className="ml-auto flex items-center gap-2">
           {clientItems.length > 1 && (
-            <Select
+            <ClientPicker
               items={clientItems}
               value={client}
-              onValueChange={(v) => v && setClient(v)}
-            >
-              <SelectTrigger
-                size="sm"
-                aria-label="Which client"
-                className={cn(
-                  "w-32 sm:w-44",
-                  client !== "all" && "border-primary/40 bg-primary/5",
-                )}
-              >
-                <Building2Icon className="text-muted-foreground" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {clientItems.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={setClient}
+              size="sm"
+              icon
+              label="Which client"
+              className={cn("w-32 sm:w-44", client !== "all" && "border-primary/40 bg-primary/5")}
+            />
           )}
           <Select
             items={SHOW}
@@ -882,25 +868,12 @@ function TaskDetails({
             className="w-full"
           />
           <Label className="text-muted-foreground">Client</Label>
-          <Select
+          <ClientPicker
             items={[{ value: "none", label: "No client" }, ...clients]}
             value={t.clientId ?? "none"}
-            onValueChange={(v) =>
-              v && onChange({ clientId: v === "none" ? null : v })
-            }
-          >
-            <SelectTrigger aria-label="Client" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No client</SelectItem>
-              {clients.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={(v) => onChange({ clientId: v === "none" ? null : v })}
+            className="w-full"
+          />
           <Label htmlFor="task-due" className="text-muted-foreground">
             Due
           </Label>

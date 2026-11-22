@@ -549,6 +549,7 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
   return (
     <Combobox
       multiple
+      autoHighlight
       items={team}
       value={chosen}
       onValueChange={(next: TeamMember[]) => onChange(next.map((m) => m.id))}
