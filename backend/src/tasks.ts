@@ -487,7 +487,12 @@ options: --to <email, name, me or ai>  who does it (default: ai)
                                        chat's person's clock, e.g. "0 9 * * 1" every Monday 9 am. Its title and
                                        --notes are what to do each time. Repeating ones show in tasks list;
                                        change, pause or remove them with emplio automations. For "when something
-                                       happens" (a new email), use emplio automations add.`;
+                                       happens" (a new email), use emplio automations add.
+         --clients all|<a,b>           with --every: the same job for each client (all: every active one): each
+                                       time it comes round, one task per client, titled with the client and the
+                                       period ("Monthly report · Northwind · Nov 2026"), for who handles them
+                                       (or the AI with --agent), never twice for one client and period
+         --due-days <n>                with --clients: each of those tasks is due n days after (default 7)`;
 
 export const line = (t: Task, tz: string) =>
   [
@@ -572,7 +577,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     const plain = !Object.keys(opts).length;
     const repeating = plain ? (await listAutomations(w.workspaceId).catch(() => [])).filter((a) => a.enabled && !a.error && a.when !== "manual") : [];
     if (data) return JSON.stringify([...list.map(asData), ...repeating.map((a) => ({ repeats: a.when === "schedule" ? a.schedule : `on ${a.trigger}`, agent: a.agent ?? null, name: a.name }))]);
-    const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : `on ${a.trigger}`}\t${a.agent ?? "you"}\t${a.name}`);
+    const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : `on ${a.trigger}`}\t${a.agent ?? "you"}\t${a.name}${a.clients ? ` (for ${a.clients.includes("*") ? "every active client" : a.clients.join(", ")})` : ""}`);
     if (!list.length && !rep.length) return "No tasks match.";
     return [...list.map((t) => line(t, tz)), ...rep, "", "In full: emplio tasks show <id>; repeating ones: emplio automations show <name>."].join("\n");
   }
@@ -597,6 +602,8 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
       "when: schedule",
       `schedule: ${JSON.stringify(opts.every)}`,
       ...(opts.agent ? [`agent: ${JSON.stringify(opts.agent)}`] : []),
+      ...(opts.clients ? [`clients: ${opts.clients.trim().toLowerCase() === "all" ? "all" : JSON.stringify(opts.clients.split(",").map((c) => c.trim()).filter(Boolean))}`] : []),
+      ...(opts["due-days"] ? [`due: ${Number.parseInt(opts["due-days"], 10) || 7}`] : []),
       ...(opts.actions ? [`actions: [${opts.actions.split(",").map((a) => a.trim()).filter(Boolean).join(", ")}]`] : []),
       "enabled: true",
       "---",

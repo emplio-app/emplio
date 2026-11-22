@@ -78,6 +78,13 @@
       "when": 1795341615547,
       "tag": "20261122100015_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795342313300,
+      "tag": "20261122101153_repeat_for_clients",
+      "breakpoints": true
     }
   ]
 }

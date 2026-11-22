@@ -169,6 +169,8 @@ export type Automation = {
   owner: { id: string; name: string } | null;
   nextRunAt: string | null;
   lastRun: AutomationRun | null;
+  // done for each client: ["*"] every active one, else their names; null: not per client
+  clients: string[] | null;
 };
 
 // A message found by searching one's chats; snippet marks the matches with **. A chat found by its title: messageId and snippet empty.

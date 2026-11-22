@@ -300,6 +300,11 @@ export const automations = pgTable(
     allowed: text().array().notNull().default([]),
     // which of the person's accounts of the trigger's app to watch (its label), when they have several
     account: text(),
+    // a schedule done for each client (the file's clients:): each run adds one task per client instead of a chat.
+    // ["*"]: every active client; else client slugs or names. null: not per client
+    clients: text().array(),
+    // those tasks are due this many days after the run
+    dueDays: integer(),
     // what's wrong with the file (it doesn't run until fixed)
     error: text(),
     // the provider's id for the trigger it watches
@@ -589,6 +594,8 @@ export const tasks = pgTable(
     clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
     // the AI's own: the chat it last worked on it in
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
+    // a repeating job's task: "<automation>/<client slug>/<period>", so a run never adds the same one twice
+    repeatKey: text(),
     // reminders sent to the assignee, and when the asker was told it's late; reset when the due date moves
     chasedAt: timestamp({ withTimezone: true }),
     chases: integer().notNull().default(0),
@@ -597,7 +604,7 @@ export const tasks = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.clientId)],
+  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.clientId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
 );
 
 // Saved passwords and keys (logins.ts): one person's, in one business. The value is encrypted (secrets.ts) and

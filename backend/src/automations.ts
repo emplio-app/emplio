@@ -20,7 +20,9 @@ import { chatLink, heldBack, post } from "./channels";
 import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
-import { activity, automationRuns, automations, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
+import { activity, automationRuns, automations, clients as clientsTable, connections, conversations, jobs, tasks, users, workspaceMembers, workspaces } from "./db/schema";
+import { slugOf } from "./clients";
+import { startDueTasks } from "./tasks";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
@@ -75,6 +77,13 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
   const actions = s.actions ?? [];
   if (!Array.isArray(actions) || actions.some((a) => typeof a !== "string" || !ACTION.test(a)))
     return { error: "actions: must be a list of app actions, like [gmail.send_email, todoist.create_task]" } as const;
+  // clients: all (every active client) or a list of them; due: days after each run
+  const clients = s.clients === undefined || s.clients === null ? null : s.clients === "all" ? ["*"] : s.clients;
+  if (clients !== null && (!Array.isArray(clients) || !clients.length || clients.some((c) => typeof c !== "string" || !c.trim())))
+    return { error: 'clients: must be all, or a list of clients, like [Northwind Traders, Contoso]' } as const;
+  if (clients && when !== "schedule") return { error: "clients: only goes with when: schedule" } as const;
+  const due = s.due === undefined ? null : s.due;
+  if (due !== null && (!Number.isInteger(due) || (due as number) < 0 || (due as number) > 400)) return { error: "due: must be a number of days, like 30" } as const;
   if (when === "schedule") {
     if (typeof s.schedule !== "string") return { error: 'schedule: is missing (cron, like "0 9 * * 1-5")' } as const;
     try {
@@ -94,7 +103,65 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
     prompt,
     agent: typeof s.agent === "string" ? s.agent : null,
     actions: [...new Set(actions as string[])],
+    clients: clients ? (clients as string[]).map((c) => c.trim()) : null,
+    dueDays: clients ? ((due as number | null) ?? 7) : null,
   };
+}
+
+// What a run of a schedule is for: "Nov 2026" when it runs about monthly, "2026" yearly, "week of 23 Nov" weekly,
+// else the day. Part of each task's title and of the key that stops a run adding it twice.
+export function periodOf(schedule: string, timezone: string, at = new Date()) {
+  const [a, b] = new Cron(schedule, { timezone }).nextRuns(2, at);
+  const gap = a && b ? (b.getTime() - a.getTime()) / 86_400_000 : 1;
+  const part = (o: Intl.DateTimeFormatOptions) => at.toLocaleDateString("en-GB", { timeZone: timezone, ...o });
+  if (gap > 300) return part({ year: "numeric" });
+  if (gap > 80) return `Q${Math.floor(Number(part({ month: "numeric" })) / 3.01) + 1} ${part({ year: "numeric" })}`;
+  if (gap > 25) return part({ month: "short", year: "numeric" });
+  if (gap > 5) return `week of ${part({ day: "numeric", month: "short" })}`;
+  return part({ day: "numeric", month: "short", year: "numeric" });
+}
+
+// A schedule done for each client: one task per client (who handles them does it; an agent named in the file: the AI
+// with that agent), titled with the client and the period, due dueDays later. Never twice for one client and period.
+async function fanOut(row: Row) {
+  const paused = await heldBack(row.workspaceId);
+  if (paused || !row.userId) {
+    await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason: "schedule", status: "failed", error: paused ?? "nobody to run it as", finishedAt: new Date() });
+    return;
+  }
+  const all = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, row.workspaceId));
+  const wanted = (row.clients ?? []).map((c) => c.toLowerCase());
+  const chosen = wanted.includes("*")
+    ? all.filter((c) => c.stage === "active")
+    : all.filter((c) => c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name))));
+  const period = periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE);
+  const [title, ...rest] = row.prompt.split("\n");
+  const due = new Date(Date.now() + (row.dueDays ?? 7) * 86_400_000);
+  const made = await db
+    .insert(tasks)
+    .values(
+      chosen.map((c) => ({
+        workspaceId: row.workspaceId,
+        // the client is on the task itself (shown beside the title everywhere)
+        title: `${title!.trim()} · ${period}`.slice(0, 300),
+        notes: rest.join("\n").trim() || null,
+        assigneeId: row.agent ? null : (c.handlerIds[0] ?? row.userId),
+        agent: row.agent,
+        requesterId: row.userId,
+        clientId: c.id,
+        dueAt: due,
+        repeatKey: `${row.name}/${c.slug}/${period}`,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ id: tasks.id });
+  const summary = `made ${made.length} task${made.length === 1 ? "" : "s"} for ${period}, one per client${chosen.length > made.length ? ` (${chosen.length - made.length} already there)` : ""}`;
+  await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason: "schedule", status: "done", finishedAt: new Date() });
+  record({ workspaceId: row.workspaceId, userId: row.userId, kind: "automation", summary: `Repeating "${row.name}" ${summary}` });
+  if (made.length) {
+    await post(row.workspaceId, row.userId, `**${title!.trim()}** for ${period}: ${made.length} task${made.length === 1 ? "" : "s"} added, one per client, due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}. They're on the Work page.`).catch(() => {});
+    if (row.agent) void startDueTasks().catch((error) => console.error("starting tasks failed", error));
+  }
 }
 
 const nextRun = (row: { schedule?: string | null; timezone?: string | null }) => new Cron(row.schedule!, { timezone: row.timezone ?? DEFAULT_ZONE }).nextRun();
@@ -343,6 +410,7 @@ export async function listAutomations(workspaceId: string): Promise<Automation[]
     owner: a.userId ? { id: a.userId, name: ownerName ?? ownerEmail ?? "" } : null,
     nextRunAt: a.enabled && !a.error ? (a.nextRunAt?.toISOString() ?? null) : null,
     lastRun: runs.find((r) => r.name === a.name) ?? null,
+    clients: a.clients,
   })));
 }
 
@@ -476,6 +544,10 @@ export async function runAutomation(who: Ctx, name: string) {
   if (row.error && !row.userId) throw new AutomationError(`it can't run: ${row.error}`);
   const paused = await heldBack(who.workspaceId);
   if (paused) throw new AutomationError(paused);
+  if (row.clients) {
+    await fanOut(row);
+    return { runId: null, conversationId: null, perClient: true };
+  }
   return fire(row, "manual");
 }
 
@@ -494,7 +566,7 @@ async function tick() {
       .set({ nextRunAt: nextRun(row) })
       .where(and(eq(automations.id, row.id), lte(automations.nextRunAt, new Date())))
       .returning();
-    if (claimed) await fire(claimed, "schedule").catch((error) => console.error("automation run failed to start", row.name, error));
+    if (claimed) await (claimed.clients ? fanOut(claimed) : fire(claimed, "schedule")).catch((error) => console.error("automation run failed to start", row.name, error));
   }
   const polls = await db
     .select()
@@ -884,6 +956,7 @@ export async function automationsCommand(who: Ctx, args: string[], caughtUp: () 
       case "run": {
         if (!name) break;
         const started = await runAutomation(who, name);
+        if ("perClient" in started) return "Done: this period's tasks are added, one per client (emplio tasks list --all); a client who already had one isn't given another.";
         return started.conversationId
           ? `Started: it runs in its own chat, "Automation: ${name}". Check how it went with emplio automations history ${name}.`
           : "error: it has nobody to run as.";

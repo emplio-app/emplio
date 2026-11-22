@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { expect, test } from "bun:test";
-import { automationsCommand, NOT_DONE, outcome, parseAutomation, signatureOk } from "./automations";
+import { automationsCommand, NOT_DONE, outcome, parseAutomation, periodOf, signatureOk } from "./automations";
 
 test("parses an automation file", () => {
   const a = parseAutomation(`---\nwhen: trigger\ntrigger: gmail.new_gmail_message\nconfig:\n  query: "from:@acme.com"\n---\nAdd the lead.\n`);
@@ -10,6 +10,24 @@ test("parses an automation file", () => {
   expect(parseAutomation(`---\nwhen: trigger\n---\nx`)).toHaveProperty("error");
   expect(parseAutomation(`---\nwhen: manual\n---\n`)).toHaveProperty("error");
   expect(parseAutomation(`no settings`)).toHaveProperty("error");
+});
+
+test("a schedule can be done for each client", () => {
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nclients: all\ndue: 5\n---\nMonthly report\n`)).toMatchObject({ clients: ["*"], dueDays: 5 });
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 4 *"\nclients: [Northwind Traders, contoso]\n---\nAnnual filing\n`)).toMatchObject({ clients: ["Northwind Traders", "contoso"], dueDays: 7 });
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 * * 1"\n---\nX\n`)).toMatchObject({ clients: null, dueDays: null });
+  expect(parseAutomation(`---\nwhen: manual\nclients: all\n---\nX\n`)).toHaveProperty("error");
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nclients: []\n---\nX\n`)).toHaveProperty("error");
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nclients: all\ndue: soon\n---\nX\n`)).toHaveProperty("error");
+});
+
+test("names the period a run is for", () => {
+  const at = new Date("2026-11-01T04:00:00Z");
+  expect(periodOf("0 9 1 * *", "Asia/Kolkata", at)).toBe("Nov 2026");
+  expect(periodOf("0 9 1 4 *", "Asia/Kolkata", at)).toBe("2026");
+  expect(periodOf("0 9 * * 1", "Asia/Kolkata", at)).toBe("week of 1 Nov");
+  expect(periodOf("0 9 1 1,4,7,10 *", "Asia/Kolkata", at)).toBe("Q4 2026");
+  expect(periodOf("0 9 * * *", "Asia/Kolkata", at)).toBe("1 Nov 2026");
 });
 
 test("checks webhook signatures", () => {

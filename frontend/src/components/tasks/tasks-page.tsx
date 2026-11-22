@@ -502,7 +502,7 @@ export function TasksPage() {
 
       <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-4 px-4 py-4 sm:gap-6 sm:py-6">
-          <QuickAdd people={people} />
+          <QuickAdd people={people} clientId={client === "all" ? null : client} />
 
           <div className="flex shrink-0 items-center gap-2">
             <InputGroup className="h-8 flex-1">
@@ -722,7 +722,7 @@ function WhoSelect({
 }
 
 // The add box: type what's to be done, Enter. Who and when are optional (default: the AI, no date).
-function QuickAdd({ people }: { people: People }) {
+function QuickAdd({ people, clientId }: { people: People; clientId: string | null }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [who, setWho] = useState(AI);
@@ -745,7 +745,7 @@ function QuickAdd({ people }: { people: People }) {
       onSubmit={(e) => {
         e.preventDefault();
         if (title.trim())
-          add.mutate({ title, ...pick(who), dueAt: due || null });
+          add.mutate({ title, ...pick(who), dueAt: due || null, clientId });
       }}
     >
       <div className="flex items-center gap-2 px-1">
