@@ -276,6 +276,19 @@ export function AppSidebar() {
               Processes
             </SidebarMenuButton>
           </SidebarMenuItem>
+          {/* things tracked that aren't clients: invoices, candidates, projects */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/records")}
+              data-tip="records"
+              data-tip-side="right"
+              render={<Link href="/records" onClick={() => setOpenMobile(false)} />}
+              className="h-9 font-medium"
+            >
+              <ClipboardListIcon />
+              Records
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}

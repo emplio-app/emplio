@@ -613,8 +613,8 @@ export type ProcessStep = {
 export type Process = {
   name: string;
   title: string;
-  // what each go is for: a client, or anything else with a name
-  for: "client" | "other";
+  // what each go is for: "client", "other" (anything with a name), or a kind of record ("invoice", "candidate")
+  for: string;
   // started by hand, for each new client, or on a schedule for clients (every: cron)
   starts: "manual" | "new client" | "schedule";
   every: string | null;
@@ -625,12 +625,30 @@ export type Process = {
   error: string | null;
   active: number;
 };
+// Something tracked that isn't a client (an invoice, a candidate): what a process can be run for (records.ts).
+export type BizRecord = {
+  id: string;
+  kind: string;
+  title: string;
+  clientId: string | null;
+  clientName: string | null;
+  fields: Record<string, string>;
+  status: string;
+  // processes going for it
+  active: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RecordInput = { kind?: string; title?: string; clientId?: string | null; status?: string; fields?: Record<string, string> };
+
 export type ProcessRun = {
   id: string;
   process: string;
   processTitle: string;
   subject: string;
   clientId: string | null;
+  recordId: string | null;
   period: string | null;
   status: "active" | "done" | "stopped";
   // the step it's on (0-based); steps.length once done

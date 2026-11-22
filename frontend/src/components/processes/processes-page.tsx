@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns } from "@/lib/api";
+import { api, processesQueryKey, processRunsQueryKey, recordsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useRecords } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -230,7 +230,9 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
                   ? "Fix the process first."
                   : p.for === "client"
                     ? `Start it for a client and each step goes to the right person in turn.`
-                    : "Start it for a candidate, a project or whatever it's for."}
+                    : p.for === "other"
+                      ? "Start it for a candidate, a project or whatever it's for."
+                      : `Start it for a ${p.for} and each step goes to the right person in turn.`}
               </p>
             </div>
           ) : (
@@ -342,6 +344,7 @@ function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: st
 // Start one: for a client (picked), or for anything else (typed).
 export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: string; size?: "sm" | "default" }) {
   const clients = useClients();
+  const records = useRecords({ kind: p.for === "client" || p.for === "other" ? "-" : p.for });
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [client, setClient] = useState(clientId ?? "");
@@ -358,6 +361,7 @@ export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: str
       void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
       void queryClient.invalidateQueries({ queryKey: processesQueryKey });
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      void queryClient.invalidateQueries({ queryKey: recordsQueryKey });
     },
   });
   const ready = p.for === "client" ? !!client : !!subject.trim();
@@ -377,7 +381,7 @@ export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: str
       <PopoverContent align="end" className="w-80">
         <PopoverHeader>
           <PopoverTitle>Start {p.title}</PopoverTitle>
-          <PopoverDescription>Step 1, {p.steps[0]?.name}, goes to {whoWords(p.steps[0]!).toLowerCase()} now.</PopoverDescription>
+          <PopoverDescription>Step 1, {p.steps[0]?.name}, goes to {whoWords(p.steps[0]!) === "Emplio" ? "Emplio" : whoWords(p.steps[0]!).toLowerCase()} now.</PopoverDescription>
         </PopoverHeader>
         <form
           className="grid gap-2"
@@ -393,8 +397,19 @@ export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: str
               onChange={setClient}
               className="w-full"
             />
-          ) : (
+          ) : p.for === "other" ? (
             <Input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Who or what it's for, e.g. Sarah Lee, designer" />
+          ) : (
+            <>
+              <Input autoFocus list={`records-${p.name}`} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={`Pick or type a new ${p.for}`} />
+              <datalist id={`records-${p.name}`}>
+                {(records.data ?? []).map((r) => (
+                  <option key={r.id} value={r.title}>
+                    {r.clientName ?? r.status}
+                  </option>
+                ))}
+              </datalist>
+            </>
           )}
           <Button type="submit" disabled={!ready || start.isPending}>
             <RouteIcon />

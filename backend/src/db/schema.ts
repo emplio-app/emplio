@@ -273,6 +273,52 @@ export const actionRuns = pgTable(
 // One go of a process (company/processes/<name>.md, processes.ts) for one client, or for anything else with a name (a
 // candidate, an opening): its steps copied from the file when it started (editing the file never changes work in hand),
 // which one it's on, and when each finished. Each step is a task (tasks.runId), made when the one before it is done.
+// One row per process file (company/processes/<name>.md), rebuilt from git by syncProcesses (processes.ts) like
+// automations: the file is the truth, the row is what the app and runs read.
+export const processes = pgTable(
+  "processes",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // the file name without .md, and its git blob sha (unchanged files are skipped)
+    name: text().notNull(),
+    sha: text().notNull(),
+    title: text().notNull(),
+    // what each go is for: "client", "other" (just a name), or a kind of record ("invoice", "candidate")
+    for: text().notNull().default("client"),
+    starts: text({ enum: ["manual", "new client", "schedule"] }).notNull().default("manual"),
+    every: text(),
+    clients: text().array(),
+    steps: jsonb().$type<ProcessStepDef[]>().notNull().default([]),
+    about: text().notNull().default(""),
+    // what's wrong with the file (it can't start until fixed)
+    error: text(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.name)],
+);
+
+// Things a business tracks that aren't clients: an invoice, a candidate, a project. Emplio adds them (or a process
+// started for one does); fields hold whatever that kind needs (amount, due date, role), Emplio's choice.
+export const records = pgTable(
+  "records",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // lowercase singular: invoice, candidate, project
+    kind: text().notNull(),
+    title: text().notNull(),
+    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    fields: jsonb().$type<Record<string, string>>().notNull().default({}),
+    // free words: open, paid, hired, closed...
+    status: text().notNull().default("open"),
+    createdBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index().on(t.workspaceId, t.kind)],
+);
+
 export const processRuns = pgTable(
   "process_runs",
   {
@@ -284,6 +330,8 @@ export const processRuns = pgTable(
     processTitle: text().notNull(),
     subject: text().notNull(),
     clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    // what it's for when that's a record (an invoice, a candidate); its client, if any, is in clientId too
+    recordId: uuid().references(() => records.id, { onDelete: "set null" }),
     period: text(),
     steps: jsonb().$type<ProcessStepDef[]>().notNull(),
     // the step it's on (0-based); steps.length once it's done
