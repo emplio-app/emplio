@@ -237,7 +237,7 @@ const MAC_SIGN_IN = ` If the sign-in still doesn't go through after 2 tries (the
 // (for a page whose boxes can't be told apart). A key goes into the focused box, or the page's only one.
 export async function fill(w: Who, conversationId: string, name: string, field?: string) {
   const row = await find(w, name);
-  if (!row) return `error: nothing saved as ${nameOf(name)} (emplio logins list)`;
+  if (!row) return `error: nothing saved as ${nameOf(name)} (emplio logins list); not there: ask for it with emplio logins ask ${nameOf(name)} --site <site> --fields "Email,Password"`;
   const live = await openBrowser(conversationId);
   if (!live) return `error: no browser is open in this chat; open ${row.site} with emplio browser first`;
   const cdp = await devtools(live.cdpUrl);
@@ -278,9 +278,14 @@ export async function fill(w: Who, conversationId: string, name: string, field?:
     const missed = Object.keys(saved).filter((label) => !filled.some((f) => f.startsWith(`${label} (`)));
     if (!filled.length)
       return `error: found no box for ${row.kind === "key" || pick ? "it; the page has several boxes, so click into the right one first" : `${missed.join(", ")} on ${siteOf(tab.url)}; go to the sign-in page, or click into a box and use emplio logins fill ${nameOf(name)} "<field>"`}`;
+    // the page's own Enter in the box typed last: submits the form or moves to the next step. Not with `field`,
+    // where the other boxes may still be empty.
+    if (!pick)
+      for (const type of ["keyDown", "keyUp"])
+        await cdp.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" && { text: "\r" }) }, sessionId);
     await row.used();
     record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "connection", summary: `Filled ${nameOf(name)} on ${row.site}` });
-    return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}. Now press the sign-in or next button yourself.${isDeviceBrowser(live.id) ? MAC_SIGN_IN : ""}`;
+    return `filled ${filled.join(", ")} on ${siteOf(tab.url)}${missed.length && !pick ? ` (no box yet for ${missed.join(", ")}: press Next, then fill again)` : ""}${pick ? ". Now press the sign-in or next button yourself." : ", then pressed Enter. Look at the page: if it hasn't moved on, press the sign-in or next button yourself."}${isDeviceBrowser(live.id) ? MAC_SIGN_IN : ""}`;
   } finally {
     cdp.close();
   }
@@ -354,7 +359,7 @@ const USAGE = `usage: emplio logins list                     saved logins and ke
                                           the boxes that site's sign-in page has, labelled as there ("Phone",
                                           "Username,Password,PIN"); never one-time codes. Saving a taken name replaces it.
        emplio logins ask <NAME> --site <api host> --key   the same for an API key or token
-       emplio logins fill <NAME> ["<field>"]  type it into this chat's browser tab on its site (then press the button);
+       emplio logins fill <NAME> ["<field>"]  type it into this chat's browser tab on its site (then presses Enter);
                                           with a field, just that one into the box you clicked
        emplio logins remove <NAME>           delete it
 ${HTTP_USAGE}`;

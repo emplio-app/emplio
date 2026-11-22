@@ -7,6 +7,7 @@ import { BottomTabs } from "@/components/chat/bottom-tabs";
 import { JustUpdated, NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
 import { DesktopHistory } from "@/components/desktop-history";
+import { Tour } from "@/components/tour";
 import { useDesktopLink } from "@/components/desktop-link";
 import { useWebNotifications } from "@/components/web-notifications";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
@@ -50,15 +51,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </SidebarProvider>
         {/* last in the page: of two overlapping window-drag areas, the later one wins, and the sidebar's top row is one */}
         <DesktopHistory />
+        <Tour />
       </TooltipProvider>
     </DraftProvider>
   );
 }
 
-// In the phone app (iPhone or Android), once signed in: ask to notify (iOS only asks once), tell the server where to reach this
+// In the phone app (iPhone or Android), once signed in and notifications are allowed: tell the server where to reach this
 // phone, and open the chat a tapped notification is about. The plugin is missing on app builds without it.
 type PushPlugin = {
-  requestPermissions(): Promise<{ receive: string }>;
+  checkPermissions(): Promise<{ receive: string }>;
   register(): Promise<void>;
   addListener(event: string, run: (e: never) => void): { remove(): void } | Promise<{ remove(): void }>;
 };
@@ -72,7 +74,8 @@ function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) 
         if (a.notification.data?.path) open(a.notification.data.path);
       }),
     ];
-    void push.requestPermissions().then((p) => (p.receive === "granted" ? push.register() : undefined));
+    // only once allowed: the chat asks after their first job (first-run.tsx Offers), not here at sign-in
+    void push.checkPermissions().then((p) => (p.receive === "granted" ? push.register() : undefined));
     return () => void listening.forEach((l) => void Promise.resolve(l).then((h) => h.remove()));
   }, [signedIn, open]);
 }

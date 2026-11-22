@@ -131,7 +131,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
           <Spinner className="size-3" /> {answer.variables === "deny" ? "Denying…" : "Running…"}
         </div>
       ) : (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2" data-tip="approve">
           <Button size="sm" onClick={() => answer.mutate("once")}>
             Allow
           </Button>

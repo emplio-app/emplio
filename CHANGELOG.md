@@ -2,7 +2,7 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
-## 1.3.4 (2026-11-21)
+## 1.3.8 (2026-11-22)
 
 ### What's new
 
@@ -15,6 +15,57 @@ The newest version is at the top, and its heading is where Emplio's version numb
 - Group details are kept for 10 minutes (`groupInfo`, `joinedGroups`); any group change drops them.
 - New `GET /accounts/{id}/groups?with=` and `whatsapp_linked.list_groups`. Group adds and new groups no longer count as sends; they count as group changes.
 - Takes effect once the WhatsApp worker is redeployed.
+
+## 1.3.7 (2026-11-21)
+
+### What's new
+
+- A cleaner message box: one line inside a chat, a few lines on a new chat, with the mic and a filled send button inside it.
+- Buttons under the box for attaching, commands (/) and mentioning (@), so you don't need to know what to type. On a phone they sit behind a + in the box, and the keyboard closes once you send.
+- Attach a folder from the same attach button, or drag a folder into the chat. It's sent as one zip with its sub-folders kept.
+- Late at night or early in the morning, the greeting changes: "Working late?", "Still up?", "Up early?".
+- A step's name that's too long for its row can now be read in full: hover over it, or open the step (tap it on a phone).
+- When a job asks for your OK on many things at once, the first card shows in full with "N more waiting after this" under it; answering it brings up the next.
+
+### For developers
+
+- `chat-view.tsx` composer: single-row input with mic and send inline, tool row under it on fine pointers, a + menu on coarse pointers; / and @ buttons put the character in and open the same menus (`useMentionMenu` returns `moveCaret`) (#344, #345, #346).
+- `zip-folder.ts`: `zipFolder` takes `{file, path}` pairs; `readDropped` walks a dropped folder entry (#344).
+- `tool-calls.tsx`: cut-off step labels get a `title` and wrap when the row is open (#334); waiting Allow cards show one at a time (#340).
+
+## 1.3.6 (2026-11-21)
+
+### What's new
+
+- When Emplio fills a saved login into a website, it now presses Enter afterwards, so most sign-in pages go straight through without a separate click.
+
+### For developers
+
+- `backend/src/logins.ts` `fill` sends Enter (`Input.dispatchKeyEvent`) to the box typed last, except when a single `field` was named. Its reply and the agent instructions in `sandbox.ts` say to press the button only if the page hasn't moved on (#332).
+
+## 1.3.5 (2026-11-21)
+
+### What's new
+
+- When a site isn't signed in and no login is saved, Emplio asks you to save the login first instead of asking how you want to sign in. Once saved, it signs in by itself next time. Signing in yourself in the browser is still there if you'd rather not save it.
+
+### For developers
+
+- Agent instructions (`sandbox.ts`, `jobs.ts`): with nothing saved, `emplio logins ask` comes first; browser sign-in only if the person declines or the site has only "Continue with Google" (#331).
+- `emplio logins fill` with nothing saved now points to `emplio logins ask`.
+
+## 1.3.4 (2026-11-21)
+
+### What's new
+
+- New here? Each part of Emplio now shows a short tip the first time you open it: your chat, Work, a task, Memory, Team, your menu, Integrations, the first job an agent takes on, the first file Emplio makes for you, sharing a file, and the first time Emplio asks for your OK. Step through with Back and Next; see them all again from your menu, under Product tour.
+- On the phone app, Emplio asks to send you notifications after your first message, not as soon as you sign in.
+- The menu's "Help guides" is now just "Help".
+
+### For developers
+
+- `frontend/src/components/tour.tsx` replaces `tips.tsx`: a list of short tours (`TOURS`), each with a `when()` and steps that point at `data-tip="<id>"` elements. A tour starts the first time its part is on screen, skips steps whose target isn't there, dims the rest of the page lightly and leaves it usable. Seen tours are kept per device in localStorage (`emplio-tours`); only people who came through the welcome dialog get them. To add one: mark the element with `data-tip` and add an entry to `TOURS`.
+- Push permission is checked (not requested) at sign-in; `first-run.tsx` `Offers` asks after the first message.
 
 ## 1.3.3 (2026-11-21)
 

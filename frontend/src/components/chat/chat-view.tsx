@@ -8,14 +8,18 @@ import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  AtSignIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
-  FolderUpIcon,
+  FileIcon,
+  FolderIcon,
+  SquareSlashIcon,
   PaperclipIcon,
+  PlusIcon,
   PencilIcon,
   RefreshCcwIcon,
   SendIcon,
@@ -35,6 +39,7 @@ import {
   MessageAction,
   MessageActions,
   MessageContent,
+  MessageResponse,
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
@@ -47,7 +52,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
-import { JobCards, TelegramOffer, WelcomeDialog } from "@/components/chat/first-run";
+import { JobCards, Offers, WelcomeDialog } from "@/components/chat/first-run";
 import { RenameInput } from "@/components/chat/app-sidebar";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing, isStep } from "@/components/chat/tool-calls";
@@ -68,7 +73,8 @@ import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
-import { zipFolder } from "@/lib/zip-folder";
+import { readDropped, zipFolder } from "@/lib/zip-folder";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 // The server words the common failures for people (chat.ts replyError); anything else (a browser's "Failed to
@@ -126,11 +132,17 @@ const sentLinks = (message: UIMessage) =>
     ),
   );
 
-function greeting() {
+// after 9pm and before 6am it asks, rather than greets
+function greeting(name?: string) {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  const [words, end] =
+    hour < 4 ? ["Still up", "?"]
+    : hour < 6 ? ["Up early", "?"]
+    : hour < 12 ? ["Good morning", ""]
+    : hour < 18 ? ["Good afternoon", ""]
+    : hour < 21 ? ["Good evening", ""]
+    : ["Working late", "?"];
+  return `${words}${name ? `, ${name}` : ""}${end}`;
 }
 
 // job: this is a job's own chat (backend jobs.ts): its header names the agent, and it closes out of the sidebar
@@ -511,6 +523,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     setInput("");
     setQuotes([]);
     mentionMenu.clear();
+    // on a phone the keyboard goes once it's sent, so the reply has the whole screen
+    if (!matchMedia("(pointer: fine)").matches) box.current?.blur();
   };
 
   // Waiting in line, sent as their own message when the reply ends. The running reply is told, so it ends
@@ -690,10 +704,29 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       e.stopPropagation();
       dragDepth.current = 0;
       setDragging(false);
-      attachments.add([...e.dataTransfer.files]);
+      // a dropped folder goes as one zip, like a picked one; grab the entries now, they're gone after the first await
+      const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry());
+      const plain = [...e.dataTransfer.files].filter((_, i) => !entries[i]?.isDirectory);
+      if (plain.length) attachments.add(plain);
+      for (const dir of entries.filter((x) => x?.isDirectory)) void addFolder(readDropped(dir!));
     },
   };
+  const addFolder = async (picked: Promise<{ file: File; path: string }[]>) => {
+    const zip = await zipFolder(await picked, 100 * 1024 * 1024);
+    if (zip) attachments.add([zip]);
+    else toast.error("That folder is empty or over 100 MB");
+  };
   const fileInput = useRef<HTMLInputElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // puts text in the box with the cursor at `at`, so the / or @ menu opens as if typed
+  const typeIn = (text: string, at: number) => {
+    setInput(text);
+    mentionMenu.moveCaret(at);
+    requestAnimationFrame(() => {
+      box.current?.focus();
+      box.current?.setSelectionRange(at, at);
+    });
+  };
   const folderInput = useRef<HTMLInputElement>(null);
 
   // Like Claude/ChatGPT: a just-sent prompt scrolls to the top and the reply fills in below it.
@@ -973,8 +1006,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         ) : (message.role === "assistant" || text) && (
           <MessageContent className="text-[0.9rem] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:px-4 group-[.is-user]:py-2.5">
             {message.role === "user" ? (
-              <LongText>
-                <QuotedText text={userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)} marks={sentMarks(message)} links={sentLinks(message)} />
+              <LongText markdown={fromEmplio || MARKDOWN.test(text)}>
+                {/* Emplio's briefs, and anything typed with markdown (bold, lists, headings, code), show formatted;
+                    plain messages keep their @mention and /command highlights */}
+                {fromEmplio || MARKDOWN.test(text) ? (
+                  <MessageResponse className="leading-relaxed [&_li]:my-1">{userFacingText(fromEmplio ? text.slice(FROM_EMPLIO.length) : text)}</MessageResponse>
+                ) : (
+                  <QuotedText text={userFacingText(text)} marks={sentMarks(message)} links={sentLinks(message)} />
+                )}
               </LongText>
             ) : isLast && busy && message.parts.every((p) => p.type !== "text" && !isStep(p.type) && !(p.type === "reasoning" && p.text.trim())) ? (
               thinking(message)
@@ -1149,8 +1188,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         </div>
       )}
     <PromptInput
+      data-tip="chat"
       onSubmit={({ text }) => send(text)}
-      className="rounded-2xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
+      className="rounded-3xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:rounded-3xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
     >
       {(attachments.items.length > 0 || quotes.length > 0) && (
         <PromptInputHeader className="p-0">
@@ -1158,9 +1198,36 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
           {attachments.items.length > 0 && <AttachmentTray items={attachments.items} onRemove={attachments.remove} onRetry={attachments.retry} />}
         </PromptInputHeader>
       )}
-      <div className="relative w-full">
+      {/* one line, send at its end; the tools sit under the box */}
+      <div className="flex w-full items-end">
+      {/* on a phone a row under the box is wasted height: attach, skill and mention fold into one + in it */}
+      <div className="hidden h-12 items-center pl-2 pointer-coarse:flex" onMouseDown={(e) => e.preventDefault()}>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<PromptInputButton aria-label="More" className="rounded-full text-muted-foreground" />}>
+            <PlusIcon className="size-5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" sideOffset={10}>
+            <DropdownMenuItem onClick={() => fileInput.current?.click()}>
+              <PaperclipIcon /> Attach
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}>
+              <SquareSlashIcon /> Commands
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
+                typeIn(text, text.length);
+              }}
+            >
+              <AtSignIcon /> Mention
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="relative min-w-0 flex-1">
         <HighlightLayer text={input} marks={marks} />
         <PromptInputTextarea
+          ref={box}
           value={input}
           onChange={(e) => setInput(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -1175,64 +1242,18 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             e.preventDefault();
             attachments.add(files);
           }}
-          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : "Ask Emplio anything…")}
+          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for commands, @ to mention" : "Ask Emplio anything…")}
           // not on phones: the keyboard would cover half the chat the moment it opens
           autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className="px-4 pt-4 text-[0.9rem]"
+          className={cn("px-5 py-3 text-[0.9rem] leading-6 placeholder:truncate pointer-coarse:px-1", empty ? "min-h-24" : "min-h-0")} // a new chat gets room for a few lines
         />
       </div>
-      {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
-          buttons out from under the finger before it lifts, and the tap is lost. */}
-      <PromptInputFooter className="px-3 pb-3" onMouseDown={(e) => e.preventDefault()}>
-        <PromptInputTools>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              attachments.add([...(e.currentTarget.files ?? [])]);
-              e.currentTarget.value = "";
-            }}
-          />
-          <PromptInputButton
-            tooltip="Attach images, PDFs or text files"
-            aria-label="Attach files"
-            onClick={() => fileInput.current?.click()}
-            className="rounded-full text-muted-foreground"
-          >
-            <PaperclipIcon className="size-4" />
-          </PromptInputButton>
-          {/* a whole folder goes as one zip with its sub-folders kept. Not on touch screens: phones can't pick folders */}
-          <input
-            ref={folderInput}
-            type="file"
-            className="hidden"
-            {...{ webkitdirectory: "" }}
-            onChange={async (e) => {
-              const picked = [...(e.currentTarget.files ?? [])];
-              e.currentTarget.value = "";
-              if (!picked.length) return;
-              const zip = await zipFolder(picked, 100 * 1024 * 1024);
-              if (zip) attachments.add([zip]);
-              else toast.error("That folder is empty or over 100 MB");
-            }}
-          />
-          <PromptInputButton
-            tooltip="Attach a folder"
-            aria-label="Attach a folder"
-            onClick={() => folderInput.current?.click()}
-            className="hidden rounded-full text-muted-foreground pointer-fine:inline-flex"
-          >
-            <FolderUpIcon className="size-4" />
-          </PromptInputButton>
+        {/* mic and send share one row, centred on each other and on the first line of text */}
+        <div className="flex h-12 items-center gap-1 pr-2">
+        {/* a press keeps the focus in the box */}
+        <div className="flex" onMouseDown={(e) => e.preventDefault()}>
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
-          {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
-          <span className="hidden pl-1 text-xs text-muted-foreground sm:pointer-fine:inline">
-            <kbd className="font-sans">Enter</kbd> to send ·{" "}
-            <kbd className="font-sans">Shift + Enter</kbd> for a new line
-          </span>
-        </PromptInputTools>
+        </div>
         {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
         {/* while a reply streams: stop when the box is empty, queue when there's something to send */}
         <PromptInputSubmit
@@ -1244,8 +1265,75 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         >
           {busy && !canSend ? undefined : <ArrowUpIcon className="size-4" />}
         </PromptInputSubmit>
-      </PromptInputFooter>
+        </div>
+      </div>
     </PromptInput>
+      {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
+          buttons out from under the finger before it lifts, and the tap is lost. */}
+      <div className="mt-1 flex items-center justify-between gap-2 px-2 pointer-coarse:hidden" onMouseDown={(e) => e.preventDefault()}>
+        <PromptInputTools>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              attachments.add([...(e.currentTarget.files ?? [])]);
+              e.currentTarget.value = "";
+            }}
+          />
+          {/* a browser picker takes files or a folder, never both, so the one clip asks which */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<PromptInputButton aria-label="Attach" className="rounded-full text-muted-foreground" />}
+            >
+              <PaperclipIcon className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start">
+              <DropdownMenuItem onClick={() => fileInput.current?.click()}>
+                <FileIcon /> Files
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => folderInput.current?.click()}>
+                <FolderIcon /> Folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* a whole folder goes as one zip with its sub-folders kept */}
+          <input
+            ref={folderInput}
+            type="file"
+            className="hidden"
+            {...{ webkitdirectory: "" }}
+            onChange={async (e) => {
+              const picked = [...(e.currentTarget.files ?? [])].map((file) => ({ file, path: file.webkitRelativePath || file.name }));
+              e.currentTarget.value = "";
+              if (picked.length) await addFolder(Promise.resolve(picked));
+            }}
+          />
+          {/* the same menus typing / or @ opens, for people who don't know to type them */}
+          <PromptInputButton
+            tooltip="Commands"
+            aria-label="Commands"
+            onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}
+            className="rounded-full text-muted-foreground"
+          >
+            <SquareSlashIcon className="size-4" />
+          </PromptInputButton>
+          <PromptInputButton
+            tooltip="Mention"
+            aria-label="Mention"
+            onClick={() => {
+              const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
+              typeIn(text, text.length);
+            }}
+            className="rounded-full text-muted-foreground"
+          >
+            <AtSignIcon className="size-4" />
+          </PromptInputButton>
+        </PromptInputTools>
+        {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
+        <span className="hidden text-xs text-muted-foreground sm:pointer-fine:inline">Shift + Enter for a new line</span>
+      </div>
     </div>
   );
 
@@ -1350,7 +1438,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
               {/* my-auto, not justify-center: centred when it fits, scrolls from the top when it doesn't */}
               <div className="my-auto w-full max-w-2xl">
                 <h2 className="mb-1.5 text-center text-2xl font-semibold sm:mb-2 sm:text-4xl">
-                  {greeting()}, {firstName}
+                  {greeting(firstName)}
                 </h2>
                 <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
                 {composer}
@@ -1440,7 +1528,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(1rem,var(--safe-bottom))] max-md:pb-3">
+              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(0.25rem,var(--safe-bottom))] max-md:pb-3 md:pointer-coarse:pb-[max(0.75rem,var(--safe-bottom))]">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1456,9 +1544,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 {asks.length ? (
                   // waiting for their tap: here whatever they're typing or Emplio is doing, until answered
                   <div ref={(card) => void (card && setCardRoom(card.offsetHeight))} className="absolute inset-x-4 bottom-full z-20 flex max-h-[min(28rem,50dvh)] flex-col gap-2 pb-2">
-                    {asks.map((a) => (
-                      <ApprovalAsk key={a.id} approval={a} />
-                    ))}
+                    {/* one at a time: stacked, each shrank to a clipped title (ten from one job) */}
+                    <ApprovalAsk key={asks[0].id} approval={asks[0]} />
+                    {asks.length > 1 && <p className="text-center text-xs text-muted-foreground">{asks.length - 1} more waiting after this</p>}
                   </div>
                 ) : (
                   nextStep && !input && !attachments.items.length && !quotes.length && !busy && !queue.length && !onTelegram && (
@@ -1471,7 +1559,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   <TelegramOnly />
                 ) : (
                   <>
-                    {!job && <TelegramOffer messages={messages} />}
+                    {!job && <Offers messages={messages} />}
                     {composer}
                   </>
                 )}
@@ -1582,8 +1670,11 @@ function EditableTitle({ id, title }: { id: string; title: string }) {
 }
 
 // A long sent message folds to its first lines; "Show more" opens it.
-function LongText({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLParagraphElement>(null);
+// enough markdown in a sent message to be worth formatting: **bold**, `code`, a list, a heading or a fenced block
+const MARKDOWN = /\*\*\S|`[^`\n]+`|^\s*(?:[-*+]|\d+\.)\s+\S|^#{1,6}\s|^```/m;
+
+function LongText({ children, markdown }: { children: React.ReactNode; markdown?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -1592,9 +1683,9 @@ function LongText({ children }: { children: React.ReactNode }) {
   }, [children, open]);
   return (
     <>
-      <p ref={ref} className={cn("whitespace-pre-wrap [overflow-wrap:anywhere]", !open && "line-clamp-8")}>
+      <div ref={ref} className={cn("[overflow-wrap:anywhere]", !markdown && "whitespace-pre-wrap", !open && "line-clamp-8")}>
         {children}
-      </p>
+      </div>
       {long && (
         <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-sm font-medium text-muted-foreground hover:text-foreground">
           {open ? "Show less" : "Show more"}

@@ -696,7 +696,7 @@ function Share({ id }: { id: string }) {
   if (made.isPending) return null;
   if (!link)
     return (
-      <Button size="sm" variant="ghost" className="h-8 gap-1.5" disabled={toggle.isPending} onClick={() => toggle.mutate(true)} title="Make a link anyone can open, no sign-in needed">
+      <Button size="sm" variant="ghost" className="h-8 gap-1.5" disabled={toggle.isPending} onClick={() => toggle.mutate(true)} title="Make a link anyone can open, no sign-in needed" data-tip="file-share" data-tip-side="bottom">
         <LinkIcon /> Share
       </Button>
     );
@@ -837,13 +837,14 @@ export function MadeCards({ files }: { files: { id?: string; url: string; filena
   const shown = [...new Map(files.map((f) => [f.url, { id: f.id, url: f.url, name: f.filename, mediaType: f.mediaType ?? "application/octet-stream" }])).values()];
   return (
     <div className="flex flex-wrap gap-2">
-        {shown.map((f) =>
+        {/* the tour's tip points at the first file itself, not the whole row */}
+        {shown.map((f, i) =>
           kindOf(f) === "image" ? (
-            <button key={f.url} type="button" onClick={() => open?.(f)} className="overflow-hidden rounded-lg border hover:opacity-90" aria-label={`Open ${f.name}`}>
+            <button key={f.url} type="button" onClick={() => open?.(f)} className="overflow-hidden rounded-lg border hover:opacity-90" aria-label={`Open ${f.name}`} data-tip={i ? undefined : "made"} data-tip-side="bottom">
               <img src={fileHref(f.url)} alt={f.name} className="h-40 max-w-64 object-cover" />
             </button>
           ) : (
-            <div key={f.url} className="flex w-72 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 hover:bg-accent/50">
+            <div key={f.url} className="flex w-72 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 hover:bg-accent/50" data-tip={i ? undefined : "made"} data-tip-side="bottom">
               <button type="button" onClick={() => open?.(f)} className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-2.5 text-left">
                 <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
                   <FileTypeIcon file={f} className="size-4.5" />

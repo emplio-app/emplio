@@ -206,5 +206,6 @@ export function useMentionMenu(input: string, setInput: (text: string) => void) 
     <MenuSkeleton />
   ) : null;
 
-  return { menu, linked, link, onKeyDown, onSelect, clear: () => setPicked([]) };
+  // moveCaret: text put in by a button, not typed, so no select event says where the cursor went
+  return { menu, linked, link, onKeyDown, onSelect, moveCaret: setCaret, clear: () => setPicked([]) };
 }
