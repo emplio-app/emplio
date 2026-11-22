@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.0 (2026-11-22)
+
+### What's new
+
+- Fifteen new apps for agencies and other client businesses, each connected by pasting a key: Harvest, Toggl Track and Clockify for time tracking; Jira, Linear, monday.com, Trello and Productive for projects; HighLevel and Pipedrive for clients and deals; Zendesk and Freshdesk for support; PandaDoc and Dropbox Sign for proposals and signatures; and Shiprocket for shipping. Emplio can log hours, move work along, update deals, answer tickets, send contracts for signature and book shipments, and start work by itself when something happens, like a deal moving stage, a ticket coming in or a contract being signed. ![](frontend/public/whats-new/1.4.0-client-apps.webp)
+
+### For developers
+
+- New own apps under `backend/src/integrations/own/`: `harvest`, `toggl`, `clockify`, `jira`, `linear`, `monday`, `trello`, `productive`, `gohighlevel`, `pipedrive`, `zendesk`, `freshdesk`, `pandadoc`, `dropbox_sign`, `shiprocket`. Key sign-in only; each has `COVERAGE.md`, tests, and webhook triggers where the app allows them by API, polled ones (`polls/<app>.ts`) otherwise.
+- `automations.ts`: the app webhook route also takes `multipart/form-data` (Dropbox Sign callbacks), kept raw.
+- `own/openapi.ts`: error messages read `error.error_msg` and `description`, and list field errors given as an array or under `details`.
+- `composio-names.ts` and the skill's `coverage.ts` skip the empty `"tools":[]` Composio's toolkit pages now start with.
+- `new-integration` skill: every app also gets its website page (`cloud/frontend/seo/apps.ts`), docs row and changelog picture.
+
 ## 1.3.9 (2026-11-22)
 
 ### What's new

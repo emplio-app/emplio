@@ -131,11 +131,15 @@ export async function call(api: Api, key: string, send: Send, input: Record<stri
     const text = await res.text();
     const j = parseLine(text);
     // Twirp (LiveKit) says {"code", "msg"}; Plivo {"error": "..."}; Razorpay {"error": {"description"}}
-    const why = j?.error?.message ?? j?.error?.description ?? j?.message ?? j?.Message ?? j?.msg ?? (typeof j?.error === "string" ? j.error : undefined) ?? j?.detail ?? text;
-    // field-by-field validation errors, as Laravel-style APIs give them: {"errors": {"name": ["is taken"]}}
-    const fields = j?.errors && typeof j.errors === "object" && !Array.isArray(j.errors)
-      ? Object.entries(j.errors).map(([k, v]) => `${k}: ${[v].flat().join(", ")}`).join("; ")
-      : "";
+    const why = j?.error?.message ?? j?.error?.error_msg ?? j?.error?.description ?? j?.message ?? j?.Message ?? j?.msg ?? j?.description ?? (typeof j?.error === "string" ? j.error : undefined) ?? j?.detail ?? text;
+    // field-by-field validation errors: {"errors": {"name": ["is taken"]}} (Laravel-style), {"errors": [{"field", "message"}]}
+    // (Freshdesk), {"details": {"email": [{"description"}]}} (Zendesk)
+    const say = (x: any): string => (typeof x === "string" ? x : (x?.description ?? x?.message ?? JSON.stringify(x)));
+    const list = j?.errors ?? j?.details;
+    const fields = !list || typeof list !== "object" ? ""
+      // a list only adds to a message the app gave; without one, the whole answer (why = text) already says it
+      : Array.isArray(list) ? (why === text ? "" : list.map((e: any) => (e?.field ? `${e.field}: ${say(e)}` : say(e))).join("; "))
+      : Object.entries(list).map(([k, v]) => `${k}: ${[v].flat().map(say).join(", ")}`).join("; ");
     if (api.deadToken ? api.deadToken(res.status, j) : res.status === 401)
       throw new AppsError(`${api.name} rejected the token; make a new one (${api.tokenHelp}) and reconnect`, true, `${why || res.statusText} (${res.status})`);
     throw new AppsError(`${api.name}: ${why || res.statusText}${fields ? ` (${fields})` : ""} (${res.status})`);

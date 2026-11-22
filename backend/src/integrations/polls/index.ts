@@ -38,6 +38,21 @@ import { godaddy } from "./godaddy";
 import { namecheap } from "./namecheap";
 import { wix } from "./wix";
 import { wordpress } from "./wordpress";
+import { harvest } from "./harvest";
+import { toggl } from "./toggl";
+import { clockify } from "./clockify";
+import { jira } from "./jira";
+import { linear } from "./linear";
+import { monday } from "./monday";
+import { pandadoc } from "./pandadoc";
+import { shiprocket } from "./shiprocket";
+import { gohighlevel } from "./gohighlevel";
+import { productive } from "./productive";
+import { pipedrive } from "./pipedrive";
+import { zendesk } from "./zendesk";
+import { freshdesk } from "./freshdesk";
+import { dropbox_sign } from "./dropbox_sign";
+import { trello } from "./trello";
 import { postgresql } from "./postgresql";
 import { mysql } from "./mysql";
 import { whatsapp_linked } from "./whatsapp_linked";
@@ -57,7 +72,7 @@ export type PollTrigger = {
 };
 
 // Every app's polled triggers, one file per app (polls/<app>.ts), each exporting its triggers by short name.
-const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, payu, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked };
+const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, payu, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello };
 const POLLS: Record<string, PollTrigger> = Object.fromEntries(
   Object.entries(APPS).flatMap(([app, triggers]) => Object.entries(triggers).map(([name, t]) => [`${app}.${name}`, t])),
 );

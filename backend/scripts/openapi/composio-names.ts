@@ -6,7 +6,8 @@ export async function composioNames(slug: string) {
   const res = await fetch(`https://docs.composio.dev/toolkits/${slug}`);
   if (!res.ok) throw new Error(`no Composio toolkit page for ${slug} (${res.status})`);
   const page = (await res.text()).replace(/\\"/g, '"');
-  const from = page.indexOf('"tools":[');
+  // the page may start with an empty "tools":[] before the real list
+  const from = page.indexOf('"tools":[{') >= 0 ? page.indexOf('"tools":[{') : page.indexOf('"tools":[');
   const part = page.slice(from);
   const prefix = `${slug.toUpperCase()}_`;
   return [...new Set([...part.slice(0, part.search(/\}\],"/)).matchAll(/\{"slug":"([A-Z0-9_]+)"/g)].map((m) => m[1]!.replace(prefix, "").toLowerCase()))];

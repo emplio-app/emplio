@@ -732,6 +732,8 @@ export async function automationRoutes(app: FastifyInstance) {
     hooks.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 5 * 1024 * 1024 }, (_req, body, done) => done(null, body));
     // form-encoded deliveries (Mailchimp's), kept raw for the app to read
     hooks.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: 5 * 1024 * 1024 }, (_req, body, done) => done(null, body));
+    // multipart deliveries (Dropbox Sign's callbacks), kept raw for the app to read
+    hooks.addContentTypeParser("multipart/form-data", { parseAs: "string", bodyLimit: 5 * 1024 * 1024 }, (_req, body, done) => done(null, body));
     hooks.post<{ Body: string }>("/webhooks/composio", async (req, reply) => {
       const h = (name: string) => String(req.headers[name] ?? "");
       if (!webhookSecret || !signatureOk(webhookSecret, h("webhook-id"), h("webhook-timestamp"), req.body, h("webhook-signature")))
