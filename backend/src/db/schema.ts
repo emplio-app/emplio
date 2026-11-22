@@ -270,6 +270,37 @@ export const actionRuns = pgTable(
   (t) => [index().on(t.workspaceId, t.createdAt)],
 );
 
+// One go of a process (company/processes/<name>.md, processes.ts) for one client, or for anything else with a name (a
+// candidate, an opening): its steps copied from the file when it started (editing the file never changes work in hand),
+// which one it's on, and when each finished. Each step is a task (tasks.runId), made when the one before it is done.
+export const processRuns = pgTable(
+  "process_runs",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // the file name without .md
+    process: text().notNull(),
+    // the process's title then, and what this go is for: the client's name or the thing's, and the period
+    processTitle: text().notNull(),
+    subject: text().notNull(),
+    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    period: text(),
+    steps: jsonb().$type<ProcessStepDef[]>().notNull(),
+    // the step it's on (0-based); steps.length once it's done
+    step: integer().notNull().default(0),
+    // when each step finished, by position (a step sent back to is cleared again)
+    finished: jsonb().$type<(string | null)[]>().notNull().default([]),
+    status: text({ enum: ["active", "done", "stopped"] }).notNull().default("active"),
+    startedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    // a process started on a schedule for each client: "<process>/<client slug>/<period>", never started twice
+    repeatKey: text(),
+    startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    doneAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [index().on(t.workspaceId, t.process, t.status), index().on(t.clientId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
+);
+export type ProcessStepDef = { name: string; who: string; how?: string; days?: number; after?: number | "start"; back?: number };
+
 // One per file in the company repo's automations/ folder: the file (git) is the source, this row is
 // what runs. Rebuilt from git by syncAutomations; never edited on its own.
 export const automations = pgTable(
@@ -305,6 +336,8 @@ export const automations = pgTable(
     clients: text().array(),
     // those tasks are due this many days after the run
     dueDays: integer(),
+    // with clients: start this process (company/processes/<name>.md) for each of them instead of adding a task
+    process: text(),
     // what's wrong with the file (it doesn't run until fixed)
     error: text(),
     // the provider's id for the trigger it watches
@@ -596,6 +629,9 @@ export const tasks = pgTable(
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
     // a repeating job's task: "<automation>/<client slug>/<period>", so a run never adds the same one twice
     repeatKey: text(),
+    // a process's step (process_runs): which go of it, and which step
+    runId: uuid().references((): AnyPgColumn => processRuns.id, { onDelete: "cascade" }),
+    stepIndex: integer(),
     // reminders sent to the assignee, and when the asker was told it's late; reset when the due date moves
     chasedAt: timestamp({ withTimezone: true }),
     chases: integer().notNull().default(0),

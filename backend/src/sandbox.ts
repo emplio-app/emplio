@@ -33,6 +33,7 @@ import { imageCommand } from "./image";
 import { channelsCommand } from "./channels";
 import { tasksCommand } from "./tasks";
 import { clientsCommand } from "./clients";
+import { processesCommand } from "./processes";
 import { previewSkill, skillsCommand } from "./skill-store";
 import { agentsCommand, TOOL_NAME } from "./agents";
 import { siteCallsFrom, sitesCommand } from "./site-calls";
@@ -728,6 +729,7 @@ usage() {
   echo "       emplio plan                                    the checklist the person sees for a job of several steps: emplio plan help"
   echo "       emplio tasks                                   tasks for people and for you, with due dates: emplio tasks help"
   echo "       emplio clients                                 who the business works for, and who handles each: emplio clients help"
+  echo "       emplio processes                               work done the same steps every time (onboarding, filings, hiring): emplio processes help"
   echo "       emplio files                                   everything you've made (from out/), in any chat: emplio files help"
   echo "       emplio skills                                  read one whole (use <name>), or find and install skills others wrote: emplio skills help"
   echo "       emplio logins                                  saved passwords and keys, used by name: emplio logins help"
@@ -1038,6 +1040,10 @@ PY
   clients)
     shift
     req CLIENT "$@" ;;
+  processes)
+    shift
+    case "$1" in add|update) [ "$3" = - ] && set -- "$1" "$2" "$(cat)" ;; esac
+    req PROC "$@" ;;
   files)
     shift
     req FILES "$@" ;;
@@ -1433,6 +1439,7 @@ ${only(agent, `- Files over 1 MB or binary in those folders are .media pointers:
 Where things go:
 - Business facts (clients, suppliers, products, prices, how things are done, decisions): company/knowledge/${admin ? "" : " (as a proposal in inbox/)"}{clients,suppliers,people,topics}/<name>.md or decisions.md, each dated with its source ("2026-10-24, Ravi: Acme pays in 45 days"). Changed: add the new, mark the old "(replaced <date>)". People disagree: keep both and ${admin ? "ask the owner" : "say so in the proposal"}.
 - Clients (who the business works for, or might): \`emplio clients list\`. One who comes up and isn't there: add them in the same reply (\`emplio clients add "<name>"\`, \`--stage prospect\` if not won yet, \`--handler <who>\` once you know who on the team looks after them); their facts go in the notes file it names. Work for or about a client is a task with \`--client <name>\`; waiting on them: \`--status waiting --waiting "<client>: <what>"\`. Before answering about one: \`emplio clients show <name>\` and their notes.
+- Work done the same steps every time (onboarding a client, a yearly filing, a monthly report, hiring for a role): a process (\`emplio processes list\`). When one applies, start it (\`emplio processes start <name> --client <name>\`, or \`--for "<who or what>"\` when it isn't for a client) rather than adding its tasks one by one; each step becomes a task when the one before it is done, so you finish a step with \`emplio tasks done <id>\`, and an OK step that isn't right goes back with \`emplio processes back <run> --note "<what to fix>"\`. Where things stand: \`emplio processes runs\`. Told how something is done step by step, or doing the same steps a second time: write it as a process (\`emplio processes add <name>\`, see \`emplio processes help\`), with who does each step and when it's due, and say so in one line.
 - ${admin ? "Money, pay, HR, legal, the owner's private notes: restricted/; never copied into company/ or me/ or told to a team member." : `Money, pay, HR or legal: never in company/; tell ${name} to take it to the owner.`}
 ${only(manager && !background, `- ${name}'s me/profile.md (who they are) and preferences.md (how they like things), shown below: something lasting they tell you, or a correction, is one short line there in the same reply (change a line rather than add a repeat; delete what's wrong or to forget). Not one-off details; never shared. Their notes, drafts and anything unsure: me/notes/.\n`)}- Before answering about a client, supplier, price or past decision: \`emplio search <words>\`, and say where it came from.
 - Records to count or filter go in the database; things for later are tasks.
@@ -2327,6 +2334,11 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const repeat = (name: string, file: string) => automationsCommand(who, ["add", name, file], () => catchUp(box, s, reposFor(s)[0]!), (a) => askToAllow(s, a));
       lines.push(await tasksCommand(who, s.conversationId, args, repeat, s.data));
     }
+    else if (line.startsWith(`PROC:${key}\t`)) {
+      const args = Buffer.from(line.slice(`PROC:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
+      const who = { workspaceId: s.workspaceId, workspaceName: s.workspaceName, userId: s.user.id, userName: s.user.name, userEmail: s.user.email, role: s.role };
+      lines.push(await processesCommand(who, args, () => catchUp(box, s, reposFor(s)[0]!), s.data));
+    }
     else if (line.startsWith(`CLIENT:${key}\t`)) {
       const args = Buffer.from(line.slice(`CLIENT:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
       lines.push(await clientsCommand({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, s.conversationId, args, s.data));
@@ -2418,7 +2430,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|CLIENT|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|CLIENT|PROC|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.

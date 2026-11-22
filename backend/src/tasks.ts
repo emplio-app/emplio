@@ -23,6 +23,7 @@ import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
 import { clients, conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
 import { findClient, labelChat } from "./clients";
+import { stepFinished, stepInfo } from "./processes";
 import { listTeam } from "./team";
 
 type Who = { workspaceId: string; userId: string; role: Role };
@@ -63,6 +64,7 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
   const agents = await agentNames(rows, workspaceId);
   const ids = [...new Set(rows.flatMap((t) => (t.clientId ? [t.clientId] : [])))];
   const clientNames = new Map(ids.length ? (await db.select({ id: clients.id, name: clients.name }).from(clients).where(inArray(clients.id, ids))).map((c) => [c.id, c.name]) : []);
+  const runs = await stepInfo([...new Set(rows.flatMap((t) => (t.runId ? [t.runId] : [])))]);
   return rows.map((t) => withName({
     id: t.id,
     title: t.title,
@@ -82,11 +84,18 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
     chases: t.chases,
     clientId: t.clientId,
     clientName: t.clientId ? (clientNames.get(t.clientId) ?? null) : null,
+    process: processOf(t, runs.get(t.runId ?? "")),
     createdAt: t.createdAt.toISOString(),
     doneAt: t.doneAt?.toISOString() ?? null,
     assigneeName: t.assigneeId ? (names.get(t.assigneeId) ?? "(left the team)") : AI,
   }));
 }
+const processOf = (t: Row, run: Awaited<ReturnType<typeof stepInfo>> extends Map<string, infer R> ? R | undefined : never): Task["process"] => {
+  if (!run || t.stepIndex === null) return null;
+  const back = run.steps[t.stepIndex]?.back;
+  // sending back only from the step it's on
+  return { runId: run.id, title: run.processTitle, step: t.stepIndex + 1, of: run.steps.length, backTo: back && run.step === t.stepIndex && run.status === "active" ? (run.steps[back - 1]?.name ?? null) : null };
+};
 const withName = (t: Task): Task => (t.agentName ? { ...t, assigneeName: `the ${t.agentName} agent` } : t);
 
 // assignee: a user id, null for the AI, undefined for anyone. open: not done or cancelled. due: due by now. client: theirs only.
@@ -203,6 +212,9 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
   const [row] = await db.update(tasks).set(set).where(eq(tasks.id, t.id)).returning();
   const task = await one(row!);
   const what = input.status === "done" ? "Finished" : input.status === "cancelled" ? "Cancelled" : "Changed";
+  // a process's step done (or cancelled: skipped): its next step starts
+  if ((input.status === "done" || input.status === "cancelled") && OPEN.includes(t.status) && row!.runId)
+    await stepFinished(row!).catch((error) => console.error("moving the process on failed", t.id, error));
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "task", summary: `${what} task "${task.title}"` });
   if (!task.assigneeId) void startDueTasks().catch((error) => console.error("starting tasks failed", error));
   return { ok: true, task };

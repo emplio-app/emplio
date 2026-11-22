@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Client, ClientInput, ClientStage, Task, TeamMember } from "@emplio/shared";
+import type { Client, ClientInput, ClientStage, Process, ProcessRun, Task, TeamMember } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRightIcon,
@@ -14,6 +14,7 @@ import {
   PlusIcon,
   SearchIcon,
   UserPlusIcon,
+  WorkflowIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -39,7 +40,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, clientsQueryKey, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
+import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks } from "@/lib/api";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 const STAGES: { value: ClientStage; label: string; hint: string }[] = [
@@ -506,6 +508,8 @@ function ClientDetails({
           <HandlerPicker clientName={c.name} team={team} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlerIds: ids })} />
         </div>
 
+        <ClientProcesses clientId={c.id} onOpenTask={onOpenTask} />
+
         <section className="grid gap-2">
           <div className="flex items-center justify-between">
             <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Open work</h2>
@@ -608,5 +612,89 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
         </ComboboxList>
       </ComboboxContent>
     </Combobox>
+  );
+}
+
+// The processes going for this client, the step each is on, and starting another.
+function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTask: (id: string) => void }) {
+  const runs = useProcessRuns({ client: clientId });
+  const processes = useProcesses();
+  const forClients = (processes.data ?? []).filter((p) => p.for === "client" && !p.error);
+  if (!forClients.length && !runs.data?.length) return null;
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-center justify-between">
+        <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Processes</h2>
+        {forClients.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="xs" className="text-muted-foreground" />}>
+              <PlusIcon />
+              Start
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {forClients.map((p) => (
+                <StartItem key={p.name} p={p} clientId={clientId} />
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+      {runs.data?.length ? (
+        <ul className="grid gap-1.5">
+          {runs.data.map((r) => (
+            <li key={r.id}>
+              <button
+                type="button"
+                disabled={!r.current}
+                onClick={() => r.current && onOpenTask(r.current.taskId)}
+                className="grid w-full gap-1.5 rounded-lg border px-3 py-2.5 text-left hover:bg-muted/50 disabled:hover:bg-transparent"
+              >
+                <span className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate font-medium">
+                    {r.processTitle}
+                    {r.period ? <span className="font-normal text-muted-foreground"> · {r.period}</span> : null}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {r.step + 1}/{r.steps.length}
+                  </span>
+                </span>
+                <span className="flex gap-0.5">
+                  {r.steps.map((_, i) => (
+                    <span key={i} className={cn("h-1 flex-1 rounded-full", i < r.step ? "bg-primary" : i === r.step ? (r.current?.status === "waiting" ? "bg-amber-500" : "bg-primary/40") : "bg-muted")} />
+                  ))}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {r.steps[r.step]?.name}
+                  {r.current && ` · ${r.current.status === "waiting" ? "waiting" : r.current.assigneeName}`}
+                  {r.current?.dueAt && ` · due ${dueText(r.current.dueAt)}`}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">Nothing going. Start one when it&rsquo;s time.</p>
+      )}
+    </section>
+  );
+}
+
+function StartItem({ p, clientId }: { p: Process; clientId: string }) {
+  const queryClient = useQueryClient();
+  const start = useMutation({
+    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId }),
+    onSuccess: (r) => toast.success(`Started ${r.processTitle}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined }),
+    onError: (e) => toast.error(e.message),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: processesQueryKey });
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+    },
+  });
+  return (
+    <DropdownMenuItem onClick={() => start.mutate()}>
+      <WorkflowIcon />
+      <span className="truncate">{p.title}</span>
+    </DropdownMenuItem>
   );
 }

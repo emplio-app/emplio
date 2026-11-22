@@ -25,6 +25,7 @@ import {
   SparklesIcon,
   Trash2Icon,
   Undo2Icon,
+  WorkflowIcon,
   UsersIcon,
   ZapIcon,
 } from "lucide-react";
@@ -260,6 +261,19 @@ export function AppSidebar() {
             >
               <Building2Icon />
               Clients
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          {/* work done the same steps every time, and where each client stands in it */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/processes")}
+              data-tip="processes"
+              data-tip-side="right"
+              render={<Link href="/processes" onClick={() => setOpenMobile(false)} />}
+              className="h-9 font-medium"
+            >
+              <WorkflowIcon />
+              Processes
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

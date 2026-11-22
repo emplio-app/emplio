@@ -83,6 +83,7 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
     return { error: 'clients: must be all, or a list of clients, like [Northwind Traders, Contoso]' } as const;
   if (clients && when !== "schedule") return { error: "clients: only goes with when: schedule" } as const;
   const due = s.due === undefined ? null : s.due;
+  if (s.process !== undefined && (typeof s.process !== "string" || !clients)) return { error: "process: goes with clients: (start that process for each of them)" } as const;
   if (due !== null && (!Number.isInteger(due) || (due as number) < 0 || (due as number) > 400)) return { error: "due: must be a number of days, like 30" } as const;
   if (when === "schedule") {
     if (typeof s.schedule !== "string") return { error: 'schedule: is missing (cron, like "0 9 * * 1-5")' } as const;
@@ -105,6 +106,7 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
     actions: [...new Set(actions as string[])],
     clients: clients ? (clients as string[]).map((c) => c.trim()) : null,
     dueDays: clients ? ((due as number | null) ?? 7) : null,
+    process: clients && typeof s.process === "string" ? s.process : null,
   };
 }
 
@@ -135,6 +137,20 @@ async function fanOut(row: Row) {
     ? all.filter((c) => c.stage === "active")
     : all.filter((c) => c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name))));
   const period = periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE);
+  // a process: one go of it per client and period
+  if (row.process) {
+    const { startRun } = await import("./processes");
+    let started = 0;
+    let error: string | null = null;
+    for (const c of chosen) {
+      const run = await startRun({ workspaceId: row.workspaceId, userId: row.userId }, row.process, { clientId: c.id, period, repeatKey: `${row.process}/${c.slug}/${period}` }).catch((e: Error) => ((error = e.message), null));
+      if (run) started++;
+    }
+    await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason: "schedule", status: error && !started ? "failed" : "done", error, finishedAt: new Date() });
+    record({ workspaceId: row.workspaceId, userId: row.userId, kind: "automation", summary: `Started process ${row.process} for ${started} client${started === 1 ? "" : "s"} (${period})${error ? `; ${error}` : ""}` });
+    if (started) await post(row.workspaceId, row.userId, `**${row.prompt.split("\n")[0]!.replace(/^Start "(.+)" for each client.*$/, "$1")}** for ${period}: started for ${started} client${started === 1 ? "" : "s"}. Their steps are on the Work page.`).catch(() => {});
+    return;
+  }
   const [title, ...rest] = row.prompt.split("\n");
   const due = new Date(Date.now() + (row.dueDays ?? 7) * 86_400_000);
   const made = await db

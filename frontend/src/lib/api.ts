@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Client, ConversationSummary, MeResponse, Task } from "@emplio/shared";
+import type { Client, ConversationSummary, MeResponse, Process, ProcessRun, Task } from "@emplio/shared";
 import { WebSocketChatTransport } from "ai";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -42,6 +42,17 @@ export const versionQueryKey = ["version"];
 // The business's clients (backend clients.ts), for the Clients page and the task pickers.
 export function useClients() {
   return useQuery({ queryKey: clientsQueryKey, queryFn: () => api<Client[]>("/clients") });
+}
+
+// The business's processes (backend processes.ts) and their runs: the Processes page and a client's panel.
+export const processesQueryKey = ["processes"];
+export const processRunsQueryKey = ["process-runs"];
+export function useProcesses() {
+  return useQuery({ queryKey: processesQueryKey, queryFn: () => api<Process[]>("/processes") });
+}
+export function useProcessRuns(f: { process?: string; client?: string; all?: boolean } = {}) {
+  const q = new URLSearchParams({ ...(f.process && { process: f.process }), ...(f.client && { client: f.client }), ...(f.all && { all: "1" }) });
+  return useQuery({ queryKey: [...processRunsQueryKey, f], queryFn: () => api<ProcessRun[]>(`/process-runs?${q}`) });
 }
 
 // Every task this person may see (owner and admins: all), for the Tasks page and the sidebar's count.

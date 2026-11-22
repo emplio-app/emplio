@@ -96,6 +96,7 @@ export async function addClient(w: Who, input: ClientInput, conversationId?: str
     .returning();
   if (!row) return { ok: false, error: `already a client: emplio clients show ${slug}` };
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Added client ${name}` });
+  if (row.stage === "active") await won(w, row.id);
   return { ok: true, client: await one(row) };
 }
 
@@ -112,8 +113,13 @@ export async function updateClient(w: Who, q: string, input: ClientInput, conver
   if (input.handlerIds !== undefined) set.handlerIds = [...new Set(input.handlerIds)];
   const [row] = await db.update(clients).set(set).where(eq(clients.id, c.id)).returning();
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${row!.name}` });
+  if (c.stage === "prospect" && row!.stage === "active") await won(w, row!.id);
   return { ok: true, client: await one(row!) };
 }
+
+// Won: the processes that start for each new client (processes.ts), once per client.
+const won = (w: Who, clientId: string) =>
+  import("./processes").then((p) => p.startForNewClient(w, clientId)).catch((error) => console.error("starting new-client processes failed", error));
 
 // Their tasks and chats stay, without the label; their notes file stays too.
 export async function removeClient(w: Who, q: string, conversationId?: string) {

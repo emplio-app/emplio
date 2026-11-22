@@ -24,11 +24,14 @@ import {
   UserIcon,
   XIcon,
   ChevronLeftIcon,
+  Undo2Icon,
+  WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Combobox,
   ComboboxCollection,
@@ -71,7 +74,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
 import { ClientPicker } from "@/components/clients/client-picker";
-import { api, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
+import { api, processRunsQueryKey, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Repeating } from "@/components/tasks/repeating";
@@ -258,7 +261,11 @@ function useTaskActions(onRemoved?: () => void) {
             : t,
         ),
       ),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      // a step done moves its process on
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+    },
   });
   const start = useMutation({
     mutationFn: (id: string) => api<Task>(`/tasks/${id}/start`, {}),
@@ -622,6 +629,16 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
   const tasks = useTasks();
   const { update, start, remove, people, clients } = useTaskActions(onRemoved);
   const [confirmDialog, confirm] = useConfirm();
+  const queryClient = useQueryClient();
+  // sent back, this task is cancelled and the earlier step's new one takes over: show that one
+  const sendBack = useMutation({
+    mutationFn: ({ runId, note }: { runId: string; note: string }) => api(`/process-runs/${runId}/back`, { note }),
+    onSuccess: () => toast.success("Sent back"),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+    },
+  });
   const current = tasks.data?.find((t) => t.id === id) ?? null;
   return (
     <>
@@ -653,7 +670,8 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
           }
           onStart={() => start.mutate(current.id)}
           starting={start.isPending}
-          error={update.error?.message ?? start.error?.message ?? remove.error?.message}
+          error={update.error?.message ?? start.error?.message ?? remove.error?.message ?? sendBack.error?.message}
+          onSendBack={(note) => sendBack.mutate({ runId: current.process!.runId, note })}
         />
       )}
       {confirmDialog}
@@ -662,6 +680,37 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
 }
 
 type People = { value: string; label: string }[];
+
+// An OK step that isn't OK: back to the step the process names, with what to fix.
+function SendBack({ to, onSend }: { to: string; onSend: (note: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button variant="outline" size="sm" className="justify-self-start" />}>
+        <Undo2Icon />
+        Send back to &ldquo;{to}&rdquo;
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80">
+        <form
+          className="grid gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSend(note.trim());
+            setOpen(false);
+            setNote("");
+          }}
+        >
+          <Label htmlFor="send-back-note">What needs fixing?</Label>
+          <Textarea id="send-back-note" autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Use the new registered address" className="min-h-20" />
+          <Button type="submit" size="sm">
+            Send back
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // Emplio first, then its agents, then the team, each under its own heading; a search box on top, as a business can
 // have dozens of agents (the plain list ran off the screen)
@@ -817,6 +866,7 @@ function TaskDetails({
   onStart,
   starting,
   error,
+  onSendBack,
 }: {
   t: Task;
   people: People;
@@ -826,6 +876,7 @@ function TaskDetails({
   onStart: () => void;
   starting: boolean;
   error?: string;
+  onSendBack?: (note: string) => void;
 }) {
   const [title, setTitle] = useState(t.title);
   const [notes, setNotes] = useState(t.notes ?? "");
@@ -864,6 +915,20 @@ function TaskDetails({
           <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
             <Spinner className="size-4" />
             Emplio is working on this now.
+          </div>
+        )}
+        {t.process && (
+          <div className="grid gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+            <Link href="/processes" className="flex items-center gap-2 text-sm hover:underline">
+              <WorkflowIcon className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                Step {t.process.step} of {t.process.of} · {t.process.title}
+              </span>
+            </Link>
+            <span className="h-1 overflow-hidden rounded-full bg-muted">
+              <span className="block h-full rounded-full bg-primary" style={{ width: `${((t.process.step - 1) / t.process.of) * 100}%` }} />
+            </span>
+            {t.process.backTo && onSendBack && <SendBack to={t.process.backTo} onSend={onSendBack} />}
           </div>
         )}
         <div className="grid grid-cols-[6rem_1fr] items-center gap-x-3 gap-y-3">

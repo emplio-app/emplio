@@ -590,10 +590,57 @@ export type Task = {
   // the client it's for (clients.ts)
   clientId: string | null;
   clientName: string | null;
+  // a process's step: which go, which step of how many, and where sending it back goes (an OK step)
+  process: { runId: string; title: string; step: number; of: number; backTo: string | null } | null;
   createdAt: string;
   doneAt: string | null;
 };
 export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; clientId?: string | null };
+
+// A process (backend processes.ts): steps done in order, for each client or anything else with a name. The file is
+// company/processes/<name>.md; each go of it is a ProcessRun, and each step a task.
+export type ProcessStep = {
+  name: string;
+  // "handler" (whoever looks after the client), "owner", "emplio", "client" (waiting on them), a person, or an agent
+  who: string;
+  how?: string;
+  // due this many days after the step starts, or after an earlier step (1-based) finished, or the start
+  days?: number;
+  after?: number | "start";
+  // an OK step: sending it back goes to this step (1-based)
+  back?: number;
+};
+export type Process = {
+  name: string;
+  title: string;
+  // what each go is for: a client, or anything else with a name
+  for: "client" | "other";
+  // started by hand, for each new client, or on a schedule for clients (every: cron)
+  starts: "manual" | "new client" | "schedule";
+  every: string | null;
+  clients: string[] | null;
+  steps: ProcessStep[];
+  // how it's done, in the file's words
+  about: string;
+  error: string | null;
+  active: number;
+};
+export type ProcessRun = {
+  id: string;
+  process: string;
+  processTitle: string;
+  subject: string;
+  clientId: string | null;
+  period: string | null;
+  status: "active" | "done" | "stopped";
+  // the step it's on (0-based); steps.length once done
+  step: number;
+  steps: (ProcessStep & { finishedAt: string | null })[];
+  // the task of the step it's on
+  current: { taskId: string; assigneeName: string; status: TaskStatus; dueAt: string | null; waitingOn: string | null } | null;
+  startedAt: string;
+  doneAt: string | null;
+};
 
 // A client of the business (backend clients.ts): the Clients page and `emplio clients`. Their notes are the file
 // company/knowledge/clients/<slug>.md.
