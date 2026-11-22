@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.3.9 (2026-11-22)
+
+### What's new
+
+- When Emplio's server restarts (after an update), an agent that was working picks up where it stopped by itself, once, instead of getting a second "carry on" from the main chat. This now works for agents given new work hours after they began too.
+
+### For developers
+
+- `resume.ts` leaves job chats to `markOrphanedJobs` (`jobs.ts`), so a cut-off job is carried on once, through its job path. `markOrphanedJobs` times a job from the last message asked of it, not from when the job was created (#349).
+
 ## 1.3.8 (2026-11-22)
 
 ### What's new

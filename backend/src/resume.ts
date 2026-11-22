@@ -20,6 +20,8 @@ export async function resumeCutOff() {
       detail->>'byPerson' = 'true' as "byPerson"
     from activity
     where kind in ('message', 'reply') and conversation_id is not null and created_at > now() - ${WITHIN}::interval
+      -- a job's chat carries on through its job (jobs.ts markOrphanedJobs), so it isn't told twice
+      and conversation_id not in (select id from conversations where kind = 'job')
     order by conversation_id, created_at desc
   `);
   for (const c of rows) {
