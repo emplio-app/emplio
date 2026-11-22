@@ -2,8 +2,9 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Process, ProcessRun, ProcessStep } from "@emplio/shared";
-import { CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
+import { ChevronRightIcon, CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ClientPicker } from "@/components/clients/client-picker";
@@ -43,15 +44,8 @@ const short = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: 
 const late = (iso: string | null) => !!iso && new Date(iso) < new Date();
 
 export function ProcessesPage() {
-  const { data: me } = useMe();
-  const admin = me?.workspaces[0]?.role !== "member";
   const processes = useProcesses();
-  const [picked, setPicked] = useState<string | null>(null);
-  const [all, setAll] = useState(false);
   const list = processes.data ?? [];
-  const current = list.find((p) => p.name === picked) ?? list[0] ?? null;
-  const [taskId, setTaskId] = useState<string | null>(null);
-
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
@@ -60,38 +54,82 @@ export function ProcessesPage() {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {processes.isPending ? (
-          <div className="mx-auto grid max-w-5xl gap-3 p-6">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-40 w-full" />
+          <div className="mx-auto grid max-w-3xl gap-2 px-4 py-6 md:px-6">
+            <Skeleton className="h-20 w-full rounded-xl" />
+            <Skeleton className="h-20 w-full rounded-xl" />
           </div>
         ) : !list.length ? (
           <Empty />
         ) : (
-          <div className={cn("mx-auto grid max-w-6xl gap-6 px-4 py-6 md:px-6", list.length > 1 && "md:grid-cols-[13rem_minmax(0,1fr)]")}>
-            <nav aria-label="Processes" className={cn("flex gap-1 overflow-x-auto md:flex-col md:overflow-visible", list.length < 2 && "hidden")}>
-              {list.map((p) => (
-                <button
-                  key={p.name}
-                  type="button"
-                  onClick={() => setPicked(p.name)}
-                  className={cn(
-                    "grid shrink-0 gap-0.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60",
-                    current?.name === p.name && "bg-muted",
-                  )}
+          <ul className="mx-auto grid max-w-3xl gap-2 px-4 py-6 md:px-6">
+            {list.map((p) => (
+              <li key={p.name}>
+                <Link
+                  href={`/processes/${encodeURIComponent(p.name)}`}
+                  className="flex items-center gap-4 rounded-xl border bg-card px-4 py-3.5 transition-colors hover:bg-muted/40"
                 >
-                  <span className="flex items-center justify-between gap-3 text-sm font-medium">
-                    <span className="truncate">{p.title}</span>
-                    {p.active > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-xs font-medium text-primary tabular-nums">{p.active}</span>}
+                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <WorkflowIcon className="size-4" />
                   </span>
-                  <span className={cn("truncate text-xs text-muted-foreground", p.error && "text-destructive")}>
-                    {p.error ? "Needs fixing" : `${p.steps.length} steps · ${startsWords(p)}`}
+                  <span className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="truncate font-medium">{p.title}</span>
+                    <span className={cn("truncate text-sm text-muted-foreground", p.error && "text-destructive")}>
+                      {p.error ? "Needs fixing" : `${p.steps.length} steps · ${startsWords(p)}`}
+                    </span>
                   </span>
-                </button>
-              ))}
-            </nav>
-            {current && <Board key={current.name} p={current} all={all} setAll={setAll} admin={admin} onOpenTask={setTaskId} />}
-          </div>
+                  {p.active > 0 && (
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary tabular-nums">{p.active} going</span>
+                  )}
+                  <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+// One process: its runs and its steps.
+export function ProcessPage() {
+  const { name } = useParams<{ name: string }>();
+  const { data: me } = useMe();
+  const admin = me?.workspaces[0]?.role !== "member";
+  const processes = useProcesses();
+  const p = processes.data?.find((x) => x.name === decodeURIComponent(name));
+  const [all, setAll] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  return (
+    <div className="flex h-dvh flex-col">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+        <SidebarTrigger />
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 px-2 text-sm">
+          <Link href="/processes" className="text-muted-foreground hover:text-foreground">
+            Processes
+          </Link>
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-medium">{p?.title ?? ""}</span>
+        </nav>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-4 py-6 md:px-6">
+          {processes.isPending ? (
+            <div className="grid gap-3">
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-40 w-full" />
+            </div>
+          ) : !p ? (
+            <p className="py-16 text-center text-sm text-muted-foreground">
+              This process isn&rsquo;t there any more.{" "}
+              <Link href="/processes" className="text-foreground underline underline-offset-4">
+                See all processes
+              </Link>
+            </p>
+          ) : (
+            <Board p={p} all={all} setAll={setAll} admin={admin} onOpenTask={setTaskId} />
+          )}
+        </div>
       </div>
       <TaskSheet id={taskId} onClose={() => setTaskId(null)} />
     </div>
