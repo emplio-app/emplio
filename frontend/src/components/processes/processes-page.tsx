@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Process, ProcessRun, ProcessStep } from "@emplio/shared";
-import { CheckIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
+import { CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -67,8 +67,8 @@ export function ProcessesPage() {
         ) : !list.length ? (
           <Empty />
         ) : (
-          <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 md:grid-cols-[15rem_minmax(0,1fr)] md:px-6">
-            <nav aria-label="Processes" className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
+          <div className={cn("mx-auto grid max-w-6xl gap-6 px-4 py-6 md:px-6", list.length > 1 && "md:grid-cols-[13rem_minmax(0,1fr)]")}>
+            <nav aria-label="Processes" className={cn("flex gap-1 overflow-x-auto md:flex-col md:overflow-visible", list.length < 2 && "hidden")}>
               {list.map((p) => (
                 <button
                   key={p.name}
@@ -132,10 +132,10 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
   });
   const rows = runs.data ?? [];
   return (
-    <section className="grid min-w-0 content-start gap-5">
+    <section className="grid min-w-0 content-start gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="grid gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight">{p.title}</h2>
+        <div className="grid min-w-0 gap-1">
+          <h2 className="text-2xl font-semibold tracking-tight text-balance">{p.title}</h2>
           <p className="text-sm text-muted-foreground">
             {p.steps.length} steps · {startsWords(p)}
           </p>
@@ -158,113 +158,132 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
       {p.error && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">This process can&rsquo;t run: {p.error}</p>}
       {p.about && <p className="max-w-prose text-sm whitespace-pre-line text-muted-foreground">{p.about}</p>}
 
-      <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5 text-sm self-start justify-self-start">
-        {[
-          { v: false, label: "Going" },
-          { v: true, label: "All" },
-        ].map((o) => (
-          <button
-            key={o.label}
-            type="button"
-            onClick={() => setAll(o.v)}
-            className={cn("rounded-md px-3 py-1 text-muted-foreground", all === o.v && "bg-background font-medium text-foreground shadow-sm")}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left">
-              <th className="sticky left-0 z-10 min-w-48 bg-muted/40 px-4 py-3 font-medium backdrop-blur">{p.for === "client" ? "Client" : "For"}</th>
-              {p.steps.map((s, i) => (
-                <th key={i} className="min-w-36 px-3 py-3 align-top font-normal">
-                  <span className="grid gap-0.5">
-                    <span className="text-xs text-muted-foreground tabular-nums">{i + 1}</span>
-                    <span className="font-medium leading-snug">{s.name}</span>
-                    <span className="text-xs text-muted-foreground">{whoWords(s)}</span>
-                  </span>
-                </th>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="grid min-w-0 content-start gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{all ? "All runs" : "Going now"}</h3>
+            <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5 text-xs">
+              {[
+                { v: false, label: "Going" },
+                { v: true, label: "All" },
+              ].map((o) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => setAll(o.v)}
+                  className={cn("rounded-md px-2.5 py-1 text-muted-foreground transition-colors", all === o.v && "bg-background font-medium text-foreground shadow-sm")}
+                >
+                  {o.label}
+                </button>
               ))}
-              <th className="w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {runs.isPending ? (
-              <tr>
-                <td colSpan={p.steps.length + 2} className="p-4">
-                  <Skeleton className="h-10 w-full" />
-                </td>
-              </tr>
-            ) : !rows.length ? (
-              <tr>
-                <td colSpan={p.steps.length + 2} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  {all ? "Never run yet." : "Nothing going right now."} {!p.error && "Start one for a client with Start."}
-                </td>
-              </tr>
-            ) : (
-              rows.map((r) => <Row key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} />)
-            )}
-          </tbody>
-        </table>
+            </div>
+          </div>
+          {runs.isPending ? (
+            <div className="grid gap-2">
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+            </div>
+          ) : !rows.length ? (
+            <div className="grid justify-items-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center">
+              <RouteIcon className="size-5 text-muted-foreground" />
+              <p className="text-sm font-medium">{all ? "Never run yet" : "Nothing going right now"}</p>
+              <p className="max-w-xs text-sm text-muted-foreground">
+                {p.error
+                  ? "Fix the process first."
+                  : p.for === "client"
+                    ? `Start it for a client and each step goes to the right person in turn.`
+                    : "Start it for a candidate, a project or whatever it's for."}
+              </p>
+            </div>
+          ) : (
+            <ul className="grid gap-2">
+              {rows.map((r) => (
+                <RunCard key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <aside className="grid content-start gap-3">
+          <h3 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Steps</h3>
+          <ol className="grid">
+            {p.steps.map((s, i) => (
+              <li key={i} className="relative grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3 pb-4 last:pb-0">
+                {i < p.steps.length - 1 && <span aria-hidden className="absolute top-7 bottom-1 left-3 w-px -translate-x-1/2 bg-border" />}
+                <span className="grid size-6 place-items-center rounded-full border bg-background text-xs text-muted-foreground tabular-nums">{i + 1}</span>
+                <div className="grid min-w-0 gap-0.5 pt-0.5">
+                  <span className="text-sm leading-snug font-medium">{s.name}</span>
+                  <span className="text-xs text-muted-foreground">{stepMeta(s, p.steps)}</span>
+                  {s.how && <span className="line-clamp-2 text-xs text-muted-foreground/80">{s.how}</span>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </aside>
       </div>
     </section>
   );
 }
 
-function Row({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: string) => void; onStop?: () => void }) {
-  const done = r.status === "done";
+// "Owner · 2 days · can send back to step 2"
+function stepMeta(s: ProcessStep, steps: ProcessStep[]) {
+  const parts = [whoWords(s)];
+  if (s.days)
+    parts.push(
+      `${s.days} day${s.days === 1 ? "" : "s"}${s.after === "start" ? " from the start" : typeof s.after === "number" ? ` after \u201c${steps[s.after - 1]?.name ?? `step ${s.after}`}\u201d` : ""}`,
+    );
+  if (s.back) parts.push(`can send back to step ${s.back}`);
+  return parts.join(" · ");
+}
+
+function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: string) => void; onStop?: () => void }) {
+  const active = r.status === "active";
+  const cur = active ? r.current : null;
+  const waiting = cur?.status === "waiting";
+  const overdue = !!cur && late(cur.dueAt);
+  const step = r.steps[r.step];
   return (
-    <tr className={cn("border-b last:border-b-0", r.status === "stopped" && "opacity-55")}>
-      <td className="sticky left-0 z-10 bg-background px-4 py-3 align-top">
-        <span className="grid gap-1">
-          <span className="font-medium">{r.subject}</span>
-          <span className="text-xs text-muted-foreground">
-            {[r.period, done ? `Done ${short(r.doneAt!)}` : r.status === "stopped" ? "Stopped" : `Step ${r.step + 1} of ${r.steps.length}`].filter(Boolean).join(" · ")}
+    <li className={cn("group relative rounded-xl border bg-card transition-colors hover:bg-muted/40", r.status === "stopped" && "opacity-60")}>
+      <button type="button" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="grid w-full gap-2.5 px-4 py-3 pr-12 text-left disabled:cursor-default">
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="min-w-0 truncate font-medium">
+            {r.subject}
+            {r.period && <span className="font-normal text-muted-foreground"> · {r.period}</span>}
           </span>
-          <span className="mt-0.5 h-1 w-24 overflow-hidden rounded-full bg-muted">
-            <span className={cn("block h-full rounded-full", done ? "bg-emerald-500" : "bg-primary")} style={{ width: `${(Math.min(r.step, r.steps.length) / r.steps.length) * 100}%` }} />
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {r.status === "done" ? `Done ${short(r.doneAt!)}` : r.status === "stopped" ? "Stopped" : `${r.step + 1} of ${r.steps.length}`}
           </span>
         </span>
-      </td>
-      {r.steps.map((s, i) => (
-        <td key={i} className="px-3 py-3 align-top">
-          {s.finishedAt && i < r.step ? (
-            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="grid size-4 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                <CheckIcon className="size-3" />
-              </span>
-              {short(s.finishedAt)}
-            </span>
-          ) : i === r.step && r.status === "active" && r.current ? (
-            <button
-              type="button"
-              onClick={() => onOpenTask(r.current!.taskId)}
+        <span className="flex gap-1" aria-hidden>
+          {r.steps.map((_, i) => (
+            <span
+              key={i}
               className={cn(
-                "grid w-full gap-0.5 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
-                r.current.status === "waiting"
-                  ? "border-amber-500/40 bg-amber-500/8"
-                  : late(r.current.dueAt)
-                    ? "border-destructive/40 bg-destructive/5"
-                    : "border-primary/30 bg-primary/5",
+                "h-1.5 flex-1 rounded-full",
+                r.status === "done" || i < r.step
+                  ? "bg-primary"
+                  : i === r.step && active
+                    ? waiting
+                      ? "bg-amber-500"
+                      : overdue
+                        ? "bg-destructive"
+                        : "bg-primary/35"
+                    : "bg-muted",
               )}
-            >
-              <span className="flex items-center gap-1 font-medium text-foreground">
-                {r.current.status === "waiting" && <HourglassIcon className="size-3 text-amber-600" />}
-                <span className="truncate">{r.current.status === "waiting" ? "Waiting" : r.current.status === "doing" ? "In progress" : "To do"}</span>
-              </span>
-              <span className="truncate text-muted-foreground">{r.current.assigneeName}</span>
-              {r.current.dueAt && <span className={cn("text-muted-foreground", late(r.current.dueAt) && "font-medium text-destructive")}>Due {short(r.current.dueAt)}</span>}
-            </button>
-          ) : (
-            <span className="mt-1.5 block size-1.5 rounded-full bg-muted-foreground/25" />
-          )}
-        </td>
-      ))}
-      <td className="px-2 py-3 align-top">
-        {onStop && (
+            />
+          ))}
+        </span>
+        {cur && step && (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+            {waiting ? <HourglassIcon className="size-3 text-amber-600" /> : <CircleDotIcon className="size-3 text-primary" />}
+            <span className="min-w-0 truncate text-foreground">{step.name}</span>
+            <span>· {waiting ? "waiting on them" : cur.assigneeName}</span>
+            {cur.dueAt && <span className={cn(overdue && "font-medium text-destructive")}>· {overdue ? "late, was due" : "due"} {short(cur.dueAt)}</span>}
+          </span>
+        )}
+      </button>
+      {onStop && (
+        <div className="absolute top-2 right-2">
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More for ${r.subject}`} />}>
               <MoreHorizontalIcon />
@@ -276,9 +295,9 @@ function Row({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: string
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
-      </td>
-    </tr>
+        </div>
+      )}
+    </li>
   );
 }
 
