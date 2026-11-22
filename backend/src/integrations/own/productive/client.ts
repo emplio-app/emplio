@@ -7,7 +7,7 @@ export function parseKey(key: string) {
   const parts = key.split(":").map((p) => p.trim());
   const org = parts.find((p) => /^\d+$/.test(p));
   const token = parts.find((p) => p !== org);
-  if (parts.length !== 2 || !org || !token) throw new AppsError("paste the organization id and the API token joined by a colon, like 12345:your-token");
+  if (parts.length !== 2 || !org || !token) throw new AppsError("enter the organization id and the API token");
   return { org, token };
 }
 

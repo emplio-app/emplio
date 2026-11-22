@@ -11,7 +11,7 @@ import { events, triggers, watch } from "./webhooks";
 const api: Api = {
   name: "Razorpay",
   base: "https://api.razorpay.com",
-  tokenHelp: "Razorpay Dashboard → Account & Settings → API Keys, pasted as KEY_ID:KEY_SECRET",
+  tokenHelp: "Razorpay Dashboard → Account & Settings → API Keys",
   auth: (key) => ({ Authorization: `Basic ${Buffer.from(key).toString("base64")}` }),
 };
 
@@ -28,13 +28,15 @@ export const razorpay: OwnApp = {
   logo: "/logos/razorpay.svg",
   keyField: {
     label: "Key ID and Key Secret",
-    help: "Razorpay Dashboard → Account & Settings → API Keys → generate a key. Paste both as one line, Key ID first, joined by a colon: KEY_ID:KEY_SECRET",
+    help: "Razorpay Dashboard → Account & Settings → API Keys → generate a key.",
     placeholder: "rzp_live_XXXXXXXXXXXXXX:your-key-secret",
+    sep: ":",
+    parts: [{label:"Key ID",placeholder:"rzp_live_XXXXXXXXXXXXXX"},{label:"Key Secret",secret:true,placeholder:"your-key-secret"}],
   },
   // Razorpay has no "who am I"; this is its cheapest call that needs a working key
   async check(key) {
     const [id, secret] = key.split(":");
-    if (!id || !secret) throw new AppsError("paste the Key ID and Key Secret joined by a colon, like rzp_live_XXXXXXXXXXXXXX:your-key-secret");
+    if (!id || !secret) throw new AppsError("enter both the Key ID and the Key Secret");
     await call(api, key, { method: "GET", path: "/v1/payments", query: ["count"], headers: [] }, { count: 1 });
   },
   actions,

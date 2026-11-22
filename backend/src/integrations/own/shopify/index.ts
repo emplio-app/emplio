@@ -226,8 +226,10 @@ export const shopify: OwnApp = {
       "Otherwise click Build apps in Dev Dashboard → Create app, name it Emplio and click Create. In the new version, leave the app URL as it is, pick the newest Webhooks API version, " +
       `and under Access paste these scopes: ${SCOPES} (add read_all_orders for orders older than 60 days). Click Release, then go to the app's Installs and install it on your store. ` +
       "Then open the app's Settings and copy its Client ID and Secret. " +
-      "Paste on one line, separated by spaces: your store's .myshopify.com address, then either the access token, or the Client ID and the Secret.",
+      "Then enter your store's .myshopify.com address and either the access token, or the Client ID and the Secret.",
     placeholder: "mystore.myshopify.com shpat_xxxx   or   mystore.myshopify.com client-id client-secret",
+    sep: " ",
+    parts: [{label:"Store address",placeholder:"mystore.myshopify.com"},{label:"Access token or Client ID",secret:true,placeholder:"shpat_... or client id"},{label:"Client secret (with a Client ID)",secret:true,optional:true}],
   },
   async check(key) {
     const { shop } = parseKey(key);

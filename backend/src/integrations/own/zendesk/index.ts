@@ -21,8 +21,10 @@ export const zendesk: OwnApp = {
   logo: "/logos/zendesk.svg",
   keyField: {
     label: "Subdomain, email and API token",
-    help: "Paste three things on one line, separated by spaces: 1) your Zendesk subdomain, the first part of the address you open Zendesk at (acme for acme.zendesk.com); 2) the email you sign in to Zendesk with; 3) an API token. To make the token, open Admin Center → Apps and integrations → APIs → API tokens (on older accounts: Zendesk API), turn on Token access, click Add API token, name it Emplio and copy it. Emplio can then do whatever your Zendesk account can; to have Emplio react to new tickets and replies the moment they happen, use an admin's account.",
+    help: "The subdomain is the first part of the address you open Zendesk at (acme for acme.zendesk.com); the email is the one you sign in to Zendesk with. To make the API token, open Admin Center → Apps and integrations → APIs → API tokens (on older accounts: Zendesk API), turn on Token access, click Add API token, name it Emplio and copy it. Emplio can then do whatever your Zendesk account can; to have Emplio react to new tickets and replies the moment they happen, use an admin's account.",
     placeholder: "acme you@company.com 0a1b2c3d4e5f...",
+    sep: " ",
+    parts: [{label:"Subdomain",placeholder:"acme"},{label:"Email",placeholder:"you@company.com"},{label:"API token",secret:true,placeholder:"0a1b2c3d4e5f..."}],
   },
   async check(key) {
     const { host } = parseKey(key);

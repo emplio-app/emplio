@@ -23,9 +23,9 @@ export function storeDomain(raw: string) {
 // The pasted line: the store, then either the access token, or the Client ID and secret, separated by spaces.
 export function parseKey(key: string): Store {
   const [shop = "", a = "", b = ""] = key.trim().split(/\s+/);
-  if (!shop || !a) throw new AppsError("paste your store's address and then its access token (or Client ID and secret), separated by spaces");
+  if (!shop || !a) throw new AppsError("enter your store's address and its access token (or Client ID and secret)");
   if (/^shp(at|ca|ss)_/.test(a)) return { shop: storeDomain(shop), token: a };
-  if (!b) throw new AppsError("after the Client ID, paste the app's Client secret too, separated by a space");
+  if (!b) throw new AppsError("with a Client ID, enter the app's Client secret too");
   return { shop: storeDomain(shop), clientId: a, clientSecret: b };
 }
 

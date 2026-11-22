@@ -35,8 +35,10 @@ export const payu: OwnApp = {
   logo: "/logos/payu.svg",
   keyField: {
     label: "Merchant key and salt",
-    help: "PayU Dashboard → Developers → API Keys (older dashboards: Payment Gateway → Settings → Key and Salt). Paste both as one line, key first, joined by a colon: KEY:SALT. For test-mode keys from test.payu.in add :test at the end: KEY:SALT:test",
+    help: "PayU Dashboard → Developers → API Keys (older dashboards: Payment Gateway → Settings → Key and Salt). For test-mode keys from test.payu.in, pick Test.",
     placeholder: "aBcD12:yourMerchantSalt",
+    sep: ":",
+    parts: [{label:"Merchant key",placeholder:"aBcD12"},{label:"Salt",secret:true,placeholder:"yourMerchantSalt"},{label:"Mode",optional:true,options:[{value:"",label:"Live"},{value:"test",label:"Test (test.payu.in)"}]}],
   },
   // a lookup of an order id that can't exist: it needs a correct key and salt to get any answer
   async check(key) {

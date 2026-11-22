@@ -49,8 +49,8 @@ test("the key says sandbox or production; a suffix overrides the guess", () => {
   expect(parseKey(TEST).env).toBe("sandbox");
   expect(parseKey("abc:def:sandbox")).toEqual({ id: "abc", secret: "def", env: "sandbox", explicit: true });
   expect(parseKey("TESTabc:def:production").env).toBe("production");
-  expect(() => parseKey("only-an-id")).toThrow("joined by a colon");
-  expect(() => parseKey("a:b:staging")).toThrow(":sandbox or :production");
+  expect(() => parseKey("only-an-id")).toThrow("Client ID and the Client Secret");
+  expect(() => parseKey("a:b:staging")).toThrow("Sandbox or Production");
 });
 
 test("a working key is accepted and labelled with its mode; a wrong one is refused", async () => {
@@ -67,7 +67,7 @@ test("a working key is accepted and labelled with its mode; a wrong one is refus
 
 test("sandbox keys that look like production ones are caught, with what to add", async () => {
   stub((c) => (c.url.host === "sandbox.cashfree.com" ? json({}, 404) : json({ message: "authentication Failed" }, 401)));
-  expect((await fails(cashfree.check("abc:def"))).message).toContain(":sandbox at the end");
+  expect((await fails(cashfree.check("abc:def"))).message).toContain("pick sandbox");
 });
 
 test("calls go to the key's environment with the client id, secret and API version", async () => {

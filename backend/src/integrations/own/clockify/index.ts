@@ -34,8 +34,10 @@ export const clockify: OwnApp = {
   logo: "/logos/clockify.svg",
   keyField: {
     label: "API key",
-    help: "In Clockify open your profile picture → Preferences → Advanced (app.clockify.me/user/preferences#advanced), press Generate new under API key, then copy it. Emplio can then do whatever your Clockify account can. If your workspace's data is kept in a region, put it in front: euc1: (EU), use2: (USA), euw2: (UK) or apse2: (Australia).",
+    help: "In Clockify open your profile picture → Preferences → Advanced (app.clockify.me/user/preferences#advanced), press Generate new under API key, then copy it. Emplio can then do whatever your Clockify account can. If your workspace's data is kept in a region, pick it.",
     placeholder: "Your Clockify API key",
+    sep: ":",
+    parts: [{label:"Data region",optional:true,options:[{value:"",label:"Global (most workspaces)"},{value:"euc1",label:"EU"},{value:"use2",label:"USA"},{value:"euw2",label:"UK"},{value:"apse2",label:"Australia"}]},{label:"API key",secret:true,placeholder:"Your Clockify API key"}],
   },
   async check(key) {
     const me = (await call(api, key, { method: "GET", path: "/v1/user", query: [], headers: [] }, {})) as { id: string; name?: string; email?: string };

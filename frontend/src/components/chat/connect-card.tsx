@@ -1,12 +1,13 @@
 "use client";
 
-import type { ConnectCard as Card, Connection, KeyField, McpServer } from "@emplio/shared";
+import { joinKey, keyReady, type ConnectCard as Card, type Connection, type KeyField, type McpServer } from "@emplio/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, PlugIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { api, API_URL } from "@/lib/api";
 
@@ -76,15 +77,19 @@ export function useConnect() {
 // to our server, which checks it with the app and keeps it encrypted; the AI employee never sees it.
 function KeyDialog({ target, onSignIn, onClose }: { target: Target; onSignIn: () => void; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const field = target.keyField!;
   const [key, setKey] = useState("");
+  // an app whose key is several things asks for each in its own box
+  const [parts, setParts] = useState<string[]>(() => (field.parts ?? []).map(() => ""));
+  const full = field.parts ? joinKey(field, parts) : key.trim();
+  const ready = field.parts ? keyReady(field, parts) : !!key.trim();
   const save = useMutation({
-    mutationFn: () => api("/connections", { app: target.app, key, connection: target.connection }),
+    mutationFn: () => api("/connections", { app: target.app, key: full, connection: target.connection }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: connectionsQueryKey });
       onClose();
     },
   });
-  const field = target.keyField!;
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -110,25 +115,63 @@ function KeyDialog({ target, onSignIn, onClose }: { target: Target; onSignIn: ()
             save.mutate();
           }}
         >
-          <label className="grid gap-1.5 text-sm font-medium">
-            {field.label}
-            <Input
-              type="password"
-              autoComplete="off"
-              autoFocus
-              required
-              placeholder={field.placeholder}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-            />
-          </label>
+          {field.parts ? (
+            field.parts.map((part, i) => {
+              const set = (v: string) => setParts((p) => p.map((x, j) => (j === i ? v : x)));
+              return (
+                <label key={part.label} className="grid gap-1.5 text-sm font-medium">
+                  <span>
+                    {part.label}
+                    {part.optional && !part.options && <span className="font-normal text-muted-foreground"> (optional)</span>}
+                  </span>
+                  {part.options ? (
+                    <Select items={part.options} value={parts[i]} onValueChange={(v) => set(v ?? "")}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {part.options.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      type={part.secret ? "password" : "text"}
+                      autoComplete="off"
+                      autoFocus={i === 0}
+                      required={!part.optional}
+                      placeholder={part.placeholder}
+                      value={parts[i]}
+                      onChange={(e) => set(e.target.value)}
+                    />
+                  )}
+                </label>
+              );
+            })
+          ) : (
+            <label className="grid gap-1.5 text-sm font-medium">
+              {field.label}
+              <Input
+                type="password"
+                autoComplete="off"
+                autoFocus
+                required
+                placeholder={field.placeholder}
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+              />
+            </label>
+          )}
           <p className="text-xs text-muted-foreground">Stored encrypted. Emplio uses it but never sees it.</p>
           {save.error && <p className="text-sm text-destructive">{save.error.message}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={save.isPending || !key.trim()}>
+            <Button type="submit" disabled={save.isPending || !ready}>
               {save.isPending && <Spinner className="size-3.5" />}
               {save.isPending ? "Checking…" : "Connect"}
             </Button>

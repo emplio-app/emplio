@@ -15,7 +15,7 @@ export type Project = { url: string; http: string; apiKey: string; secret: strin
 export function parseKey(key: string): Project {
   const parts = key.trim().split(/\s+/);
   const bad = (why: string) =>
-    new AppsError(`${why}. Paste the project URL, API key and API secret on one line, separated by spaces, e.g. "wss://myproj.livekit.cloud APIxxxx secretxxxx" (${KEY_HELP})`);
+    new AppsError(`${why}. Enter the project URL (like wss://myproj.livekit.cloud), the API key and the API secret (${KEY_HELP})`);
   if (parts.length !== 3) throw bad(`expected 3 parts, got ${parts.length}`);
   const [url, apiKey, secret] = parts as [string, string, string];
   let u: URL;

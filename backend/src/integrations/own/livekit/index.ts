@@ -20,8 +20,10 @@ export const livekit: OwnApp = {
   logo: "/logos/livekit.png",
   keyField: {
     label: "Project URL, API key and secret",
-    help: "In cloud.livekit.io → Settings → Keys, make a key, then paste the project URL, the API key and the API secret on one line, separated by spaces.",
+    help: "In cloud.livekit.io → Settings → Keys, make a key and copy its project URL, API key and API secret.",
     placeholder: "wss://myproj.livekit.cloud APIxxxx secretxxxx",
+    sep: " ",
+    parts: [{label:"Project URL",placeholder:"wss://myproj.livekit.cloud"},{label:"API key",placeholder:"APIxxxx"},{label:"API secret",secret:true,placeholder:"secretxxxx"}],
   },
   // a malformed key fails here; a wrong key or secret gets a 401, which marks the connection for reconnecting
   async check(key) {

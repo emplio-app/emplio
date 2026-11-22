@@ -15,7 +15,7 @@ const HELP = "Cal.com → Settings → Developer → API keys";
 export function parseKey(key: string): { base: string; token: string } {
   const parts = key.trim().split(/\s+/);
   if (parts.length === 1) return { base: CLOUD, token: parts[0]! };
-  if (parts.length !== 2) throw new AppsError(`paste the API key alone, or your Cal.com API address and the key separated by a space (${HELP})`);
+  if (parts.length !== 2) throw new AppsError(`enter the API key, plus your Cal.com API address if it's self-hosted (${HELP})`);
   let u: URL;
   try {
     u = new URL(parts[0]!);
@@ -69,8 +69,10 @@ export const calcom: OwnApp = {
   logo: "/logos/calcom.svg",
   keyField: {
     label: "API key",
-    help: "In Cal.com, open Settings → Developer → API keys, press Add, name it Emplio, choose Never expires, and copy the key (it starts with cal_live_). Emplio can then see and change whatever your Cal.com account can, including your team's and organization's if you're an admin. Self-hosted Cal.com: paste your API address, a space, then the key, like https://cal.example.com/api cal_...",
+    help: "In Cal.com, open Settings → Developer → API keys, press Add, name it Emplio, choose Never expires, and copy the key (it starts with cal_live_). Emplio can then see and change whatever your Cal.com account can, including your team's and organization's if you're an admin. Self-hosted Cal.com: also enter your API address, like https://cal.example.com/api.",
     placeholder: "cal_live_...",
+    sep: " ",
+    parts: [{label:"API address (self-hosted only)",optional:true,placeholder:"https://cal.example.com/api"},{label:"API key",secret:true,placeholder:"cal_live_..."}],
   },
   async check(key) {
     const { data } = (await call(api, key, ME, {})) as { data: { name?: string; email?: string; username?: string; organization?: { name?: string } | null } };

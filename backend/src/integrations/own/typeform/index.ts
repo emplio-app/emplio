@@ -30,8 +30,10 @@ export const typeform: OwnApp = {
   logo: "/logos/typeform.svg",
   keyField: {
     label: "Personal access token",
-    help: "In Typeform, open your account menu → Account → Personal tokens (admin.typeform.com/user/tokens), click Generate a new token, name it Emplio, tick every permission (Emplio can then do whatever your account can) and copy the token, which starts with tfp_. Account in Typeform's EU data centre? Paste it as eu:tfp_... (or typeform.eu:tfp_... on the newer EU centre).",
+    help: "In Typeform, open your account menu → Account → Personal tokens (admin.typeform.com/user/tokens), click Generate a new token, name it Emplio, tick every permission (Emplio can then do whatever your account can) and copy the token, which starts with tfp_. Account in Typeform's EU data centre? Pick it.",
     placeholder: "tfp_...",
+    sep: ":",
+    parts: [{label:"Data centre",optional:true,options:[{value:"",label:"US (most accounts)"},{value:"eu",label:"EU"},{value:"typeform.eu",label:"EU (newer, typeform.eu)"}]},{label:"Personal access token",secret:true,placeholder:"tfp_..."}],
   },
   async check(secret) {
     if (!split(secret).token) throw new AppsError("paste your Typeform personal access token");

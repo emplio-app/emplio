@@ -65,8 +65,10 @@ export const productive: OwnApp = {
   logo: "/logos/productive.svg",
   keyField: {
     label: "Organization ID and API token",
-    help: "In Productive open Settings → API integrations and press Generate new token (give it full access, not read-only). The same page shows your Organization ID. Paste both as one line, joined by a colon: ORGANIZATION_ID:TOKEN. Emplio can then do whatever that token can.",
+    help: "In Productive open Settings → API integrations and press Generate new token (give it full access, not read-only). The same page shows your Organization ID. Emplio can then do whatever that token can.",
     placeholder: "12345:your-api-token",
+    sep: ":",
+    parts: [{label:"Organization ID",placeholder:"12345"},{label:"API token",secret:true,placeholder:"your-api-token"}],
   },
   async check(key) {
     const { org } = parseKey(key);

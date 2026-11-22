@@ -14,8 +14,10 @@ export const shiprocket: OwnApp = {
   logo: "/logos/shiprocket.svg",
   keyField: {
     label: "API user email and password",
-    help: "In Shiprocket go to Settings → API → Configure → Create an API user. Use a new email (not your Shiprocket login), tick all modules, and Shiprocket emails you its password. Paste the email and password joined by a colon: email:password",
+    help: "In Shiprocket go to Settings → API → Configure → Create an API user. Use a new email (not your Shiprocket login), tick all modules, and Shiprocket emails you its password.",
     placeholder: "api@yourshop.com:password",
+    sep: ":",
+    parts: [{label:"API user email",placeholder:"api@yourshop.com"},{label:"Password",secret:true}],
   },
   // logs in once; a wrong email or password marks the connection for reconnecting
   async check(key) {

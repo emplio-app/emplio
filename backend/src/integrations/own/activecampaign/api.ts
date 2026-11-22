@@ -20,7 +20,7 @@ export function parseKey(key: string): Login {
   const url = parts.find((p) => p.includes(".") || /^https?:/i.test(p));
   const token = parts.find((p) => p !== url);
   if (parts.length !== 2 || !url || !token)
-    throw new AppsError("paste two things separated by a space: your API URL (like https://acme.api-us1.com) and your API key, both from Settings → Developer in ActiveCampaign");
+    throw new AppsError("enter two things: your API URL (like https://acme.api-us1.com) and your API key, both from Settings → Developer in ActiveCampaign");
   return { origin: origin(url), token };
 }
 

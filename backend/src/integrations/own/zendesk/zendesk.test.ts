@@ -39,7 +39,7 @@ test("the key is the subdomain, email and token, in any order; a host outside Ze
   expect(parseKey(` ${TOKEN}  https://acme.zendesk.com/agent/tickets/1 sarah@northwind.com `)).toEqual(want);
   expect(parseKey(`sarah@northwind.com acme.zendesk.com ${TOKEN}`)).toEqual(want);
   expect(() => parseKey(`evil.com sarah@northwind.com ${TOKEN}`)).toThrow(AppsError);
-  expect(() => parseKey("acme sarah@northwind.com")).toThrow(/three things/);
+  expect(() => parseKey("acme sarah@northwind.com")).toThrow(/subdomain .*email .*API token/);
 });
 
 test("a login is checked with basic auth on email/token and labelled; a bad one is refused as dead", async () => {
