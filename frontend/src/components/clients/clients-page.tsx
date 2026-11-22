@@ -20,7 +20,6 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -183,7 +182,7 @@ export function ClientsPage() {
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
-        <MemoryTabs />
+        <span className="px-2 font-sans text-sm font-medium tracking-normal">Clients</span>
       </header>
 
       <div className="under-tabs min-h-0 flex-1 overflow-y-auto">

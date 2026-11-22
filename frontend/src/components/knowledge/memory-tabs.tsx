@@ -15,7 +15,6 @@ export function MemoryTabs() {
     <nav className="flex items-center gap-1" aria-label="Memory" data-tip="memory-page" data-tip-side="bottom">
       {[
         { href: "/knowledge", label: "Notes" },
-        { href: "/clients", label: "Clients" },
         { href: "/files", label: "Files" },
         ...(role && role !== "member" ? [{ href: "/database", label: "Database" }] : []),
       ].map((t) => (

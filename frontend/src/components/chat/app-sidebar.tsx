@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { JobSummary } from "@emplio/shared";
 import {
   BlocksIcon,
+  Building2Icon,
   BookOpenIcon,
   CheckIcon,
   ChevronsUpDownIcon,
@@ -248,9 +249,22 @@ export function AppSidebar() {
               </SidebarMenuBadge>
             )}
           </SidebarMenuItem>
+          {/* who the business works for */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/clients") || pathname.startsWith("/files") || pathname.startsWith("/database")}
+              isActive={pathname.startsWith("/clients")}
+              data-tip="clients"
+              data-tip-side="right"
+              render={<Link href="/clients" onClick={() => setOpenMobile(false)} />}
+              className="h-9 font-medium"
+            >
+              <Building2Icon />
+              Clients
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}
               data-tip="memory"
               data-tip-side="right"
               render={
