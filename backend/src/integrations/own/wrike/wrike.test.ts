@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import Fastify from "fastify";
 import { automationRoutes } from "../../../automations";
 import { db } from "../../../db";
@@ -10,12 +10,13 @@ import { own } from "../index";
 import { parseKey, wrike } from "./index";
 import { triggers, wanted } from "./triggers";
 
+// encrypt() needs a real 32-byte key, which CI doesn't set; set before the webhook secret below is worked out
+if (Buffer.from(process.env.ENCRYPTION_KEY ?? "", "base64").length !== 32) process.env.ENCRYPTION_KEY = randomBytes(32).toString("base64");
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
 beforeAll(() => {
-  process.env.ENCRYPTION_KEY ??= "test-key";
   process.env.WEBHOOK_URL = "https://api.test";
 });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -31,7 +32,7 @@ const stub = (answer: (c: Call) => Response) => {
 };
 const login = { externalId: "c1", secret: "tok" };
 const BASE = "https://www.wrike.com/api/v4";
-const secret = createHmac("sha256", process.env.ENCRYPTION_KEY ?? "test-key").update("wrike-webhook:c1").digest("hex");
+const secret = createHmac("sha256", process.env.ENCRYPTION_KEY!).update("wrike-webhook:c1").digest("hex");
 const sign = (body: string, key = secret) => createHmac("sha256", key).update(body).digest("hex");
 const delivery = (body: unknown, headers: Record<string, string> = {}, rest = "") => {
   const text = JSON.stringify(body);
