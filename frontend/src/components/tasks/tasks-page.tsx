@@ -605,54 +605,57 @@ export function TasksPage() {
   );
 }
 
-// One task's panel, by id (null: closed): on the Work page and wherever a task is clicked (the Clients page).
-export function TaskSheet({ id, onClose, back }: { id: string | null; onClose: () => void; back?: { label: string; onClick: () => void } }) {
+// One task's panel, by id (null: closed): on the Work page and wherever a task is clicked.
+export function TaskSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
   const tasks = useTasks();
-  const { update, start, remove, people, clients } = useTaskActions(onClose);
+  const open = !!tasks.data?.some((t) => t.id === id);
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full gap-0 sm:max-w-md">{id && <TaskPanel id={id} onRemoved={onClose} />}</SheetContent>
+    </Sheet>
+  );
+}
+
+// What's inside a task's panel, for a sheet of its own or another panel that shows it in place (a client's), with a
+// way back to that one.
+export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () => void; back?: { label: string; onClick: () => void } }) {
+  const tasks = useTasks();
+  const { update, start, remove, people, clients } = useTaskActions(onRemoved);
   const [confirmDialog, confirm] = useConfirm();
   const current = tasks.data?.find((t) => t.id === id) ?? null;
   return (
     <>
-      <Sheet open={!!current} onOpenChange={(o) => !o && onClose()}>
-        <SheetContent className="w-full gap-0 sm:max-w-md">
-          {back && (
-            <div className="border-b px-2 py-1.5 pr-12">
-              <Button variant="ghost" size="sm" onClick={back.onClick} className="max-w-full gap-1 text-muted-foreground">
-                <ChevronLeftIcon />
-                <span className="truncate">{back.label}</span>
-              </Button>
-            </div>
-          )}
-          {current && (
-            <TaskDetails
-              key={current.id}
-              t={current}
-              people={people}
-              clients={(clients.data ?? []).map((c) => ({ value: c.id, label: c.name }))}
-              onChange={(body) => update.mutate({ id: current.id, ...body })}
-              onRemove={() =>
-                confirm({
-                  title: "Delete this task?",
-                  description: (
-                    <>
-                      &ldquo;{current.title}&rdquo; will be deleted for
-                      everyone. To keep a record, mark it cancelled instead.
-                    </>
-                  ),
-                  onConfirm: () => remove.mutate(current.id),
-                })
-              }
-              onStart={() => start.mutate(current.id)}
-              starting={start.isPending}
-              error={
-                update.error?.message ??
-                start.error?.message ??
-                remove.error?.message
-              }
-            />
-          )}
-        </SheetContent>
-      </Sheet>
+      {back && (
+        <div className="border-b px-2 py-1.5 pr-12">
+          <Button variant="ghost" size="sm" onClick={back.onClick} className="max-w-full gap-1 text-muted-foreground">
+            <ChevronLeftIcon />
+            <span className="truncate">{back.label}</span>
+          </Button>
+        </div>
+      )}
+      {current && (
+        <TaskDetails
+          key={current.id}
+          t={current}
+          people={people}
+          clients={(clients.data ?? []).map((c) => ({ value: c.id, label: c.name }))}
+          onChange={(body) => update.mutate({ id: current.id, ...body })}
+          onRemove={() =>
+            confirm({
+              title: "Delete this task?",
+              description: (
+                <>
+                  &ldquo;{current.title}&rdquo; will be deleted for everyone. To keep a record, mark it cancelled instead.
+                </>
+              ),
+              onConfirm: () => remove.mutate(current.id),
+            })
+          }
+          onStart={() => start.mutate(current.id)}
+          starting={start.isPending}
+          error={update.error?.message ?? start.error?.message ?? remove.error?.message}
+        />
+      )}
       {confirmDialog}
     </>
   );

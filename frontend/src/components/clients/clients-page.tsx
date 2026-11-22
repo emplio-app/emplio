@@ -19,7 +19,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { TaskSheet } from "@/components/tasks/tasks-page";
+import { TaskPanel } from "@/components/tasks/tasks-page";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -137,7 +137,13 @@ function Handlers({ c }: { c: Client }) {
 // Who the business works for, read like a book of clients: who they are, how things stand, who looks after them and
 // what's open for them. Emplio keeps it from chats and email; anyone can add one, owners and admins change them.
 export function ClientsPage() {
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskId, setTaskIdRaw] = useState<string | null>(null);
+  // back from a task: the client's panel slides in from the left (opened fresh, it just appears with the sheet)
+  const [cameBack, setCameBack] = useState(false);
+  const setTaskId = (id: string | null) => {
+    setCameBack(!id && !!taskId);
+    setTaskIdRaw(id);
+  };
   const { data: me } = useMe();
   const admin = me?.workspaces[0]?.role !== "member";
   const clients = useClients();
@@ -336,30 +342,35 @@ export function ClientsPage() {
         </div>
       </div>
 
-      <Sheet open={!!current && !taskId} onOpenChange={(o) => !o && setOpenId(null)}>
-        <SheetContent className="w-full gap-0 sm:max-w-md">
-          {current && (
-            <ClientDetails
-              key={current.id}
-              c={current}
-              admin={admin}
-              team={team.data ?? []}
-              tasks={(tasks.data ?? []).filter((t) => t.clientId === current.id)}
-              onChange={(body) => update.mutate({ id: current.id, ...body })}
-              onOpenTask={setTaskId}
-            />
-          )}
+      <Sheet
+        open={!!current}
+        onOpenChange={(o) => {
+          if (o) return;
+          setOpenId(null);
+          setTaskId(null);
+        }}
+      >
+        <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">
+          {/* one panel: a task opened from the client's open work slides in over them, and back slides them back */}
+          {current && taskId ? (
+            <div key={taskId} className="flex min-h-0 flex-1 flex-col duration-200 ease-out animate-in fade-in-0 slide-in-from-right-8 motion-reduce:animate-none">
+              <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} back={{ label: current.name, onClick: () => setTaskId(null) }} />
+            </div>
+          ) : current ? (
+            <div key={current.id} className={cn("flex min-h-0 flex-1 flex-col", cameBack && "duration-200 ease-out animate-in fade-in-0 slide-in-from-left-8 motion-reduce:animate-none")}>
+              <ClientDetails
+                key={current.id}
+                c={current}
+                admin={admin}
+                team={team.data ?? []}
+                tasks={(tasks.data ?? []).filter((t) => t.clientId === current.id)}
+                onChange={(body) => update.mutate({ id: current.id, ...body })}
+                onOpenTask={setTaskId}
+              />
+            </div>
+          ) : null}
         </SheetContent>
       </Sheet>
-      {/* a task clicked in a client's open work: its own panel, over the client's */}
-      <TaskSheet
-        id={taskId}
-        onClose={() => {
-          setTaskId(null);
-          setOpenId(null);
-        }}
-        back={current ? { label: current.name, onClick: () => setTaskId(null) } : undefined}
-      />
     </div>
   );
 }
