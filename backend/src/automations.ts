@@ -631,7 +631,7 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
 }
 
 // Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
-async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]) {
+async function onAppEvents(app: string, fallback: string[], events: WebhookEvent[]) {
   const { push } = OWN_APPS[app]!;
   for (const event of events) {
     if (!event.triggers.length) continue;
@@ -641,11 +641,12 @@ async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]
       if (seen.size > 10_000) seen.delete(seen.values().next().value!);
     }
     const names = event.triggers.map((t) => `${app}.${t}`);
-    const id = event.watch ?? fallback;
+    // no id from the app: the address it came to, or the connection itself (apps whose address carries only a token)
+    const ids = event.watch ? [event.watch] : fallback;
     const rows = await db
       .select()
       .from(automations)
-      .where(and(eq(automations.externalId, id), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
+      .where(and(inArray(automations.externalId, ids), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
     for (const row of rows) if (push?.wanted?.(row.triggerConfig, event.data) ?? true) await fire(row, "trigger", event.data);
   }
 }
@@ -782,7 +783,7 @@ export async function automationRoutes(app: FastifyInstance) {
       reply.headers(got.headers ?? {});
       void got
         .events()
-        .then((events) => onAppEvents(app, [app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), events))
+        .then((events) => onAppEvents(app, [...new Set([[app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), `${app}:${connection}`])], events))
         .catch((error) => req.log.error(error, `handling a ${app} event failed`));
       return got.reply ?? { ok: true };
     };
