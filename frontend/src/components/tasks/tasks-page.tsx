@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -75,6 +75,7 @@ import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { api, processRunsQueryKey, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
+import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Repeating } from "@/components/tasks/repeating";
@@ -919,7 +920,7 @@ function TaskDetails({
         )}
         {t.process && (
           <div className="grid gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
-            <Link href="/processes" className="flex items-center gap-2 text-sm hover:underline">
+            <Link href={`/processes/${t.process.name}`} className="flex items-center gap-2 text-sm hover:underline">
               <WorkflowIcon className="size-4 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">
                 Step {t.process.step} of {t.process.of} · {t.process.title}
@@ -928,6 +929,18 @@ function TaskDetails({
             <span className="h-1 overflow-hidden rounded-full bg-muted">
               <span className="block h-full rounded-full bg-primary" style={{ width: `${((t.process.step - 1) / t.process.of) * 100}%` }} />
             </span>
+            {t.process.inputs.some((x) => x.value) && (
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
+                {t.process.inputs
+                  .filter((x) => x.value)
+                  .map((x) => (
+                    <Fragment key={x.key}>
+                      <dt className="text-muted-foreground">{x.name}</dt>
+                      <dd className="min-w-0 truncate">{inputText(x)}</dd>
+                    </Fragment>
+                  ))}
+              </dl>
+            )}
             {t.process.backTo && onSendBack && <SendBack to={t.process.backTo} onSend={onSendBack} />}
           </div>
         )}

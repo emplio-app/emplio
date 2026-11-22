@@ -2,7 +2,8 @@
 // role). Each is a file in the company repo, processes/<name>.md: settings and its steps between --- lines, then how
 // it's done in words. Emplio writes them (from a chat, or when it sees the same steps done again and again); owners
 // change them later. A go of one (a run, process_runs) is for one client, or for anything else with a name (a
-// candidate, an opening) or for a record (records.ts: an invoice, a project), and keeps the steps it started with. Each step is a task, made when the one before it is
+// candidate, an opening), with what its inputs ask for filled in (an invoice number, an amount, a deadline), and keeps
+// the steps and inputs it started with. Each step is a task, made when the one before it is
 // done: for whoever looks after the client, the owner, a named person, Emplio or one of its agents, or "client" (a
 // task waiting on them, with the handler). An OK step can be sent back to an earlier one.
 // Started by hand (`emplio processes start`, the app), for each client won ("starts: new client"), or on a schedule
@@ -11,12 +12,11 @@
 // each scheduled one's automation in step with its file, however the file was changed.
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import type { Process, ProcessRun, ProcessStep, Role } from "@emplio/shared";
+import { INPUT_TYPES, type Process, type ProcessInput, type ProcessRun, type ProcessStep, type Role, type RunInput } from "@emplio/shared";
 import { record } from "./activity";
 import { context, type Ctx } from "./auth";
 import { db } from "./db";
-import { clients, processes, processRuns, records, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
-import { addRecord, findRecord, KIND, RecordError } from "./records";
+import { clients, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
 import { findAgent } from "./agents";
 import { findClient } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
@@ -45,7 +45,8 @@ const pathOf = (name: string) => {
 
 type Parsed = Omit<Process, "name" | "error" | "active">;
 
-// Its settings and steps, or what's wrong with it. Steps refer to each other by number (1 = the first) or by name.
+// Its settings, inputs and steps, or what's wrong with it. Steps refer to each other by number (1 = the first) or
+// by name, and to a date input by its name.
 export function parseProcess(text: string): Parsed | { error: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/.exec(text);
   if (!m) return { error: "the file must start with settings and steps between --- lines, then how it's done" };
@@ -59,8 +60,8 @@ export function parseProcess(text: string): Parsed | { error: string } {
   const title = typeof s.title === "string" && s.title.trim() ? s.title.trim() : null;
   if (!title) return { error: 'title: is missing (like "Annual filing")' };
   const forWhat = typeof s.for === "string" ? s.for.trim().toLowerCase() : s.for === undefined ? "client" : "";
-  if (forWhat !== "client" && forWhat !== "other" && !KIND.test(forWhat))
-    return { error: "for: is client (each go is for a client), a kind of record (invoice, candidate, project: one word, singular), or other (just a name)" };
+  if (forWhat !== "client" && forWhat !== "other")
+    return { error: "for: is client (each go is for a client) or other (for anything else with a name: a candidate, an opening); what each go needs goes in inputs:" };
   const every = s.every ?? null;
   if (every !== null && typeof every !== "string") return { error: 'every: is a schedule, like "0 9 1 4 *" (9 am on 1 April)' };
   const starts = every ? "schedule" : (s.starts ?? "manual");
@@ -71,6 +72,12 @@ export function parseProcess(text: string): Parsed | { error: string } {
   const clientsList = rawClients === null ? null : rawClients === "all" ? ["*"] : rawClients;
   if (clientsList !== null && (!Array.isArray(clientsList) || !clientsList.length || clientsList.some((c) => typeof c !== "string" || !c.trim())))
     return { error: "clients: is all, or a list like [Northwind Traders, Contoso]" };
+
+  const inputs = parseInputs(s.inputs);
+  if ("error" in inputs) return inputs;
+  if (starts !== "manual" && inputs.some((x) => x.required))
+    return { error: "a process that starts by itself (for each new client, or on a schedule) can only have inputs with required: false; they're filled in later" };
+
   if (!Array.isArray(s.steps) || !s.steps.length) return { error: "steps: is missing: a list of steps, each with a name: and who:" };
   if (s.steps.length > 40) return { error: "at most 40 steps" };
   const raw = s.steps as unknown[];
@@ -79,7 +86,7 @@ export function parseProcess(text: string): Parsed | { error: string } {
   const ref = (v: unknown, i: number, key: string): number | "start" | { error: string } => {
     if (v === "start") return "start";
     const n = typeof v === "number" ? v : typeof v === "string" ? names.findIndex((x) => x.toLowerCase() === v.trim().toLowerCase()) + 1 : 0;
-    if (!Number.isInteger(n) || n < 1 || n > i) return { error: `step ${i + 1}: ${key}: must be an earlier step, by number or name` };
+    if (!Number.isInteger(n) || n < 1 || n > i) return { error: `step ${i + 1}: ${key}: must be an earlier step, by number or name${key === "after" && inputs.some((x) => x.type === "date") ? ", or a date input" : ""}` };
     return n;
   };
   const steps: ProcessStep[] = [];
@@ -87,19 +94,26 @@ export function parseProcess(text: string): Parsed | { error: string } {
     const o = (typeof x === "string" ? { name: x } : x) as Record<string, unknown>;
     if (!names[i]) return { error: `step ${i + 1} needs a name:` };
     const step: ProcessStep = { name: names[i]!, who: typeof o.who === "string" && o.who.trim() ? o.who.trim() : forWhat === "client" ? "handler" : "owner" };
-    // a record may have a client (an invoice does): handler and client work for those, falling back to whoever started it
-    if (forWhat === "other" && ["handler", "client"].includes(step.who.toLowerCase())) return { error: `step ${i + 1}: who: ${step.who} only goes with a process for clients or records` };
+    if (forWhat === "other" && ["handler", "client"].includes(step.who.toLowerCase())) return { error: `step ${i + 1}: who: ${step.who} only goes with a process for clients` };
     if (typeof o.how === "string" && o.how.trim()) step.how = o.how.trim();
     if (o.days !== undefined) {
-      if (!Number.isInteger(o.days) || (o.days as number) < 0 || (o.days as number) > 400) return { error: `step ${i + 1}: days: is a number of days, like 7` };
+      if (!Number.isInteger(o.days) || Math.abs(o.days as number) > 400) return { error: `step ${i + 1}: days: is a number of days, like 7` };
       step.days = o.days as number;
     }
     if (o.after !== undefined) {
-      if (step.days === undefined) return { error: `step ${i + 1}: after: goes with days: (days after that step)` };
-      const r = ref(o.after, i, "after");
-      if (typeof r === "object") return r;
-      step.after = r;
+      if (step.days === undefined) return { error: `step ${i + 1}: after: goes with days: (days after that step, or that date)` };
+      // a date filled in when it starts, by name, unless a step has that name
+      const date = typeof o.after === "string" && !names.slice(0, i).some((n) => n.toLowerCase() === (o.after as string).trim().toLowerCase()) ? findInput(inputs, o.after) : undefined;
+      if (date) {
+        if (date.type !== "date") return { error: `step ${i + 1}: after: ${date.name} is an input but not a date (type: date)` };
+        step.afterInput = date.key;
+      } else {
+        const r = ref(o.after, i, "after");
+        if (typeof r === "object") return r;
+        step.after = r;
+      }
     }
+    if (step.days !== undefined && step.days < 0 && !step.afterInput) return { error: `step ${i + 1}: days: is below 0 only with after: a date input (that many days before it)` };
     if (o.back !== undefined) {
       const r = ref(o.back, i, "back");
       if (typeof r === "object") return r;
@@ -108,8 +122,88 @@ export function parseProcess(text: string): Parsed | { error: string } {
     }
     steps.push(step);
   }
-  return { title, for: forWhat, starts, every, clients: clientsList as string[] | null, steps, about: m[2]!.trim() };
+  return { title, for: forWhat, inputs, starts, every, clients: clientsList as string[] | null, steps, about: m[2]!.trim() };
 }
+
+// "Due date" → due-date: what an input is passed as (--due-date; due_date= from Python, made --due-date)
+export const inputKey = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+const findInput = <T extends ProcessInput>(inputs: T[], q: unknown) => (typeof q === "string" ? inputs.find((x) => x.key === inputKey(q)) : undefined);
+// what start and set already take as flags
+const TAKEN = ["client", "for", "all", "note"];
+
+function parseInputs(v: unknown): ProcessInput[] | { error: string } {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) return { error: "inputs: is a list of what's filled in when it starts, each with a name: (and type: number, date or choice)" };
+  if (v.length > 20) return { error: "at most 20 inputs" };
+  const out: ProcessInput[] = [];
+  for (const [i, x] of v.entries()) {
+    const o = (typeof x === "string" ? { name: x } : x) as Record<string, unknown>;
+    const name = typeof o?.name === "string" ? o.name.trim().slice(0, 60) : "";
+    const key = inputKey(name);
+    if (!key) return { error: `input ${i + 1} needs a name: (like Invoice, or Due date)` };
+    if (TAKEN.includes(key)) return { error: `input ${i + 1}: ${name} means something else when starting; call it something else` };
+    if (out.some((x) => x.key === key)) return { error: `input ${i + 1}: ${name} is there twice` };
+    const type = o.type === undefined ? "text" : String(o.type).trim().toLowerCase();
+    if (!(INPUT_TYPES as readonly string[]).includes(type)) return { error: `input ${i + 1}: type: is text (the default), number, date or choice` };
+    if (o.required !== undefined && typeof o.required !== "boolean") return { error: `input ${i + 1}: required: is true (the default) or false` };
+    const input: ProcessInput = { name, key, type: type as ProcessInput["type"], required: o.required !== false };
+    if (type === "choice") {
+      const options = Array.isArray(o.options) ? o.options.map((x) => (typeof x === "string" || typeof x === "number" ? String(x).trim() : "")) : [];
+      if (!options.length || options.some((x) => !x) || new Set(options.map((x) => x.toLowerCase())).size !== options.length)
+        return { error: `input ${i + 1}: a choice needs options:, a list like [Bank, Card, Cheque]` };
+      input.options = options;
+    } else if (o.options !== undefined) return { error: `input ${i + 1}: options: goes with type: choice` };
+    out.push(input);
+  }
+  return out;
+}
+
+// What was given for a process's inputs (by name or key, any case), checked and tidied: a number as plain digits, a
+// date as 2026-12-01, a choice as its option. "" or null empties one. Unknown names are refused. Starting (whole):
+// every required one must be there; changing: only what's given is checked.
+export function checkInputs(inputs: ProcessInput[], given: Record<string, unknown>, whole: boolean): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const [k, raw] of Object.entries(given)) {
+    const input = findInput(inputs, k);
+    if (!input) throw new ProcessError(inputs.length ? `no input ${k}; this process takes ${inputs.map((x) => `--${x.key}`).join(", ")}` : `this process takes no inputs (${k})`);
+    const v = raw === null || raw === undefined ? "" : String(raw).trim();
+    if (!v) {
+      if (input.required && !whole) throw new ProcessError(`${input.name} can't be left empty`);
+      out[input.key] = null;
+      continue;
+    }
+    if (input.type === "number") {
+      const n = Number(v.replace(/[,\s_]/g, ""));
+      if (!Number.isFinite(n)) throw new ProcessError(`${input.name} is a number, not "${v}"`);
+      out[input.key] = String(n);
+    } else if (input.type === "date") {
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T12:00:00Z`) : new Date(v);
+      if (Number.isNaN(d.getTime())) throw new ProcessError(`${input.name} is a date, like 2026-12-01, not "${v}"`);
+      out[input.key] = /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : d.toLocaleDateString("en-CA", { timeZone: DEFAULT_ZONE });
+    } else if (input.type === "choice") {
+      const o = input.options!.find((x) => x.toLowerCase() === v.toLowerCase());
+      if (!o) throw new ProcessError(`${input.name} is one of ${input.options!.join(", ")}, not "${v}"`);
+      out[input.key] = o;
+    } else out[input.key] = v.slice(0, 1000);
+  }
+  if (whole) {
+    const missing = inputs.filter((x) => x.required && !out[x.key]);
+    if (missing.length) throw new ProcessError(`it needs ${missing.map((x) => `${x.name} (--${x.key})`).join(", ")}`);
+  }
+  return out;
+}
+
+// What was filled in, for a person or Emplio to read: "Invoice: INV-1042 · Amount: 85000 · Due date: 2026-12-01"
+export const inputsLine = (inputs: RunInput[]) =>
+  inputs
+    .filter((x) => x.value)
+    .map((x) => `${x.name}: ${x.value}`)
+    .join(" · ");
 
 type ProcessRow = typeof processes.$inferSelect;
 
@@ -133,7 +227,7 @@ export function syncProcesses(workspaceId: string): Promise<void> {
       const parsed = parseProcess(text);
       const values =
         "error" in parsed
-          ? { workspaceId, name, sha: f.sha, title: name, for: "client", starts: "manual" as const, every: null, clients: null, steps: [], about: "", error: parsed.error, updatedAt: new Date() }
+          ? { workspaceId, name, sha: f.sha, title: name, for: "client", inputs: [], starts: "manual" as const, every: null, clients: null, steps: [], about: "", error: parsed.error, updatedAt: new Date() }
           : { workspaceId, name, sha: f.sha, ...parsed, steps: parsed.steps as ProcessStepDef[], error: null, updatedAt: new Date() };
       await db.insert(processes).values(values).onConflictDoUpdate({ target: [processes.workspaceId, processes.name], set: values });
       const sameSchedule = (old?.every ?? null) === values.every && JSON.stringify(old?.clients ?? null) === JSON.stringify(values.clients) && old?.title === values.title;
@@ -150,7 +244,8 @@ export function syncProcesses(workspaceId: string): Promise<void> {
 const toProcess = (r: ProcessRow, active: number): Process => ({
   name: r.name,
   title: r.title,
-  for: r.for,
+  for: r.for === "other" ? "other" : "client",
+  inputs: r.inputs,
   starts: r.starts,
   every: r.every,
   clients: r.clients,
@@ -251,38 +346,25 @@ const person = (team: { id: string; name: string | null; email: string }[], q: s
 
 // --- runs ---
 
-// Start one: for a client (subject is their name) or for anything else named by subject. A repeatKey already used
-// starts nothing (null).
+// Start one: for a client (subject is their name) or for anything else named by subject (else by its first input),
+// with its inputs filled in. A repeatKey already used starts nothing (null).
 export async function startRun(
   w: { workspaceId: string; userId: string },
   name: string,
-  o: { clientId?: string | null; recordId?: string | null; subject?: string; period?: string | null; repeatKey?: string },
+  o: { clientId?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
 ): Promise<Run | null> {
   const p = await getProcess(w.workspaceId, name);
-  let subject = o.subject?.trim() ?? "";
+  const given = checkInputs(p.inputs, o.inputs ?? {}, true);
+  const inputs: RunInput[] = p.inputs.map((x) => ({ ...x, value: given[x.key] ?? null }));
+  let subject = o.subject?.trim() || (p.for === "other" ? (inputs[0]?.value ?? "") : "");
   let clientId: string | null = null;
-  let recordId: string | null = null;
-  if (p.for !== "client" && p.for !== "other") {
-    // for a record: the one named, else the one with that title, else a new one
-    let rec;
-    try {
-      rec = o.recordId ? await findRecord(w.workspaceId, o.recordId, p.for) : subject ? await findRecord(w.workspaceId, subject, p.for).catch(() => null) : null;
-      if (!rec && subject) rec = await addRecord({ ...w, role: "owner" }, { kind: p.for, title: subject, clientId: o.clientId ?? null });
-    } catch (error) {
-      if (error instanceof RecordError) throw new ProcessError(error.message);
-      throw error;
-    }
-    if (!rec) throw new ProcessError(`say which ${p.for} this "${p.title}" is for (--for "<its title>", made if it isn't there yet)`);
-    subject = rec.title;
-    recordId = rec.id;
-    clientId = rec.clientId;
-  } else if (p.for === "client") {
+  if (p.for === "client") {
     if (!o.clientId) throw new ProcessError(`"${p.title}" is done for a client: say which (--client <name>)`);
     const c = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, o.clientId)) });
     if (!c) throw new ProcessError("no such client (emplio clients list)");
     subject = c.name;
     clientId = c.id;
-  } else if (!subject) throw new ProcessError(`say who or what this "${p.title}" is for (--for "Sarah Lee, React developer")`);
+  } else if (!subject) throw new ProcessError(`say who or what this "${p.title}" is for (--for "Sarah Lee, React developer"${p.inputs[0] ? `, or its ${p.inputs[0].name}: --${p.inputs[0].key}` : ""})`);
   const [run] = await db
     .insert(processRuns)
     .values({
@@ -291,7 +373,7 @@ export async function startRun(
       processTitle: p.title,
       subject: subject.slice(0, 200),
       clientId,
-      recordId,
+      inputs,
       period: o.period ?? null,
       steps: p.steps as ProcessStepDef[],
       finished: p.steps.map(() => null),
@@ -329,15 +411,14 @@ async function makeStep(run: Run, i: number, note?: string) {
       missing = `(The process says ${step.who} does this, but nobody by that name is on the team now.)`;
     }
   }
-  const from = step.after === "start" ? run.startedAt.getTime() : step.after ? Date.parse(run.finished[step.after - 1] ?? "") || Date.now() : Date.now();
-  const dueAt = step.days === undefined ? null : endOfDay(new Date(from + step.days * DAY));
+  const dueAt = dueOf(run, step);
   const waiting = who === "client";
-  // a client's name shows beside the task anyway; anything else goes in the title
-  const label = run.clientId && !run.recordId ? "" : ` · ${run.subject}`;
+  const details = inputsLine(run.inputs);
   const notes = [
     step.how,
     note && `Sent back: ${note}`,
     missing,
+    details && `${DETAILS}${details}`,
     `Step ${i + 1} of ${run.steps.length} of "${run.processTitle}" for ${run.subject}${run.period ? ` (${run.period})` : ""}; how this process goes: company/processes/${run.process}.md.`,
     step.back ? `An OK step: if it isn't right, send it back to step ${step.back} (emplio processes back ${run.id.slice(0, 8)} --note "<what to fix>").` : "",
   ]
@@ -347,7 +428,7 @@ async function makeStep(run: Run, i: number, note?: string) {
     .insert(tasks)
     .values({
       workspaceId: run.workspaceId,
-      title: `${step.name}${label}${run.period ? ` · ${run.period}` : ""}`.slice(0, 300),
+      title: taskTitle(run, i),
       notes,
       status: waiting ? "waiting" : "todo",
       waitingOn: waiting ? `${run.subject}: ${step.name}` : null,
@@ -366,6 +447,30 @@ async function makeStep(run: Run, i: number, note?: string) {
   }
   return t!;
 }
+
+// What a step's task is called: the step, then what the go is for (a client's name shows beside the task anyway, so
+// for one its first input instead, if any), then the period.
+function taskTitle(run: Run, i: number) {
+  const first = run.inputs[0]?.value;
+  const label = run.clientId ? (first ? ` · ${first}` : "") : ` · ${run.subject}`;
+  return `${run.steps[i]!.name}${label}${run.period ? ` · ${run.period}` : ""}`.slice(0, 300);
+}
+
+// When a step is due: days after it starts, after an earlier step finished, after the start, or before or after a date
+// filled in (none if that date was left empty).
+function dueOf(run: Run, step: ProcessStepDef) {
+  if (step.days === undefined) return null;
+  if (step.afterInput) {
+    const v = run.inputs.find((x) => x.key === step.afterInput)?.value;
+    const d = v ? new Date(`${v}T12:00:00Z`) : null;
+    return d && !Number.isNaN(d.getTime()) ? endOfDay(new Date(d.getTime() + step.days * DAY)) : null;
+  }
+  const from = step.after === "start" ? run.startedAt.getTime() : step.after ? Date.parse(run.finished[step.after - 1] ?? "") || Date.now() : Date.now();
+  return endOfDay(new Date(from + step.days * DAY));
+}
+
+// the line in a step's notes with what was filled in, kept current when it changes
+const DETAILS = "Details: ";
 
 // 6 pm that day, the business's time
 function endOfDay(d: Date) {
@@ -419,6 +524,46 @@ export async function sendBack(w: Who, id: string, note: string) {
   return moved;
 }
 
+// Change what was filled in (a part payment, a new due date): whoever started it, whoever has the step it's on, the
+// owner or an admin. The open step's task follows: its title, its details line, and its due date if it hangs off a
+// date that changed.
+export async function setInputs(w: Who, id: string, given: Record<string, unknown>) {
+  const run = await findRun(w.workspaceId, id);
+  if (run.status !== "active") throw new ProcessError(`it's ${run.status}; only a go still running can change`);
+  if (!run.inputs.length) throw new ProcessError("this one has nothing filled in to change (its process had no inputs when it started)");
+  if (!Object.keys(given).length) throw new ProcessError(`say what to change: ${run.inputs.map((x) => `--${x.key}`).join(", ")}`);
+  const t = await currentTask(run);
+  if (!isAdmin(w) && run.startedBy !== w.userId && t?.assigneeId !== w.userId) throw new ProcessError("only whoever started it, whoever has its step, the owner or an admin can change it");
+  const next = checkInputs(run.inputs, given, false);
+  const changed = run.inputs.filter((x) => x.key in next && next[x.key] !== x.value);
+  if (!changed.length) return run;
+  const inputs = run.inputs.map((x) => (x.key in next ? { ...x, value: next[x.key]! } : x));
+  const [moved] = await db.update(processRuns).set({ inputs }).where(eq(processRuns.id, run.id)).returning();
+  if (t) {
+    const step = moved!.steps[moved!.step]!;
+    const details = inputsLine(inputs);
+    const lines = (t.notes ?? "").split("\n").filter((l) => !l.startsWith(DETAILS));
+    const at = lines.findIndex((l) => l.startsWith(`Step ${moved!.step + 1} of `));
+    if (details) lines.splice(at < 0 ? lines.length : at, 0, `${DETAILS}${details}`, "");
+    await db
+      .update(tasks)
+      .set({
+        title: taskTitle(moved!, moved!.step),
+        notes: lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(),
+        ...(step.afterInput && changed.some((x) => x.key === step.afterInput) && { dueAt: dueOf(moved!, step) }),
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, t.id));
+  }
+  record({
+    workspaceId: w.workspaceId,
+    userId: w.userId,
+    kind: "process",
+    summary: `Changed ${changed.map((x) => `${x.name} to ${next[x.key] ?? "(empty)"}`).join(", ")} on "${run.processTitle}" for ${run.subject}`,
+  });
+  return moved!;
+}
+
 export async function stopRun(w: Who, id: string) {
   const run = await findRun(w.workspaceId, id);
   if (!isAdmin(w) && run.startedBy !== w.userId) throw new ProcessError("only whoever started it, the owner or an admin can stop it");
@@ -435,7 +580,7 @@ export async function startForNewClient(w: { workspaceId: string; userId: string
     if (!p.error && p.starts === "new client") await startRun(w, p.name, { clientId, repeatKey: `${p.name}/new/${clientId}` }).catch((error) => console.error("starting a process failed", p.name, error));
 }
 
-export async function listRuns(workspaceId: string, f: { process?: string; clientId?: string; recordId?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
+export async function listRuns(workspaceId: string, f: { process?: string; clientId?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
   const rows = await db
     .select()
     .from(processRuns)
@@ -444,7 +589,6 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
         eq(processRuns.workspaceId, workspaceId),
         f.process ? eq(processRuns.process, f.process) : undefined,
         f.clientId ? eq(processRuns.clientId, f.clientId) : undefined,
-        f.recordId ? eq(processRuns.recordId, f.recordId) : undefined,
         f.all ? undefined : eq(processRuns.status, "active"),
       ),
     )
@@ -464,7 +608,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       processTitle: r.processTitle,
       subject: r.subject,
       clientId: r.clientId,
-      recordId: r.recordId,
+      inputs: r.inputs,
       period: r.period,
       status: r.status,
       step: r.step,
@@ -489,21 +633,26 @@ export async function stepInfo(runIds: string[]) {
 const USAGE = `usage: emplio processes list                                   the processes (steps done the same way every time)
        emplio processes show <name>                            one, with its file
        emplio processes add <name> - <<'MD' ... MD             a new one (owner or admin): company/processes/<name>.md, as below
-       emplio processes update <name> - <<'MD' ... MD          change it (runs already going keep their steps)
+       emplio processes update <name> - <<'MD' ... MD          change it (runs already going keep their steps and inputs)
        emplio processes remove <name>                          remove it (runs going carry on)
-       emplio processes start <name> --client <name>           start one for a client (anyone on the team)
-       emplio processes start <name> --for "<title>"           one for a record (an invoice: made if new) or anything else by name
-       emplio processes start <name> --record <id>             one for a record already there (emplio records list)
-       emplio processes runs [--client <name>] [--record <id>] [--all]   what's going (a process's name first: just that one; --all: finished ones too)
+       emplio processes start <name> --client <name> [--<input> <value>]...   start one for a client, its inputs filled in
+       emplio processes start <name> --for "<who or what>" [--<input> <value>]...   one not for a client
+       emplio processes runs [<name>] [--client <name>] [--all]  what's going, with what was filled in (--all: finished ones too)
+       emplio processes set <run> --<input> <value>...         change what was filled in (a part payment, a new date; "" empties)
        emplio processes back <run> --note "<what to fix>"      an OK step not OK: back to the step it names
        emplio processes stop <run>                             stop one; its open step is cancelled
+An input is passed by its name, lowercase with dashes: Due date is --due-date (in Python, due_date=).
 A process file:
   ---
   title: Annual filing
-  for: client              # client (default); a kind of record: invoice, candidate, project (one word,
-                           #   singular; emplio records); or other: just a name
+  for: client              # client (default), or other: anything else with a name (a candidate, an opening)
   starts: manual           # manual (default), or new client: for each client won
   every: "0 9 1 4 *"       # instead: on a schedule, for each client (clients: all, or [a, b])
+  inputs:                  # what's filled in when it starts (none: nothing asked)
+    - name: Financial year #   text unless type: says otherwise
+    - name: AGM date
+      type: date           # text, number, date (2026-12-01), or choice with options: [Bank, Card]
+      required: false      # needed unless false; one that starts by itself has only required: false ones
   steps:
     - name: Get the audited accounts
       who: client          # handler (default: who looks after the client), owner, emplio, client (waiting on
@@ -516,8 +665,8 @@ A process file:
       back: 2              # an OK step: sending it back starts step 2 again
     - name: File AOC-4
       days: 30
-      after: Hold the AGM  # due 30 days after that step finished (or after: start), not after this one starts
-      how: Attach the signed accounts and the AGM minutes.
+      after: AGM date      # due 30 days after that date (or after: an earlier step, or start); days: -7 with a
+      how: Attach the signed accounts and the AGM minutes.   #   date: a week before it
   ---
   How it's done, in words: what good looks like, the usual snags.`;
 
@@ -530,9 +679,11 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
   else for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
     if (a === "--all") opts.all = "1";
-    else if (a.startsWith("--")) opts[a.slice(2)] = rest[++i] ?? "";
+    else if (a.startsWith("--") && a.length > 2) opts[a.slice(2)] = rest[++i] ?? "";
     else words.push(a);
   }
+  // every other --flag is an input (start, set)
+  const { client: _client, for: _for, all: _all, note: _note, ...inputFlags } = opts;
   const clientOf = async (q: string | undefined) => {
     if (!q) return undefined;
     const c = await findClient(who.workspaceId, q);
@@ -572,19 +723,25 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Removed ${words[0]}; runs going carry on.`;
       case "start": {
         if (!words[0]) break;
-        const run = await startRun(who, words[0], { clientId: await clientOf(opts.client), recordId: opts.record, subject: opts.for });
+        const run = await startRun(who, words[0], { clientId: await clientOf(opts.client), subject: opts.for, inputs: inputFlags });
         const [r] = await listRuns(who.workspaceId, { process: words[0], all: true }).then((l) => l.filter((x) => x.id === run!.id));
-        return `Started ${run!.id.slice(0, 8)}: "${run!.processTitle}" for ${run!.subject}. Step 1, ${r?.steps[0]?.name}: ${r?.current ? `${r.current.assigneeName}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}` : "made"}.`;
+        const details = inputsLine(run!.inputs);
+        return `Started ${run!.id.slice(0, 8)}: "${run!.processTitle}" for ${run!.subject}${details ? ` (${details})` : ""}. Step 1, ${r?.steps[0]?.name}: ${r?.current ? `${r.current.assigneeName}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}` : "made"}.`;
+      }
+      case "set": {
+        if (!words[0]) break;
+        const run = await setInputs(who, words[0], inputFlags);
+        return `Now: ${inputsLine(run.inputs) || "nothing filled in"}.`;
       }
       case "runs": {
-        const recordId = opts.record ? (await findRecord(who.workspaceId, opts.record).catch((e: Error) => { throw new ProcessError(e.message); })).id : undefined;
-        const runs = await listRuns(who.workspaceId, { process: words[0], clientId: await clientOf(opts.client), recordId, all: !!opts.all });
+        const runs = await listRuns(who.workspaceId, { process: words[0], clientId: await clientOf(opts.client), all: !!opts.all });
         if (data) return JSON.stringify(runs);
         if (!runs.length) return opts.all ? "No runs." : "Nothing going. (--all for finished ones)";
         return runs
           .map((r) => {
             const at = r.status === "active" ? `step ${r.step + 1}/${r.steps.length} ${r.steps[r.step]?.name}${r.current ? ` (${r.current.assigneeName}, ${r.current.status}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""})` : ""}` : r.status;
-            return `${r.id.slice(0, 8)}\t${r.processTitle}\t${r.subject}${r.period ? ` · ${r.period}` : ""}\t${at}`;
+            const details = inputsLine(r.inputs);
+            return `${r.id.slice(0, 8)}\t${r.processTitle}\t${r.subject}${r.period ? ` · ${r.period}` : ""}\t${at}${details ? `\n\t${details}` : ""}`;
           })
           .join("\n");
       }
@@ -620,16 +777,16 @@ export async function processRoutes(app: FastifyInstance) {
     if (!ctx) return;
     return listProcesses(ctx.workspaceId);
   });
-  app.get<{ Querystring: { process?: string; client?: string; record?: string; all?: string } }>("/process-runs", async (req, reply) => {
+  app.get<{ Querystring: { process?: string; client?: string; all?: string } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listRuns(ctx.workspaceId, { process: req.query.process, clientId: req.query.client, recordId: req.query.record, all: req.query.all === "1" });
+    return listRuns(ctx.workspaceId, { process: req.query.process, clientId: req.query.client, all: req.query.all === "1" });
   });
-  app.post<{ Body: { process?: string; clientId?: string | null; recordId?: string | null; subject?: string } }>("/process-runs", async (req, reply) => {
+  app.post<{ Body: { process?: string; clientId?: string | null; subject?: string; inputs?: Record<string, unknown> } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     try {
-      const run = await startRun(ctx, req.body?.process ?? "", { clientId: req.body?.clientId, recordId: req.body?.recordId, subject: req.body?.subject });
+      const run = await startRun(ctx, req.body?.process ?? "", { clientId: req.body?.clientId, subject: req.body?.subject, inputs: req.body?.inputs ?? {} });
       return (await listRuns(ctx.workspaceId, { process: run!.process })).find((r) => r.id === run!.id);
     } catch (error) {
       return fail(reply, error);
@@ -641,6 +798,16 @@ export async function processRoutes(app: FastifyInstance) {
     try {
       await sendBack(ctx, req.params.id, req.body?.note ?? "");
       return { ok: true };
+    } catch (error) {
+      return fail(reply, error);
+    }
+  });
+  app.patch<{ Params: { id: string }; Body: { inputs?: Record<string, unknown> } }>("/process-runs/:id", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    try {
+      const run = await setInputs(ctx, req.params.id, req.body?.inputs ?? {});
+      return (await listRuns(ctx.workspaceId, { process: run.process, all: true })).find((r) => r.id === run.id);
     } catch (error) {
       return fail(reply, error);
     }
@@ -661,8 +828,26 @@ if (import.meta.main) {
   const ok = parseProcess(`---\ntitle: Annual filing\nsteps:\n  - name: Get accounts\n    who: client\n    days: 30\n  - name: Draft\n    who: emplio\n  - name: Approve\n    who: owner\n    back: Draft\n  - name: File\n    days: 30\n    after: 1\n---\nWords.\n`);
   console.assert(!("error" in ok) && ok.steps[2]!.back === 2 && ok.steps[3]!.after === 1 && ok.steps[0]!.who === "client" && ok.steps[3]!.who === "handler", ok);
   console.assert("error" in parseProcess(`---\ntitle: X\nsteps:\n  - name: A\n    back: 2\n---\n`));
-  const inv = parseProcess(`---\ntitle: Chase\nfor: Invoice\nsteps:\n  - name: Remind\n    who: handler\n---\n`);
-  console.assert(!("error" in inv) && inv.for === "invoice", inv);
-  console.assert("error" in parseProcess(`---\ntitle: X\nfor: two words\nsteps: [A]\n---\n`));
+  const pay = parseProcess(`---\ntitle: Chase\ninputs:\n  - Invoice\n  - name: Amount\n    type: number\n  - name: Due date\n    type: date\n  - name: How they pay\n    type: choice\n    options: [Bank, Card]\n    required: false\nsteps:\n  - name: Remind\n  - name: Call\n    days: 3\n    after: Due date\n  - name: Before\n    days: -2\n    after: due date\n---\n`);
+  console.assert(!("error" in pay) && pay.inputs.length === 4 && pay.inputs[2]!.key === "due-date" && pay.inputs[3]!.required === false && pay.steps[1]!.afterInput === "due-date" && pay.steps[2]!.days === -2, pay);
+  if (!("error" in pay)) {
+    const ok = checkInputs(pay.inputs, { invoice: " INV-1042 ", amount: "85,000", due_date: "2026-12-01", "How they pay": "bank" }, true);
+    console.assert(ok.invoice === "INV-1042" && ok.amount === "85000" && ok["due-date"] === "2026-12-01" && ok["how-they-pay"] === "Bank", ok);
+    const bad = (g: Record<string, unknown>, whole = true) => { try { checkInputs(pay.inputs, g, whole); return false; } catch { return true; } };
+    console.assert(bad({ invoice: "X", amount: "lots", "due-date": "2026-12-01" }), "number");
+    console.assert(bad({ invoice: "X", amount: "1", "due-date": "someday" }), "date");
+    console.assert(bad({ invoice: "X", amount: "1" }), "missing");
+    console.assert(bad({ invoice: "X", amount: "1", "due-date": "2026-12-01", colour: "red" }), "unknown");
+    console.assert(bad({ invoice: "X", amount: "1", "due-date": "2026-12-01", "how-they-pay": "Cash" }), "choice");
+    console.assert(bad({ invoice: "" }, false), "required can't be emptied");
+    console.assert(checkInputs(pay.inputs, { "how-they-pay": "" }, false)["how-they-pay"] === null);
+  }
+  console.assert("error" in parseProcess(`---\ntitle: X\nsteps:\n  - name: A\n    days: -2\n---\n`), "negative days need a date");
+  console.assert("error" in parseProcess(`---\ntitle: X\ninputs: [Invoice]\nsteps:\n  - name: A\n    days: 2\n    after: Invoice\n---\n`), "after a text input");
+  console.assert("error" in parseProcess(`---\ntitle: X\nstarts: new client\ninputs: [Invoice]\nsteps: [A]\n---\n`), "auto start, required input");
+  console.assert(!("error" in parseProcess(`---\ntitle: X\nstarts: new client\ninputs:\n  - name: Invoice\n    required: false\nsteps: [A]\n---\n`)));
+  console.assert("error" in parseProcess(`---\ntitle: X\ninputs: [Client]\nsteps: [A]\n---\n`), "taken name");
+  console.assert("error" in parseProcess(`---\ntitle: X\nfor: invoice\nsteps: [A]\n---\n`), "for: is client or other");
+  console.assert("error" in parseProcess(`---\ntitle: X\ninputs:\n  - name: P\n    type: choice\nsteps: [A]\n---\n`), "choice needs options");
   console.log("ok");
 }

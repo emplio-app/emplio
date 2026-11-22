@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Process, ProcessRun, ProcessStep } from "@emplio/shared";
-import { ChevronRightIcon, CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
+import type { Process, ProcessInput, ProcessRun, ProcessStep } from "@emplio/shared";
+import { ChevronRightIcon, CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -10,12 +10,16 @@ import { toast } from "sonner";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { TaskSheet } from "@/components/tasks/tasks-page";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, processesQueryKey, processRunsQueryKey, recordsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useRecords } from "@/lib/api";
+import { api, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns } from "@/lib/api";
+import { runDetails, runName } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -169,6 +173,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
     },
   });
   const rows = runs.data ?? [];
+  const [editing, setEditing] = useState<ProcessRun | null>(null);
   return (
     <section className="grid min-w-0 content-start gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -230,15 +235,13 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
                   ? "Fix the process first."
                   : p.for === "client"
                     ? `Start it for a client and each step goes to the right person in turn.`
-                    : p.for === "other"
-                      ? "Start it for a candidate, a project or whatever it's for."
-                      : `Start it for a ${p.for} and each step goes to the right person in turn.`}
+                    : "Start it for a candidate, a project or whatever it's for."}
               </p>
             </div>
           ) : (
             <ul className="grid gap-2">
               {rows.map((r) => (
-                <RunCard key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} />
+                <RunCard key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} onEdit={r.status === "active" && r.inputs.length ? () => setEditing(r) : undefined} />
               ))}
             </ul>
           )}
@@ -253,7 +256,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
                 <span className="grid size-6 place-items-center rounded-full border bg-background text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                 <div className="grid min-w-0 gap-0.5 pt-0.5">
                   <span className="text-sm leading-snug font-medium">{s.name}</span>
-                  <span className="text-xs text-muted-foreground">{stepMeta(s, p.steps)}</span>
+                  <span className="text-xs text-muted-foreground">{stepMeta(s, p.steps, p.inputs)}</span>
                   {s.how && <span className="line-clamp-2 text-xs text-muted-foreground/80">{s.how}</span>}
                 </div>
               </li>
@@ -261,14 +264,18 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
           </ol>
         </aside>
       </div>
+      {editing && <EditDetails key={editing.id} r={editing} onClose={() => setEditing(null)} />}
     </section>
   );
 }
 
-// "Owner · 2 days · can send back to step 2"
-function stepMeta(s: ProcessStep, steps: ProcessStep[]) {
+// "Owner · 2 days · can send back to step 2", "Their handler · 7 days before Filing deadline"
+function stepMeta(s: ProcessStep, steps: ProcessStep[], inputs: ProcessInput[]) {
   const parts = [whoWords(s)];
-  if (s.days)
+  const date = s.afterInput && inputs.find((x) => x.key === s.afterInput)?.name;
+  if (s.days !== undefined && date)
+    parts.push(s.days ? `${Math.abs(s.days)} day${Math.abs(s.days) === 1 ? "" : "s"} ${s.days < 0 ? "before" : "after"} ${date}` : `on ${date}`);
+  else if (s.days)
     parts.push(
       `${s.days} day${s.days === 1 ? "" : "s"}${s.after === "start" ? " from the start" : typeof s.after === "number" ? ` after \u201c${steps[s.after - 1]?.name ?? `step ${s.after}`}\u201d` : ""}`,
     );
@@ -276,7 +283,8 @@ function stepMeta(s: ProcessStep, steps: ProcessStep[]) {
   return parts.join(" · ");
 }
 
-function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: string) => void; onStop?: () => void }) {
+function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask: (id: string) => void; onStop?: () => void; onEdit?: () => void }) {
+  const details = runDetails(r);
   const active = r.status === "active";
   const cur = active ? r.current : null;
   const waiting = cur?.status === "waiting";
@@ -287,7 +295,7 @@ function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: st
       <button type="button" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="grid w-full gap-2.5 px-4 py-3 pr-12 text-left disabled:cursor-default">
         <span className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 truncate font-medium">
-            {r.subject}
+            {runName(r)}
             {r.period && <span className="font-normal text-muted-foreground"> · {r.period}</span>}
           </span>
           <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -313,6 +321,7 @@ function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: st
             />
           ))}
         </span>
+        {details && <span className="truncate text-xs text-muted-foreground">{details}</span>}
         {cur && step && (
           <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
             {waiting ? <HourglassIcon className="size-3 text-amber-600" /> : <CircleDotIcon className="size-3 text-primary" />}
@@ -322,17 +331,25 @@ function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: st
           </span>
         )}
       </button>
-      {onStop && (
+      {(onStop || onEdit) && (
         <div className="absolute top-2 right-2">
           <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More for ${r.subject}`} />}>
+            <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`More for ${runName(r)}`} />}>
               <MoreHorizontalIcon />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onClick={onStop}>
-                <SquareIcon />
-                Stop this one
-              </DropdownMenuItem>
+              {onEdit && (
+                <DropdownMenuItem onClick={onEdit}>
+                  <PencilIcon />
+                  Edit details
+                </DropdownMenuItem>
+              )}
+              {onStop && (
+                <DropdownMenuItem variant="destructive" onClick={onStop}>
+                  <SquareIcon />
+                  Stop this one
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -341,40 +358,102 @@ function RunCard({ r, onOpenTask, onStop }: { r: ProcessRun; onOpenTask: (id: st
   );
 }
 
-// Start one: for a client (picked), or for anything else (typed).
-export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: string; size?: "sm" | "default" }) {
+// One field per input: a date box for a date, a dropdown for a choice, a number box for a number.
+export function InputFields({ inputs, values, onChange }: { inputs: ProcessInput[]; values: Record<string, string>; onChange: (key: string, value: string) => void }) {
+  return inputs.map((x) => (
+    <div key={x.key} className="grid gap-1.5">
+      <Label htmlFor={`input-${x.key}`} className="text-xs font-normal text-muted-foreground">
+        {x.name}
+        {!x.required && <span className="text-muted-foreground/70"> (optional)</span>}
+      </Label>
+      {x.type === "choice" ? (
+        <Select
+          items={[{ value: null, label: x.required ? "Pick one" : "None" }, ...x.options!.map((o) => ({ value: o, label: o }))]}
+          value={values[x.key] || null}
+          onValueChange={(v) => onChange(x.key, (v as string | null) ?? "")}
+        >
+          <SelectTrigger id={`input-${x.key}`} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {!x.required && <SelectItem value={null}>None</SelectItem>}
+            {x.options!.map((o) => (
+              <SelectItem key={o} value={o}>
+                {o}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input
+          id={`input-${x.key}`}
+          type={x.type === "date" ? "date" : "text"}
+          inputMode={x.type === "number" ? "decimal" : undefined}
+          value={values[x.key] ?? ""}
+          onChange={(e) => onChange(x.key, e.target.value)}
+        />
+      )}
+    </div>
+  ));
+}
+
+const filled = (inputs: ProcessInput[], values: Record<string, string>) => inputs.every((x) => !x.required || values[x.key]?.trim());
+
+// Starting one: the client (unless it's given), or what it's for, then its inputs.
+export function StartForm({ p, clientId, onDone }: { p: Process; clientId?: string; onDone: () => void }) {
   const clients = useClients();
-  const records = useRecords({ kind: p.for === "client" || p.for === "other" ? "-" : p.for });
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [client, setClient] = useState(clientId ?? "");
   const [subject, setSubject] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
   const start = useMutation({
-    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId: p.for === "client" ? client : null, subject }),
+    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId: p.for === "client" ? client : null, subject, inputs: values }),
     onSuccess: (r) => {
-      toast.success(`Started for ${r.subject}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined });
-      setOpen(false);
-      setSubject("");
+      toast.success(`Started for ${runName(r)}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined });
+      onDone();
     },
     onError: (e) => toast.error(e.message),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
       void queryClient.invalidateQueries({ queryKey: processesQueryKey });
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
-      void queryClient.invalidateQueries({ queryKey: recordsQueryKey });
     },
   });
-  const ready = p.for === "client" ? !!client : !!subject.trim();
-  if (clientId)
-    return (
-      <Button size={size} variant="outline" disabled={start.isPending} onClick={() => start.mutate()}>
-        <PlayIcon />
+  // a process for other things with no inputs is named by hand; with some, by its first
+  const named = p.for === "other" && !p.inputs.length;
+  const ready = (p.for === "client" ? !!client : !named || !!subject.trim()) && filled(p.inputs, values);
+  return (
+    <form
+      className="grid gap-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready && !start.isPending) start.mutate();
+      }}
+    >
+      {p.for === "client" && !clientId && (
+        <ClientPicker
+          items={[{ value: "", label: "Pick a client" }, ...(clients.data ?? []).filter((c) => c.stage !== "past").map((c) => ({ value: c.id, label: c.name }))]}
+          value={client}
+          onChange={setClient}
+          className="w-full"
+        />
+      )}
+      {named && <Input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Who or what it's for, e.g. Sarah Lee, designer" />}
+      <InputFields inputs={p.inputs} values={values} onChange={(k, v) => setValues((now) => ({ ...now, [k]: v }))} />
+      <Button type="submit" disabled={!ready || start.isPending}>
+        <RouteIcon />
         Start
       </Button>
-    );
+    </form>
+  );
+}
+
+// Start one, from the process's page.
+function Start({ p }: { p: Process }) {
+  const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button size={size} />}>
+      <PopoverTrigger render={<Button size="sm" />}>
         <PlayIcon />
         Start
       </PopoverTrigger>
@@ -383,40 +462,55 @@ export function Start({ p, clientId, size = "sm" }: { p: Process; clientId?: str
           <PopoverTitle>Start {p.title}</PopoverTitle>
           <PopoverDescription>Step 1, {p.steps[0]?.name}, goes to {whoWords(p.steps[0]!) === "Emplio" ? "Emplio" : whoWords(p.steps[0]!).toLowerCase()} now.</PopoverDescription>
         </PopoverHeader>
-        <form
-          className="grid gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (ready) start.mutate();
-          }}
-        >
-          {p.for === "client" ? (
-            <ClientPicker
-              items={[{ value: "", label: "Pick a client" }, ...(clients.data ?? []).filter((c) => c.stage !== "past").map((c) => ({ value: c.id, label: c.name }))]}
-              value={client}
-              onChange={setClient}
-              className="w-full"
-            />
-          ) : p.for === "other" ? (
-            <Input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Who or what it's for, e.g. Sarah Lee, designer" />
-          ) : (
-            <>
-              <Input autoFocus list={`records-${p.name}`} value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={`Pick or type a new ${p.for}`} />
-              <datalist id={`records-${p.name}`}>
-                {(records.data ?? []).map((r) => (
-                  <option key={r.id} value={r.title}>
-                    {r.clientName ?? r.status}
-                  </option>
-                ))}
-              </datalist>
-            </>
-          )}
-          <Button type="submit" disabled={!ready || start.isPending}>
-            <RouteIcon />
-            Start
-          </Button>
-        </form>
+        {open && <StartForm p={p} onDone={() => setOpen(false)} />}
       </PopoverContent>
     </Popover>
+  );
+}
+
+// Change what was filled in when it started.
+export function EditDetails({ r, onClose }: { r: ProcessRun; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(r.inputs.map((x) => [x.key, x.value ?? ""])));
+  const changed = Object.fromEntries(r.inputs.filter((x) => (values[x.key] ?? "") !== (x.value ?? "")).map((x) => [x.key, values[x.key] ?? ""]));
+  const save = useMutation({
+    mutationFn: () => api<ProcessRun>(`/process-runs/${r.id}`, { inputs: changed }, "PATCH"),
+    onSuccess: () => {
+      toast.success("Saved");
+      onClose();
+    },
+    onError: (e) => toast.error(e.message),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+    },
+  });
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{runName(r)}</DialogTitle>
+          <DialogDescription>{r.processTitle}: what was filled in when it started.</DialogDescription>
+        </DialogHeader>
+        <form
+          id={`details-${r.id}`}
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (Object.keys(changed).length && filled(r.inputs, values)) save.mutate();
+          }}
+        >
+          <InputFields inputs={r.inputs} values={values} onChange={(k, v) => setValues((now) => ({ ...now, [k]: v }))} />
+        </form>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form={`details-${r.id}`} disabled={!Object.keys(changed).length || !filled(r.inputs, values) || save.isPending}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

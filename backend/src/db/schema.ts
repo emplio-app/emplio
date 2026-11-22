@@ -1,4 +1,4 @@
-import type { Approval, PlanStep, JobInfo } from "@emplio/shared";
+import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { type AnyPgColumn, bigint, boolean, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -284,8 +284,10 @@ export const processes = pgTable(
     name: text().notNull(),
     sha: text().notNull(),
     title: text().notNull(),
-    // what each go is for: "client", "other" (just a name), or a kind of record ("invoice", "candidate")
+    // what each go is for: "client" or "other" (anything with a name)
     for: text().notNull().default("client"),
+    // what's filled in when one starts (an invoice number, an amount, a deadline)
+    inputs: jsonb().$type<ProcessInput[]>().notNull().default([]),
     starts: text({ enum: ["manual", "new client", "schedule"] }).notNull().default("manual"),
     every: text(),
     clients: text().array(),
@@ -296,27 +298,6 @@ export const processes = pgTable(
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex().on(t.workspaceId, t.name)],
-);
-
-// Things a business tracks that aren't clients: an invoice, a candidate, a project. Emplio adds them (or a process
-// started for one does); fields hold whatever that kind needs (amount, due date, role), Emplio's choice.
-export const records = pgTable(
-  "records",
-  {
-    id: uuid().primaryKey().defaultRandom(),
-    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    // lowercase singular: invoice, candidate, project
-    kind: text().notNull(),
-    title: text().notNull(),
-    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
-    fields: jsonb().$type<Record<string, string>>().notNull().default({}),
-    // free words: open, paid, hired, closed...
-    status: text().notNull().default("open"),
-    createdBy: uuid().references(() => users.id, { onDelete: "set null" }),
-    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index().on(t.workspaceId, t.kind)],
 );
 
 export const processRuns = pgTable(
@@ -330,8 +311,8 @@ export const processRuns = pgTable(
     processTitle: text().notNull(),
     subject: text().notNull(),
     clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
-    // what it's for when that's a record (an invoice, a candidate); its client, if any, is in clientId too
-    recordId: uuid().references(() => records.id, { onDelete: "set null" }),
+    // what was filled in when it started (changed since, maybe): the process's inputs then, each with its value
+    inputs: jsonb().$type<RunInput[]>().notNull().default([]),
     period: text(),
     steps: jsonb().$type<ProcessStepDef[]>().notNull(),
     // the step it's on (0-based); steps.length once it's done
@@ -347,7 +328,7 @@ export const processRuns = pgTable(
   },
   (t) => [index().on(t.workspaceId, t.process, t.status), index().on(t.clientId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
 );
-export type ProcessStepDef = { name: string; who: string; how?: string; days?: number; after?: number | "start"; back?: number };
+export type ProcessStepDef = { name: string; who: string; how?: string; days?: number; after?: number | "start"; afterInput?: string; back?: number };
 
 // One per file in the company repo's automations/ folder: the file (git) is the source, this row is
 // what runs. Rebuilt from git by syncAutomations; never edited on its own.

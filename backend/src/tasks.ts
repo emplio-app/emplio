@@ -94,7 +94,15 @@ const processOf = (t: Row, run: Awaited<ReturnType<typeof stepInfo>> extends Map
   if (!run || t.stepIndex === null) return null;
   const back = run.steps[t.stepIndex]?.back;
   // sending back only from the step it's on
-  return { runId: run.id, title: run.processTitle, step: t.stepIndex + 1, of: run.steps.length, backTo: back && run.step === t.stepIndex && run.status === "active" ? (run.steps[back - 1]?.name ?? null) : null };
+  return {
+    runId: run.id,
+    name: run.process,
+    title: run.processTitle,
+    step: t.stepIndex + 1,
+    of: run.steps.length,
+    backTo: back && run.step === t.stepIndex && run.status === "active" ? (run.steps[back - 1]?.name ?? null) : null,
+    inputs: run.inputs,
+  };
 };
 const withName = (t: Task): Task => (t.agentName ? { ...t, assigneeName: `the ${t.agentName} agent` } : t);
 

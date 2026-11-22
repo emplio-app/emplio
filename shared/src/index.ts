@@ -590,8 +590,9 @@ export type Task = {
   // the client it's for (clients.ts)
   clientId: string | null;
   clientName: string | null;
-  // a process's step: which go, which step of how many, and where sending it back goes (an OK step)
-  process: { runId: string; title: string; step: number; of: number; backTo: string | null } | null;
+  // a process's step: which go (and its process's file name), which step of how many, where sending it back goes
+  // (an OK step), and what was filled in when it started
+  process: { runId: string; name: string; title: string; step: number; of: number; backTo: string | null; inputs: RunInput[] } | null;
   createdAt: string;
   doneAt: string | null;
 };
@@ -604,17 +605,21 @@ export type ProcessStep = {
   // "handler" (whoever looks after the client), "owner", "emplio", "client" (waiting on them), a person, or an agent
   who: string;
   how?: string;
-  // due this many days after the step starts, or after an earlier step (1-based) finished, or the start
+  // due this many days after the step starts, or after an earlier step (1-based) finished, or the start, or a date
+  // filled in (afterInput: its key; days may be negative there: that many days before it)
   days?: number;
   after?: number | "start";
+  afterInput?: string;
   // an OK step: sending it back goes to this step (1-based)
   back?: number;
 };
 export type Process = {
   name: string;
   title: string;
-  // what each go is for: "client", "other" (anything with a name), or a kind of record ("invoice", "candidate")
-  for: string;
+  // what each go is for: a client, or anything else with a name
+  for: "client" | "other";
+  // what's filled in when one starts
+  inputs: ProcessInput[];
   // started by hand, for each new client, or on a schedule for clients (every: cron)
   starts: "manual" | "new client" | "schedule";
   every: string | null;
@@ -625,22 +630,12 @@ export type Process = {
   error: string | null;
   active: number;
 };
-// Something tracked that isn't a client (an invoice, a candidate): what a process can be run for (records.ts).
-export type BizRecord = {
-  id: string;
-  kind: string;
-  title: string;
-  clientId: string | null;
-  clientName: string | null;
-  fields: Record<string, string>;
-  status: string;
-  // processes going for it
-  active: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type RecordInput = { kind?: string; title?: string; clientId?: string | null; status?: string; fields?: Record<string, string> };
+// Something filled in when a process starts: an invoice number, an amount, a deadline. key is the name in lowercase
+// with dashes (due-date), what a command passes it as (--due-date).
+export const INPUT_TYPES = ["text", "number", "date", "choice"] as const;
+export type ProcessInput = { name: string; key: string; type: (typeof INPUT_TYPES)[number]; required: boolean; options?: string[] };
+// one on a run, with what was filled in (a number as digits, a date as 2026-12-01; null: left empty)
+export type RunInput = ProcessInput & { value: string | null };
 
 export type ProcessRun = {
   id: string;
@@ -648,7 +643,8 @@ export type ProcessRun = {
   processTitle: string;
   subject: string;
   clientId: string | null;
-  recordId: string | null;
+  // what was filled in when it started (changed since, maybe); the first one names it beside its client
+  inputs: RunInput[];
   period: string | null;
   status: "active" | "done" | "stopped";
   // the step it's on (0-based); steps.length once done

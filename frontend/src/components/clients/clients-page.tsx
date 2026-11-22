@@ -34,6 +34,8 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
+import { StartForm } from "@/components/processes/processes-page";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,6 +44,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks } from "@/lib/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 
 const STAGES: { value: ClientStage; label: string; hint: string }[] = [
@@ -620,6 +623,8 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
   const runs = useProcessRuns({ client: clientId });
   const processes = useProcesses();
   const forClients = (processes.data ?? []).filter((p) => p.for === "client" && !p.error);
+  // one with inputs asks for them first
+  const [starting, setStarting] = useState<Process | null>(null);
   if (!forClients.length && !runs.data?.length) return null;
   return (
     <section className="grid gap-2">
@@ -633,7 +638,7 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               {forClients.map((p) => (
-                <StartItem key={p.name} p={p} clientId={clientId} />
+                <StartItem key={p.name} p={p} clientId={clientId} onAsk={() => setStarting(p)} />
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -652,6 +657,7 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
                 <span className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate font-medium">
                     {r.processTitle}
+                    {r.inputs[0]?.value ? <span className="font-normal text-muted-foreground"> · {inputText(r.inputs[0])}</span> : null}
                     {r.period ? <span className="font-normal text-muted-foreground"> · {r.period}</span> : null}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -675,11 +681,22 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
       ) : (
         <p className="text-xs text-muted-foreground">Nothing going. Start one when it&rsquo;s time.</p>
       )}
+      {starting && (
+        <Dialog open onOpenChange={(o) => !o && setStarting(null)}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Start {starting.title}</DialogTitle>
+              <DialogDescription>Fill in what it needs; step 1, {starting.steps[0]?.name}, starts right away.</DialogDescription>
+            </DialogHeader>
+            <StartForm p={starting} clientId={clientId} onDone={() => setStarting(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
     </section>
   );
 }
 
-function StartItem({ p, clientId }: { p: Process; clientId: string }) {
+function StartItem({ p, clientId, onAsk }: { p: Process; clientId: string; onAsk: () => void }) {
   const queryClient = useQueryClient();
   const start = useMutation({
     mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId }),
@@ -692,7 +709,7 @@ function StartItem({ p, clientId }: { p: Process; clientId: string }) {
     },
   });
   return (
-    <DropdownMenuItem onClick={() => start.mutate()}>
+    <DropdownMenuItem onClick={() => (p.inputs.length ? onAsk() : start.mutate())}>
       <WorkflowIcon />
       <span className="truncate">{p.title}</span>
     </DropdownMenuItem>

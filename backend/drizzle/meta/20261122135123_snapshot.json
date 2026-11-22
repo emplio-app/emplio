@@ -1,5 +1,5 @@
 {
-  "id": "ac11bd73-0296-4f52-a70c-b6ad57708b97",
+  "id": "ec2ca8f0-ba38-491f-b3cf-c0f920aa3341",
   "prevId": "86c4d448-16ae-4754-b878-1728a3f5fa42",
   "version": "7",
   "dialect": "postgresql",
@@ -3040,11 +3040,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "record_id": {
-          "name": "record_id",
-          "type": "uuid",
+        "inputs": {
+          "name": "inputs",
+          "type": "jsonb",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "period": {
           "name": "period",
@@ -3197,19 +3198,6 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "process_runs_record_id_records_id_fk": {
-          "name": "process_runs_record_id_records_id_fk",
-          "tableFrom": "process_runs",
-          "tableTo": "records",
-          "columnsFrom": [
-            "record_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
         "process_runs_started_by_users_id_fk": {
           "name": "process_runs_started_by_users_id_fk",
           "tableFrom": "process_runs",
@@ -3271,6 +3259,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'client'"
+        },
+        "inputs": {
+          "name": "inputs",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
         "starts": {
           "name": "starts",
@@ -3416,146 +3411,6 @@
             "token_hash"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.records": {
-      "name": "records",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fields": {
-          "name": "fields",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "records_workspace_id_kind_index": {
-          "name": "records_workspace_id_kind_index",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "records_workspace_id_workspaces_id_fk": {
-          "name": "records_workspace_id_workspaces_id_fk",
-          "tableFrom": "records",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "records_client_id_clients_id_fk": {
-          "name": "records_client_id_clients_id_fk",
-          "tableFrom": "records",
-          "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "records_created_by_users_id_fk": {
-          "name": "records_created_by_users_id_fk",
-          "tableFrom": "records",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
