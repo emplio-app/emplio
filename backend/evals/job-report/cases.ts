@@ -27,7 +27,8 @@ export type Case = {
   plan?: [string, boolean][];
   // what it already ran in this job: [description, command, output]
   done: [string, string, string][];
-  world?: World;
+  // [words in the command, the result, and (optional) a command that must have run first for this answer to hold]
+  world?: [string, string, string?][];
   expect: {
     // any of these is right
     status: Status[];
@@ -180,7 +181,12 @@ export const cases = (): Case[] => [
       ["Read the statement", "python3 /work/tmp/acc/statement.py /work/in/hdfc-oct.csv", "51 transactions, saved /work/tmp/acc/hdfc-oct.json"],
       ["Match in Zoho", "python3 /work/tmp/acc/match.py", "49 matched; 2 unmatched: 14 Oct NEFT ₹12,000 'RAJ TRADERS'; 27 Oct UPI ₹1,180 'SWIGGY'. saved /work/tmp/acc/unmatched.json"],
     ],
-    world: [["list_bank_transactions|list_invoices", "(the matching above came from these: 49 matched)"], ["send_email|send", '{"sent": true, "id": "msg-55a1"}'], ["gmail\\.(search|list|get)|in:sent", '1 sent: "October reconciliation: 2 to look at" to meera@kaveri.example']],
+    world: [
+      ["list_bank_transactions|list_invoices", "(the matching above came from these: 49 matched)"],
+      ["send_email", '{"sent": true, "id": "msg-55a1"}'],
+      ["gmail\\.(search|list|get)|in:sent", '1 sent: "October reconciliation: 2 to look at" to meera@kaveri.example (msg-55a1)', "send_email"],
+      ["gmail\\.(search|list|get)|in:sent", "[]"],
+    ],
     expect: { status: ["done", "partly done"], runs: "send_email|send", orNotDone: true, says: ["12,000|12000", "1,180|1180"] },
   },
   {
@@ -201,6 +207,11 @@ export const cases = (): Case[] => [
     agent: ACCOUNTS,
     brief: "Pay the Surat fabric supplier's bill BL-2240 (₹1,42,000) in Zoho Books.",
     done: [["Look up the bill and the accounts", zoho("get_bill", { bill: "BL-2240" }), '{"bill": "BL-2240", "vendor": "Shree Textiles", "amount": 142000, "status": "open"}\nbank accounts: HDFC Current (balance ₹96,300), ICICI Current (balance ₹2,10,450)']],
+    world: [
+      ["record_bill_payment", '{"payment_id": "PAY-3310", "bill": "BL-2240", "amount": 142000, "account": "ICICI Current", "date": "2026-11-10"}'],
+      ["get_bill|list_bills", '{"bill": "BL-2240", "vendor": "Shree Textiles", "amount": 142000, "status": "paid", "payments": ["PAY-3310"]}', "record_bill_payment"],
+      ["get_bill|list_bills", '{"bill": "BL-2240", "vendor": "Shree Textiles", "amount": 142000, "status": "open"}'],
+    ],
     // paying shows the person an Allow card, so picking the one account that covers it and paying is fine too
     expect: { status: ["question", "done"] },
   },
@@ -211,6 +222,8 @@ export const cases = (): Case[] => [
     agent: ACCOUNTS,
     brief: "Download the October GST return summary from the GST portal and save it to /work/out.",
     done: [["Open the portal and sign in", "emplio browser open https://gst.example/login && emplio browser fill 4 kaveri_home && emplio browser click 7", "Page: 'Enter the OTP sent to your registered mobile +91 ******4410'. [9] textbox OTP [10] button Verify"]],
+    // the page stays on the code until someone gives it
+    world: [["browser", "Page: 'Enter the OTP sent to your registered mobile +91 ******4410'. [9] textbox OTP [10] button Verify"]],
     expect: { status: ["question"] },
   },
   // ids

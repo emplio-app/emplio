@@ -2,7 +2,7 @@
 // imports), each with its cases run side by side too (EVAL_CONCURRENCY, default 24). Logs in .evals/<name>.log, the
 // scores printed at the end. `bun run evals` in backend; extra arguments go to each `bt eval` (--no-send-logs).
 // Some evals only: `bun run evals manager job-report`.
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = import.meta.dir;
@@ -18,12 +18,17 @@ const began = Date.now();
 const strip = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, "");
 const results = await Promise.all(
   evals.map(async (name) => {
-    const p = Bun.spawn(["bt", "eval", "--runner", "bun", join(dir, name, `${name}.eval.ts`), ...flags], { cwd: join(dir, ".."), stdout: "pipe", stderr: "pipe" });
+    // on this machine by default (EVAL_SEND=1 sends to Braintrust): each answer is kept in .evals/<name>.jsonl for the
+    // eval's report.ts / a look by hand, and Braintrust's free plan runs out of room after a few days of runs
+    const local = process.env.EVAL_SEND ? [] : ["--no-send-logs"];
+    const dump = join(dir, "../.evals", `${name}.jsonl`);
+    rmSync(dump, { force: true });
+    const p = Bun.spawn(["bt", "eval", "--runner", "bun", "--no-color", join(dir, name, `${name}.eval.ts`), ...local, ...flags], { cwd: join(dir, ".."), stdout: "pipe", stderr: "pipe", env: { ...process.env, EVAL_DUMP: process.env.EVAL_DUMP || dump } });
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
     const log = strip(out + err);
     writeFileSync(join(dir, "../.evals", `${name}.log`), log);
     // the run's own column: the last figure on each score's row
-    const scores = [...log.matchAll(/^[│|]\s*◯\s+(\w+)\s+(.*?)\s*[│|]\s*$/gm)].filter((m) => m[2]!.includes("%")).map((m) => `${m[1]} ${m[2]!.replace(/^-\s+/, "").replace(/\s+/g, " ")}`);
+    const scores = [...log.matchAll(/^[│|]\s*◯\s+(\w+)\s+(.*?)\s*[│|]\s*$/gm)].filter((m) => m[2]!.includes("%")).map((m) => `${m[1]} ${m[2]!.replace(/^-\s+/, "").trim().split(/\s+/).at(-1)}`);
     console.log(`${name} (${((Date.now() - began) / 60_000).toFixed(1)} min)${code ? `: exit ${code}` : ""}\n  ${scores.join("\n  ") || "(no scores: see .evals/" + name + ".log)"}`);
     return code;
   }),

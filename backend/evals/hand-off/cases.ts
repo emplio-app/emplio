@@ -275,7 +275,8 @@ export const cases = (): Case[] => [
     business: { agents: AGENTS, threads: THREADS },
     chat: [person("every week i want fabindia's and home centre's websites checked: what's new in home furnishing and at what price. do this week's now")],
     world: SHOPS,
-    expect: { hand: true, picks: ["new"] },
+    // shops' catalogues and prices sit close to the Supplier Finder's work: that agent is a fair pick too
+    expect: { hand: true, picks: ["new", "agent:Supplier Finder"] },
   },
   {
     name: "a true one-off",

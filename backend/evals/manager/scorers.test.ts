@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { cases } from "./cases";
-import { keepsWords, noBrowser, rightCall, routesOf } from "./scorers";
+import { splits, keepsWords, noBrowser, rightCall, routesOf } from "./scorers";
 
 const business = { agents: ["- Supplier Finder (agents/supplier-finder, light): Finds suppliers"], threads: ["- 7f3a2c1e · Supplier Finder · Surat · done, 10 Nov", "- 2c9e7710 · myself · Page · done, 9 Nov"] };
 const hand = (pick: string) => [`emplio hand ${pick} <<'EOF'\nPrices from Surat\nEOF`];
@@ -26,8 +26,9 @@ test("the right call: agent, carry on or fresh, never a plain copy", () => {
   expect(rightCall(args(hand("7f3a2c1e"), { hand: true, agent: ["Supplier Finder"], cont: true })).score).toBe(1);
   expect(rightCall(args(hand('"Supplier Finder"'), { hand: true, agent: ["Supplier Finder"], cont: true })).score).toBe(0);
   expect(rightCall(args(hand('"Supplier Finder"'), { hand: true, agent: ["Supplier Finder"], cont: false }, true)).score).toBe(1);
-  expect(rightCall(args([...hand("7f3a"), ...hand('"Supplier Finder"')], { hand: true, split: 2 }, true)).score).toBe(1);
-  expect(rightCall(args(hand("7f3a"), { hand: true, split: 2 }, true)).score).toBe(0);
+  expect(splits(args([...hand("7f3a"), ...hand('"Supplier Finder"')], { hand: true, split: 2 }, true)).score).toBe(1);
+  expect(splits(args(hand("7f3a"), { hand: true, split: 2 }, true)).score).toBe(0);
+  expect(rightCall(args(hand("7f3a"), { hand: true, split: 2 }, true)).score).toBe(1);
   expect(rightCall(args(hand("myself"), { hand: true })).score).toBe(0);
   expect(rightCall(args([], { hand: false })).score).toBe(1);
   expect(rightCall(args(hand("myself"), { hand: false })).score).toBe(0);

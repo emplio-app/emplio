@@ -41,8 +41,16 @@ export function rightCall({ input, output, expected }: Args): Score {
   const all = routesOf(output.commands, input);
   const ok = !expected.hand
     ? !r
-    : !!r && r.agent !== "myself" && (!expected.agent || expected.agent.includes(r.agent)) && (expected.cont === undefined || r.cont === expected.cont) && all.length >= (expected.split ?? 1);
-  return { name: "right_call", score: ok ? 1 : 0, metadata: { wanted: expected.split ? `${wanted}, ${expected.split}+ jobs` : wanted, got: expected.split ? `${all.length} jobs: ${all.map((x) => x.agent).join(", ")}` : got, byHand: output.byHand } };
+    : !!r && r.agent !== "myself" && (!expected.agent || expected.agent.includes(r.agent)) && (expected.cont === undefined || r.cont === expected.cont);
+  return { name: "right_call", score: ok ? 1 : 0, metadata: { wanted, got, byHand: output.byHand } };
+}
+
+// Independent parts started as their own jobs, side by side. Apart from right_call: one job doing them one after the
+// other still gets the work done right, only slower.
+export function splits({ input, output, expected }: Args): Score {
+  if (!expected.split) return { name: "splits", score: null };
+  const all = routesOf(output.commands, input);
+  return { name: "splits", score: all.length >= expected.split ? 1 : 0, metadata: { wanted: expected.split, got: all.map((x) => x.agent) } };
 }
 
 // The person's own words reach the job: every word the case names is in the brief.
@@ -65,4 +73,4 @@ export function handsEarly({ input, output, expected }: Args): Score {
   return { name: "hands_early", score: output.byHand <= 2 ? 1 : 0, metadata: { byHand: output.byHand } };
 }
 
-export const scorers = [rightCall, keepsWords, noBrowser, handsEarly];
+export const scorers = [rightCall, keepsWords, noBrowser, handsEarly, splits];

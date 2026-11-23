@@ -23,8 +23,12 @@ async function task(input: Input): Promise<Output> {
     // a tick on its checklist, as the server keeps it
     for (const n of /\bemplio plan done\s+([\d\s,]+)/.exec(command)?.[1]?.match(/\d+/g) ?? []) if (plan[+n - 1]) plan[+n - 1]!.status = "done";
     if (/\bemplio plan done\s*$/.test(command)) for (const s of plan) s.status = "done";
-    return pretend(command, [...(input.world ?? []), ...JOB_WORLD]);
+    // an answer with a third part holds only once a command matching it has run (a read-back after the send)
+    const now = [...(input.world ?? []), ...JOB_WORLD].filter(([, , after]) => !after || ran.some((c) => new RegExp(after).test(c)));
+    ran.push(command);
+    return pretend(command, now.map(([words, out]) => [words, out] as [string, string]));
   };
+  const ran: string[] = [];
   const chat = chatOf(input as Case);
   // a job has 250 steps a run (src/jobs.ts JOB_MAX_STEPS): enough here that the step limit doesn't end it mid-work
   const first = await reply({}, chat, standIn, 16, false, undefined, job);

@@ -167,6 +167,8 @@ const one = (c: string): string => {
   if (/\bemplio plan\b/.test(c)) return "Checklist saved.";
   if (/\bemplio (search|history search)\b/.test(c)) return "No matches.";
   if (/\bemplio history show\b/.test(c)) return "(nothing in it beyond what you already have)";
+  // a job's own chat: nothing more than its line in the note says, until it reports
+  if (/\bemplio threads show\b/.test(c)) return "Its brief, then its steps so far. No report yet if it's still working; a done one's report is the last message here.";
   if (/\bemplio apps list\b/.test(c)) return "gmail (connected)\ngooglesheets (connected)\nzoho_books (connected)\nwhatsapp (connected)";
   if (/\bemplio apps actions\b/.test(c))
     return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\nzoho_books.get_order  One order by number\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row\ngooglesheets.update_values  Change cells in a range\ngooglesheets.delete_rows  Delete rows by number";
@@ -254,6 +256,10 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const key = crypto.randomUUID();
   const began = Date.now();
   const { steps, response } = await generateText({
+    // many evals at once (run-all.ts): a dropped connection now and then shouldn't end a case
+    maxRetries: 6,
+    // a request that never answers fails the case instead of holding the run open
+    abortSignal: AbortSignal.timeout(600_000),
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
     system: (job ? jobSystem(b, job) : system(b, round)).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
@@ -312,7 +318,8 @@ function fakeServer() {
       const a = (await req.json()) as Ask;
       const answer = answering.get(key);
       const out = answer ? answer(asCommand(a)) : "";
-      return Response.json({ out: a.args ? asData(a, out) : out, code: 0 });
+      // an empty folder is an empty list to Python, not the words "(no output)"
+      return Response.json({ out: a.args ? asData(a, out) : a.ls !== undefined && out === "(no output)" ? "" : out, code: 0 });
     },
   });
   server.unref(); // the stand-in server mustn't keep the eval run open once it's done
@@ -330,9 +337,14 @@ async function runPython(key: string, code: string, restart: boolean, answer: An
     stderr: "pipe",
     env: { PATH: process.env.PATH!, HOME: process.env.HOME!, EMPLIO_WORK: work, EMPLIO_FAKE: `http://127.0.0.1:${fakeServer().port}/${key}`, EMPLIO_FAKE_LIB: FAKE, EZ_KEY: "eval" },
   });
-  const timer = setTimeout(() => p.kill(), 120_000);
-  const [out, err, exitCode] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  // a run that hangs ends the case's step, not the whole eval: its pipes can stay open after the kill (a session
+  // process it started holds them), so the wait itself is cut off too
+  let timer: Timer | undefined;
+  const cut = new Promise<null>((done) => (timer = setTimeout(() => (p.kill(), done(null)), 120_000)));
+  const ended = await Promise.race([Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]), cut]);
   clearTimeout(timer);
+  if (!ended) return { exitCode: 124, output: "(stopped after 2 minutes)" };
+  const [out, err, exitCode] = ended;
   // the server's /work, as a person's own computer maps it back
   return { exitCode, output: (out + err).replaceAll(work, "/work").trim() || "(no output)" };
 }

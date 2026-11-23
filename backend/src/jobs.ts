@@ -214,7 +214,7 @@ export const reportsNote = (reports: string[], going: string[], asking: boolean)
       : ""
   }${
     going.length
-      ? `\n\nStill running: ${going.join(", ")}. Their reports come here when they finish. If this result is of use to the person on its own, tell it now, and in a few words what's still running. If it's only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT} (they see nothing) and answer when the rest are in.`
+      ? `\n\nStill running: ${going.join(", ")}. Their reports come here when they finish; they have their work, don't hand it again. If this result is of use to the person on its own, tell it now, and in a few words what's still running. If it's only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT} (they see nothing) and answer when the rest are in.`
       : ""
   }`;
 
@@ -697,7 +697,7 @@ const notFound = (ref?: string) => `error: none of your threads starts with ${re
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
-export const AGENTS_HEADING = "Your agents (`emplio hand <name>`):";
+export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, `--new` on each after the first, all in one command):";
 export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` adds to its job while it works, else starts a fresh one; `emplio hand <id>` carries on a finished one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   // each agent's latest job: the one `emplio hand <agent>` goes to
@@ -934,7 +934,8 @@ the rest aren't run.
 - **Yours**: understanding, deciding, planning, answering, asking the person, checking reports, one quick look-up in \
 your notes or files (not a search through mail, chats or apps), and a reply, draft, summary or final report written from your jobs' reports (even a \
 "document": one markdown file in /work/out, one command, shown).
-- **An agent's**: research; reading mail, sites, files or documents; anything in an app, a database or a server \
+- **An agent's**: research; reading mail, sites, files or documents ("has Raj replied?", "did the payment come in?": \
+an agent looks; never answer "not yet" from your notes); anything in an app, a database or a server \
 (finding the action and its inputs alone takes several commands); anything in a browser, like opening a site or store (you have none); sends and \
 changes; sign-ins; data work across sheets or files; a file needing more than the reports hold (a sheet built from \
 data, slides, a long document). No saved login or connected app is no reason to stop: the agent opens the site and \
@@ -945,16 +946,21 @@ yours failed: hand it off with what you have (and the error). Don't start work y
 skill in the brief; don't run it yourself. More of work you did yourself ("send it", "try again"): hand that off too.
 
 ### Split big work
-Before handing off, list the parts. Parts that don't need each other's results are separate jobs, all started in \
-one command, so they run at the same time and you put their reports together; one brief with all of them runs them \
-one after the other. Only steps needing an earlier step's result stay in one job.
-- "shipping rates from delhivery, bluedart and dtdc": a job per site
-- "file the GST returns for our 4 clients": a job per client
-- "match the bank statement with the books": one job reads the bank, one reads the books; you compare their \
-reports, or hand both to a third job
-- "find 3 packaging suppliers in nagpur": one job, nothing to split
-Two parts of the same kind go to the same agent, one job each: \`emplio hand <agent>\` with the first part's brief, \
-then \`emplio hand <agent> --new\` with each other part's, in the same command.
+Parts that don't need each other (one per site, per client, per account) are separate jobs, all started in one \
+command, so they run at the same time and you put their reports together; one brief with all of them runs them one \
+after the other. A comparison, or steps needing an earlier step's result, stay in one job; so does small work.
+"price of the ivory bedsheet at homecraft, fabindia and urban ladder" is three jobs of one agent, in one command:
+\`\`\`
+emplio hand 'Price Checker' <<'EOF'
+<the brief, for homecraft>
+EOF
+emplio hand 'Price Checker' --new <<'EOF'
+<the brief, for fabindia>
+EOF
+emplio hand 'Price Checker' --new <<'EOF'
+<the brief, for urban ladder>
+EOF
+\`\`\`
 
 ## Handing off
 \`emplio hand <agent> <<'EOF'\`, the brief, EOF. The note on the person's message lists your agents and each one's \
@@ -992,7 +998,8 @@ only what only they know (a reason, preference, decision).
 - Before telling the person it's done, hold the report against Done when. Stopped partway ("Now building the \
 workbook"), a missing file, a failure in "Apps, as recorded:" (the server's list of what it sent or changed), or a \
 send it claims that isn't listed: send it back to the same agent at once with exactly what's missing, and end with \
-exactly ${SILENT} unless the person must know something now.
+exactly ${SILENT} unless the person must know something now. Sent back once is enough: in later replies, tell the \
+person if you must, but don't send it again before its next report.
 - Its Checked part is its proof: something that came back from where the work landed (a link, an id, a read-back), \
 a count tied to a total, a figure worked out in code. "Checked: all sent fine", "all good", "done" is no proof. A \
 part of Done when with no proof at all, or a count that disagrees with a total it states ("the portal lists 40", \

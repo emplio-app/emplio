@@ -39,8 +39,10 @@ background agent files each note where it belongs (`background-round`).
 From `backend/`, with `OPENROUTER_API_KEY` set (in `.env`):
 
 ```bash
-bun run evals                                  # every behaviour at once, each in its own process (~3 min)
-bun run evals manager job-report               # some of them; logs in .evals/<name>.log
+bun run evals                                  # every behaviour at once, each in its own process (~2 min), on this machine:
+                                               # scores printed, each answer in .evals/<name>.jsonl, logs in .evals/<name>.log
+bun run evals manager job-report               # some of them
+EVAL_SEND=1 bun run evals                      # send the runs to Braintrust too (the free plan stops taking them after a while)
 EVAL_CONCURRENCY=8 bun run evals               # fewer cases at a time per eval (default 24), if the provider throttles
 bun run eval evals/manager                     # one, the plain way
 bun run eval evals/next-step-card              # one
@@ -50,6 +52,7 @@ bun run eval evals --no-send-logs              # no Braintrust account: scores p
 bun run eval evals/reader                      # the cheapest one, to try things out
 bun evals/failures.ts <experiment name>        # what failed, and what the model wrote
 EVAL_DUMP=a.jsonl bun run eval evals/manager --no-send-logs   # keep each answer on disk
+bun evals/manager/report.ts .evals/manager.jsonl .evals/manager.jsonl   # by category, then what failed
 bun evals/manager/report.ts a.jsonl b.jsonl    # two runs side by side, by category, then what failed in b
 bun evals/workday/report.ts a.jsonl b.jsonl    # the same for workday (EVAL_TRIALS=1 for a quick try)
 ```

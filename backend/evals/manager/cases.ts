@@ -81,7 +81,8 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("do the same for november sales in swipe")],
-    expect: { hand: true, agent: ["Data Entry"], cont: true, say: ["november"] },
+    // a new month after a finished job: the same job by id or a fresh one (cheaper: no old chat to carry)
+    expect: { hand: true, agent: ["Data Entry"], say: ["november"] },
   },
   {
     name: "more from the suppliers just found",
@@ -373,7 +374,8 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("compare october sales in swipe with what's in zoho books and list every invoice that's missing or different")],
-    expect: { hand: true, split: 2, say: ["october"] },
+    // a comparison needs both lists at once: one job is right, two (then a compare) is fine too
+    expect: { hand: true, say: ["october"] },
   },
   {
     name: "one check per site",
@@ -400,12 +402,12 @@ export const cases = (): Case[] => [
     expect: { hand: true, agent: ["Supplier Finder"] },
   },
   {
-    name: "two lists to compare (held out)",
+    name: "two dashboards (held out)",
     category: "split",
     source: "written",
     business: team,
-    chat: [person("check which items in our shopify store are missing from the zoho books item list")],
-    expect: { hand: true, split: 2 },
+    chat: [person("download october's shipping invoices from the delhivery and the bluedart dashboards")],
+    expect: { hand: true, split: 2, say: ["october"] },
   },
   // proof
   {
