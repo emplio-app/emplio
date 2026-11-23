@@ -8,7 +8,7 @@
 // said is its report, which goes back to whoever started it (a "Question:" report climbs to Emplio, which asks the
 // person). Its row in `jobs` is the hidden record of the thread: who started it, its agent, its status and its report.
 import { generateId, type UIMessage } from "ai";
-import { FROM_EMPLIO, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, NOTHING_TO_KEEP, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { FROM_EMPLIO, SILENT, HIDDEN_PART, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, NOTHING_TO_KEEP, runRef, type Approval, type AskCard, type ChatJob, type JobInfo, type JobSummary, type PlanStep, type WorkingJob } from "@emplio/shared";
 import { record } from "./activity";
 import { detailOf } from "./approvals";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
@@ -21,10 +21,11 @@ import { db } from "./db";
 import { actionRuns, conversations, jobs, messages } from "./db/schema";
 import { addTools, agentPrompt, agentsCommand, findAgent, flags, listAgents, skillsUsed, toolsUsed } from "./agents";
 import { canReopen, liveView, REOPEN_MS } from "./browser";
-import { SILENT } from "./reader";
 import { timezoneOf, when } from "./time";
 import { isReplying } from "./live";
 import { cloud } from "./cloud";
+import { planText } from "./plan";
+import { badEnding, DONE_BUT, doneProblem, MAX_PUSHES, REPORT_SHAPE, SHAPE_NOTE, shapeProblem, type Ending } from "./checks";
 
 type Action = JobInfo["actions"][number];
 
@@ -78,7 +79,7 @@ const NUDGED = /^\[From Emplio\] (\[Keep tools\] )?(Your report has gone|Before 
 const SMALL_WORK = 2;
 // a new piece of work handed to a job; a restart's or the step limit's "carry on" goes on with the one before
 const brief = (m: { role: string; parts: unknown }) =>
-  m.role === "user" && textOf(m).startsWith(FROM_EMPLIO) && ![RESTARTED, CARRY_ON].includes(textOf(m).slice(FROM_EMPLIO.length));
+  m.role === "user" && textOf(m).startsWith(FROM_EMPLIO) && ![RESTARTED, CARRY_ON].includes(textOf(m).slice(FROM_EMPLIO.length)) && !CHECKS.test(textOf(m).slice(FROM_EMPLIO.length));
 export const nudged = (msgs: { role: string; parts: unknown }[]) => {
   const at = msgs.length - 1 - [...msgs].reverse().findIndex(brief);
   if (at === msgs.length) return true;
@@ -102,8 +103,28 @@ export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
       return /^Saved tool [a-z][a-z0-9_]*\.\w+ \(/m.test(out) || wrote;
     });
 };
+// its last run answered Emplio, not the person writing in its chat: a report, whose shape is checked
+const toEmplio = async (w: Row) => !!w.chatId && textOf([...(await loadMessages(w.chatId))].reverse().find((m) => m.role === "user") ?? { parts: [] }).startsWith(FROM_EMPLIO);
+// the report's shape is asked for once: a job that still doesn't write it is let through, its report as it is
+const askedShape = async (w: Row) => (await loadMessages(w.chatId!)).some((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO + SHAPE_NOTE.slice(0, 30)));
+// a Done its checklist or last command says isn't (checks.ts doneProblem)
+async function doneCheck(w: Row, report: string) {
+  const msgs = await loadMessages(w.chatId!);
+  const plan = (await db.query.conversations.findFirst({ where: eq(conversations.id, w.chatId!), columns: { plan: true } }))?.plan ?? [];
+  const last = actionsIn(msgs).at(-1);
+  const lastSent = textOf([...msgs].reverse().find((m) => m.role === "user") ?? { parts: [] });
+  return doneProblem(report, {
+    open: plan.filter((s) => s.status !== "done").map((s) => s.text),
+    lastFailed: last && (last.error || (last.exitCode ?? 0) !== 0) ? last.description : null,
+    askedBefore: lastSent.startsWith(FROM_EMPLIO + DONE_BUT),
+  });
+}
+// how many times this piece of work was sent back by the checks on its last run (checks.ts)
+const pushed = new Map<string, number>();
+// what the checks send: none of it is new work
+const CHECKS = /^(Your run ended without a report|Your last step only thought|Your last message was cut off|You wrote code into your message|Your last message only said|Your report isn't in the shape|Your report says Done, but)/;
 export const CARRY_ON =
-  "That run used up its steps, so this is a fresh one: carry on from where you stopped. What you found is in your files; keep building the result as you go.";
+  "That run used up its steps, so this is a fresh one. Your job card has the work and your checklist: carry on with the next step not ticked, without redoing what's done. What you found is in your files and your notes; keep building the result as you go.";
 // What happens to a report when a job's reply ends: wake Emplio, keep it for its next reply, or nothing.
 // interrupted: a message is waiting to go into the job's chat, so it hasn't finished.
 export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; interrupted: boolean }) =>
@@ -112,6 +133,8 @@ export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; 
 const MAX_RUNNING = 10; // per chat at once, every level: a runaway plan can't fan out forever
 const LISTED = 8; // threads on Emplio's list
 const SIDEBAR_DAYS = 7;
+// a job's steps per run; past them it carries on in a fresh run, within JOB_MINUTES
+export const JOB_MAX_STEPS = 250;
 export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
 const WAIT_MS = 10 * 60_000;
 
@@ -129,8 +152,13 @@ each time is your report, which goes back to whoever started you, and the person
     ? "You are the one who does the work: do it yourself, browser included. Only a big part that doesn't depend on the rest may go off with `emplio hand <agent or myself> <<'EOF'`, a brief (the work, the goal, what's known, done when), then EOF; `myself` is a plain copy of you, and you can't make agents. If one comes back with a question, answer it with `emplio hand <its id>` when you can; if only a person can, end with that question yourself (below)."
     : "You are the one who does the work: do it yourself, browser included; you can't hand off."
 }
-Do the task the newest brief asks for and check the result: your instructions and skills say how you work, \
-never what to do instead, so a brief unlike your usual work or your last one is still the job. Long reading goes into files, not your chat: your chat gets folded into short \
+Your job card, at the end of these instructions, holds the work on hand: its brief word for word and everything \
+added to it since. Do all of it and check the result: an addition adds to the work and changes it only where it \
+says so ("instead", "stop", "drop"), never replacing the rest. Your instructions and skills say how you work, never \
+what to do instead, so a brief unlike your usual work or your last one is still the job. Work of more than a few \
+steps: write its checklist first (\`emplio plan set\`, a step for each part of the brief and its additions) and tick \
+each step as you finish it (\`emplio plan done <n>\`); the person follows your work there, and it stays on your card. \
+Work silently: no messages between commands. Write words once, at the end: your report. Long reading goes into files, not your chat: your chat gets folded into short \
 notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
 chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
 small file in your folder (every item with its page, say), and work from that file; never print a whole document \
@@ -146,12 +174,17 @@ risk="reads" or "changes" or "spends")\` for each, modular, reusable and generic
 out about one site or app (its address, the field with the answer) goes in a small tool of that site's area that calls \
 the general one with those built in. A tool that failed: fix that same tool and save it again under its name, never a \
 second one next to it. Judgment the code can't hold (when to ask first, how to word things) goes in a \
-skill's SKILL.md. Then end with a report for whoever started you, which is checked against what you were asked:
-- Whether it's all done, and if not, what's left. Never say done for work you've only started.
-- What you did and the outcome, with every id, path, link, amount and name exactly as it came back.
-- Files you made, by name: leave them in /work/out (they stay there and are stored in Files; Emplio shows them to the person).
-- Anything you couldn't do and why, with the exact error, and what a person would need to decide or provide.
-No preamble. Don't claim what you didn't verify. If the task is unclear, do the most sensible reading and say \
+skill's SKILL.md.
+Getting it right: work out every number, total and date in code, never in your head. After you send or change \
+something outside (an email, a post, a record in an app), read it back from where it landed before counting it \
+done. A total that a site, app or file states ("52 invoices", "1-50 of 686") is a check: your count must match it, \
+or find out why. Copy ids, invoice numbers and amounts exactly; one that looks wrong is flagged, never fixed. Never \
+make up data you couldn't get: say it's missing.
+Then end with your report for whoever started you, which is checked against your job card, in English (quote the \
+person's words and names as they wrote them, in any language; Emplio answers them in theirs), in exactly this shape \
+(files you made stay in /work/out, stored in Files; Emplio shows them to the person):
+${REPORT_SHAPE}
+Never say Done for work you've only started. No preamble. Don't claim what you didn't verify. If the task is unclear, do the most sensible reading and say \
 which one you chose. If you truly can't go on without a decision or a fact only a person has (guessing would \
 be wrong or risky), ${
   depth === 1 && from
@@ -164,12 +197,13 @@ what you've done so far.`
     : `stop and make your report start with "Question:": exactly what you need and why, then what you've done so far. \
 The answer comes back to you as a message and you carry on.`
 } Whoever started you may also \
-send you a message while you work: it arrives as a new message, and it wins over your brief where they differ.
+send you a message while you work: it arrives as a new message and joins your job card. Do it as well; where it \
+contradicts the brief, it wins on that point only.
 An app action that sends or changes something (an email, a payment, a post) shows the person an Allow card on \
 your line in their chat and waits for their tap: just run it. If they don't answer or say no, it says so; report that and \
 what was ready, without trying another way.
 Other threads may be running at the same time on the same computer: use your own folder under /work/tmp, and \
-don't use the browser unless your task says to. Don't run \`emplio plan\`: the checklist is Emplio's, for the person.`;
+don't use the browser unless your task says to.`;
 
 // What Emplio is told when reports come in that it didn't wait for. `going`: its threads still running, which may be
 // other parts of the same request, so it can hold back until they're in.
@@ -180,7 +214,7 @@ export const reportsNote = (reports: string[], going: string[], asking: boolean)
       : ""
   }${
     going.length
-      ? `\n\nStill running: ${going.join(", ")}. Their reports come here when they finish. If this result is of use to the person on its own, tell it now, and in a few words what's still running. If it's only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT} (they see nothing) and answer when the rest are in.`
+      ? `\n\nStill running: ${going.join(", ")}. Their reports come here when they finish; they have their work, don't hand it again. If this result is of use to the person on its own, tell it now, and in a few words what's still running. If it's only a piece the others complete (one half of a comparison, one part of a single file or answer), end instead with exactly ${SILENT} (they see nothing) and answer when the rest are in.`
       : ""
   }`;
 
@@ -297,6 +331,7 @@ export async function jobReply(chatId: string) {
     unattended: await unattended(w.conversationId),
     until: deadline(w.id),
     began: (stop: () => void) => began(w, stop),
+    card: async () => jobCard(await loadMessages(chatId), (await db.query.conversations.findFirst({ where: eq(conversations.id, chatId), columns: { plan: true } }))?.plan),
   };
 }
 
@@ -345,19 +380,27 @@ async function began(w: Row, stop: () => void) {
   // its last words are its report: a question waits for an answer
   // capped: the run ended on the step limit, mid-work
   // carded: it asked the person with a card (emplio ask), which shows over their chat box and sends their answer here
-  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false, carded: AskCard[] = []) => {
+  return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false, capped = false, carded: AskCard[] = [], ending?: Ending) => {
     const timeLeft = Date.now() < until - 60_000;
     // the tools and skills this run saved or used join its agent's list now, so its next job has them up front
     if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
     // told something new while it ran (carryOn), the next reply has begun on the job: that one ends it, with its report
     if (live.get(w.id)?.run !== run) return;
-    if (capped && outcome === "completed" && !interrupted && timeLeft) {
+    // checks on how it ended and on its report's shape (checks.ts): sent back, MAX_PUSHES times at most a piece of work
+    const pushes = pushed.get(w.id) ?? 0;
+    const sendBack =
+      !capped && outcome === "completed" && !interrupted && !carded.length && pushes < MAX_PUSHES
+        ? (ending && badEnding(ending)) || (asks(answer) || !answer || !(await toEmplio(w)) ? null : ((await askedShape(w)) ? null : shapeProblem(answer)) ?? (await doneCheck(w, answer)))
+        : null;
+    if (sendBack) pushed.set(w.id, pushes + 1);
+    else pushed.delete(w.id);
+    if ((capped || sendBack) && outcome === "completed" && !interrupted && timeLeft) {
       // a new entry for the next run, which ends the old one's waits when it ends; the old send() leaves it be
       carryUntil.set(w.id, until);
       live.delete(w.id);
       track(w.id).done.then(e.end);
       const told = owed.has(w.id);
-      void send(w, CARRY_ON);
+      void send(w, capped ? CARRY_ON : sendBack!);
       if (!told) owed.delete(w.id);
       return;
     }
@@ -409,11 +452,11 @@ export function cardsIn(chunk: { type: string; output?: unknown }, shown: Set<st
 // A message to the job from whoever started it, as the next message in its chat: after the reply running there,
 // if one is (steered: it wraps up after its current command).
 // `run`: the prompt's message id, which marks the run in the job's chat (runOf)
-async function send(w: Row, text: string, run = generateId(), hidden = false) {
+async function send(w: Row, text: string, run = generateId(), hidden = false, update = false) {
   const e = track(w.id);
   if (w.depth === 1) owed.add(w.id);
   const person = await personFor(w.workspaceId, w.userId);
-  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }, ...(hidden ? [{ type: HIDDEN_PART, data: true } as const] : [])] as UIMessage["parts"] };
+  const message: UIMessage = { id: run, role: "user", parts: [{ type: "text", text: FROM_EMPLIO + text }, ...(hidden ? [{ type: HIDDEN_PART, data: true } as const] : []), ...(update ? [{ type: UPDATE_PART, data: true } as const] : [])] as UIMessage["parts"] };
   const log = { error: (obj: unknown, msg: string) => console.error(`job ${w.id}: ${msg}`, obj) };
   let error: string | null = null;
   try {
@@ -489,6 +532,53 @@ export function openAsks(msgs: { role: string; parts: unknown }[]): AskCard[] {
 const asks = (report: string) => /^\W*question\b/i.test(report) && !/^\W*question:\s*(none|no)\b/i.test(report);
 const textOf = (m: { parts: unknown }) =>
   ((m.parts as { type?: string; text?: string }[]) ?? []).flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("");
+
+// Marks what Emplio sent a job while it worked: an addition to the work on hand, not new work (jobCard)
+export const UPDATE_PART = "data-update";
+const isUpdate = (m: { parts: unknown }) => ((m.parts as { type?: string }[]) ?? []).some((p) => p.type === UPDATE_PART);
+const CARD_BRIEF = 8_000;
+const CARD_ADDED = 2_000;
+const CARD_ADDITIONS = 12;
+const capped = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}\n[… cut here; all of it is in your chat]` : s);
+
+// The job card: the work on hand, rebuilt from the job's chat each run and after each fold, so neither its notes nor
+// a fresh run lose it (a job once forgot its brief after a fold and took an update for the whole task). The latest
+// piece of work Emplio handed it, word for word, what Emplio added while it worked and what the person wrote since,
+// and its checklist (emplio plan, kept on its chat).
+const work = (m: { role: string; parts: unknown }) => brief(m) && !NUDGED.test(textOf(m));
+// where the work on hand starts: the latest piece of work Emplio handed it, not an addition to one
+const workAt = (msgs: { role: string; parts: unknown }[]) => {
+  let at = msgs.length - 1;
+  while (at >= 0 && !(work(msgs[at]!) && !isUpdate(msgs[at]!))) at--;
+  return at;
+};
+export function jobCard(msgs: { role: string; parts: unknown }[], steps: PlanStep[] | null | undefined) {
+  const at = workAt(msgs);
+  if (at < 0) return "";
+  const added = msgs.slice(at + 1).flatMap((m) => {
+    if (m.role !== "user") return [];
+    const text = textOf(m).trim();
+    if (work(m) && isUpdate(m)) return [`From Emplio: ${capped(text.slice(FROM_EMPLIO.length).trim(), CARD_ADDED)}`];
+    // the person's own words; bracketed lines are ours (reports, restarts, nudges)
+    return text && !text.startsWith("[") ? [`From the person: ${capped(text, CARD_ADDED)}`] : [];
+  });
+  const shown = added.slice(-CARD_ADDITIONS);
+  return [
+    "## Your job card",
+    "Kept for you outside your chat: it stays as it is when your chat is folded into notes or a fresh run starts. It's the work on hand, done when all of it is done.",
+    "### The work, word for word",
+    capped(textOf(msgs[at]!).slice(FROM_EMPLIO.length).trim(), CARD_BRIEF),
+    ...(shown.length
+      ? [
+          "### Added since, oldest first (each adds to the work, and changes it only where it says so)",
+          ...(added.length > shown.length ? [`(${added.length - shown.length} earlier ones are in your chat)`] : []),
+          ...shown.map((a, i) => `${i + 1}. ${a}`),
+        ]
+      : []),
+    "### Your checklist",
+    steps?.length ? planText(steps) : "None yet. More than a few steps: write one now with `emplio plan set`.",
+  ].join("\n");
+}
 
 // The messages of one run: from its prompt up to the next piece of work from Emplio (a restart cutting it in two
 // doesn't end it). null while the prompt isn't in the chat.
@@ -585,7 +675,7 @@ export const agentNudge = (w: Pick<Row, "status" | "agent" | "depth">, bare = fa
     : !w.agent
       ? "\n[A plain copy of you did this. If this kind of work will come back, make an agent for it now so the next one goes to it, with its instructions from how this went: `emplio agents add` (emplio agents help). A true one-off: ignore this.]"
       : bare
-        ? `\n[${w.agent} has no instructions yet, only its brief each time. Write them now from how this went: emplio agents update ${w.agent} - <<'EOF' (the steps that worked, what to check, what it reports) EOF]`
+        ? `\n[${w.agent} has no instructions yet, only its brief each time. Write them now from how this went: emplio agents update ${w.agent} - <<'EOF' (the steps that worked, what to check, what it reports) EOF. They're for every job of this kind: general steps only, never this job's names, ids, amounts or clients.]`
         : "";
 
 const bareAgent = async (w: Row) =>
@@ -607,8 +697,8 @@ const notFound = (ref?: string) => `error: none of your threads starts with ${re
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
-export const AGENTS_HEADING = "Your agents (`emplio hand <name>`):";
-export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` carries on its job; `--new` starts a fresh one):";
+export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, `--new` on each after the first, all in one command):";
+export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` adds to its job while it works, else starts a fresh one; `emplio hand <id>` carries on a finished one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   // each agent's latest job: the one `emplio hand <agent>` goes to
   const all = await db
@@ -631,10 +721,10 @@ const USAGE = `usage: emplio hand <agent> [--new] [--description <what it does>]
        <brief; its first line names the work in a few words>
        EOF
 Work goes to an agent. In this chat each agent keeps one job going:
-  emplio hand <agent>          to that agent's job here: it carries on with everything it knew (busy, it reads this
-                               after its current step); with no job here yet, its first one starts
-  emplio hand <agent> --new    a fresh job, for work unrelated to the one it has here; not while that one is still
-                               working or waiting on an answer
+  emplio hand <agent>          while that agent's job here is working or waiting on an answer: adds to it (it reads
+                               this after its current step); otherwise a fresh job
+  emplio hand <id>             carries on that finished job with everything it knew: the same piece of work only
+  emplio hand <agent> --new    a second job for the agent while its first is still working
   emplio hand "<New Agent>" --description "<the kind of work it does>"
                                no agent fits: it's made, and its first job starts
 A new job sees nothing of this chat: the brief must say everything it needs.
@@ -663,7 +753,8 @@ async function carryOn(who: Who, conversationId: string, w: Row, brief: string):
   }
   track(w.id);
   const run = generateId();
-  void send(w, brief, run);
+  // while it works, this adds to the work on hand (its job card); finished, it's new work
+  void send(w, brief, run, false, busy);
   record({ ...who, conversationId, kind: "job", summary: `Carried on "${w.name}"`, detail: { job: w.id, pick: "carry on", agent: w.agent, brief: brief.slice(0, 4000) } });
   return busy
     ? { text: `sent to ${short(w.id)} "${w.name}"${w.agent ? ` (${agentName(w.agent)})` : ""}: it reads it after the step it's on` }
@@ -737,9 +828,10 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       const current = agent
         ? (await db.select().from(jobs).where(and(mine(who, conversationId, caller), eq(jobs.agent, agent.slug), isNotNull(jobs.chatId))).orderBy(desc(jobs.createdAt)).limit(1))[0]
         : undefined;
-      if (current && !fresh) return carryOn(who, conversationId, current, brief);
-      if (current && (current.status === "working" || current.status === "asking"))
-        return { text: `error: ${agent!.name}'s job "${current.name}" is still ${current.status === "asking" ? "waiting on an answer" : "working"}. Nothing was started: send this to it without --new (it reads it after its current step), or wait for it to finish.` };
+      // still at it: this adds to its work. Finished: a fresh job (a finished one carries on only by its id), so one
+      // job doesn't pile up unrelated work: a job once went from LinkedIn posts to X sign-in to a video, 446 steps
+      const active = current && (current.status === "working" || current.status === "asking");
+      if (active && !fresh) return carryOn(who, conversationId, current, brief);
       const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).where(and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")));
       if (n! >= MAX_RUNNING) return { text: `error: ${MAX_RUNNING} threads are already running in this chat; wait for some first` };
       const name = brief.split("\n")[0]!.trim().slice(0, 80);
@@ -842,7 +934,8 @@ the rest aren't run.
 - **Yours**: understanding, deciding, planning, answering, asking the person, checking reports, one quick look-up in \
 your notes or files (not a search through mail, chats or apps), and a reply, draft, summary or final report written from your jobs' reports (even a \
 "document": one markdown file in /work/out, one command, shown).
-- **An agent's**: research; reading mail, sites, files or documents; anything in an app, a database or a server \
+- **An agent's**: research; reading mail, sites, files or documents ("has Raj replied?", "did the payment come in?": \
+an agent looks; never answer "not yet" from your notes); anything in an app, a database or a server \
 (finding the action and its inputs alone takes several commands); anything in a browser, like opening a site or store (you have none); sends and \
 changes; sign-ins; data work across sheets or files; a file needing more than the reports hold (a sheet built from \
 data, slides, a long document). No saved login or connected app is no reason to stop: the agent opens the site and \
@@ -851,18 +944,33 @@ asks the person to save the login when needed. A question doesn't keep work with
 yours failed: hand it off with what you have (and the error). Don't start work you'll have to hand off.
 - A matching skill is an agent's work: hand it to the agent that has it (your agents list says which), naming the \
 skill in the brief; don't run it yourself. More of work you did yourself ("send it", "try again"): hand that off too.
-- Independent parts go to different agents, all started in one command; steps needing the last one's result stay \
-in one job.
+
+### Split big work
+Parts that don't need each other (one per site, per client, per account) are separate jobs, all started in one \
+command, so they run at the same time and you put their reports together; one brief with all of them runs them one \
+after the other. A comparison, or steps needing an earlier step's result, stay in one job; so does small work.
+"price of the ivory bedsheet at homecraft, fabindia and urban ladder" is three jobs of one agent, in one command:
+\`\`\`
+emplio hand 'Price Checker' <<'EOF'
+<the brief, for homecraft>
+EOF
+emplio hand 'Price Checker' --new <<'EOF'
+<the brief, for fabindia>
+EOF
+emplio hand 'Price Checker' --new <<'EOF'
+<the brief, for urban ladder>
+EOF
+\`\`\`
 
 ## Handing off
 \`emplio hand <agent> <<'EOF'\`, the brief, EOF. The note on the person's message lists your agents and each one's \
 job in this chat. Every piece of work goes to an agent; there is no plain copy of you.
-1. **Its kind of work, same purpose as its job here** (more of it, the next one, a fix, a gap, a change while it \
-runs, an answer to its question; "too", "also", "like you did"): \`emplio hand <agent>\`. That job carries on with \
-everything it found (running, it reads it after its current step). Its name doesn't matter: "Post one reply" and \
-"list all our comments" on one forum are one job.
-2. **Its kind of work, new goal** (a subject or audience its job found nothing for: would that job's findings help? \
-No → new): \`emplio hand <agent> --new\`; not while its job here is working or waiting on an answer.
+1. **Its job here is still working or waiting on an answer**: \`emplio hand <agent>\` adds this to it (it reads it \
+after its current step).
+2. **Its job here has finished**: \`emplio hand <agent>\` starts a fresh job, so one job never piles up unrelated work. \
+Only the same piece of work goes back to the finished job, by its id (\`emplio hand <id>\`, ids in the note on the \
+person's message): a fix, a gap, a retry, "send it", the next batch of the same list, an answer it asked for. A new \
+goal, site, client or document is a fresh job, even for the same agent.
 3. **No agent fits**: make one named like a job title: \`emplio hand "Invoice Chaser" --description "Chases unpaid \
 invoices by email" <<'EOF'\`. One of yours is close: use it (\`emplio agents update\` widens it).
 
@@ -890,7 +998,14 @@ only what only they know (a reason, preference, decision).
 - Before telling the person it's done, hold the report against Done when. Stopped partway ("Now building the \
 workbook"), a missing file, a failure in "Apps, as recorded:" (the server's list of what it sent or changed), or a \
 send it claims that isn't listed: send it back to the same agent at once with exactly what's missing, and end with \
-exactly ${SILENT} unless the person must know something now.
+exactly ${SILENT} unless the person must know something now. Sent back once is enough: in later replies, tell the \
+person if you must, but don't send it again before its next report.
+- Its Checked part is its proof: something that came back from where the work landed (a link, an id, a read-back), \
+a count tied to a total, a figure worked out in code. "Checked: all sent fine", "all good", "done" is no proof. A \
+part of Done when with no proof at all, or a count that disagrees with a total it states ("the portal lists 40", \
+"38 filed"): send it back at once with that part and how to check it, before telling the person anything. Proof \
+that's there is enough: don't ask for more. "Partly done" or "Blocked": pass on \
+what's left only if it needs the person; else send it back.
 - Check by reading the report and that record; doubts go back as a question. Don't open its files or redo its work.
 - Done: give the outcome with the file or link, not its steps. An agent that did its work wrong: fix its \
 instructions too (\`emplio agents update\`).
@@ -910,8 +1025,14 @@ it changes your work.
 Your saved specialists, each with its own instructions, skills, tools and lessons (saved for it automatically).
 - One agent per kind of work, named like a job title ("Supplier Finder"), not the task ("Weekly Task Summary") or \
 one instance ("Flour suppliers Pune"). Widen the closest rather than make a near-copy; archive unused ones.
+- The right size is a role someone could be hired for, with work most weeks: one app or one area of the business, \
+never one task. Too narrow → right: "Flight Fare Checker" → "Travel Desk"; "WhatsApp Chat Reader" and "WhatsApp \
+Group Poster" → "WhatsApp Assistant"; "Annual Filing Drafter" and "MCA Form Filler" → "Company Filings Clerk"; \
+"LinkedIn Invite Sender" and "LinkedIn Request Replier" → "LinkedIn Outreach"; "Menu Card Maker" → "Designer"; \
+"Invoice Maker" and "Payment Chaser" → "Accounts Assistant". Too broad: "Assistant", "Helper", "Operations". Before \
+making one, read your agents list by what each does, not by name: one that covers the kind of work gets it.
 - Level light (default) for reading, searching, sorting, drafting; strong where judgment matters (negotiating, a \
-tricky reply, a decision); \`--level strong\` raises one hand-off.
+tricky reply, a decision, and money, tax, legal or compliance work: books, reconciliations, filings, contracts); \`--level strong\` raises one hand-off.
 - Repeating work is a repeating task naming its agent (\`emplio tasks add "Find new flour suppliers" --every \
 "0 9 * * 1" --agent "Supplier Finder"\`); a one-off for later uses \`--due\`. Runs nobody watches send or change \
 things only through the app actions listed in \`--actions\`; saving shows the person one card to allow them: say in \

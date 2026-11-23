@@ -4,7 +4,7 @@ import type { ModelMessage } from "ai";
 import type { Said } from "../emplio";
 import type { Case } from "./cases";
 
-export type Input = { chat: ModelMessage[]; world: [string, string][] };
+export type Input = { chat: ModelMessage[]; world: [string, string][]; job?: { agent: string; brief: string } };
 type Args = { input: Input; output: Said; expected: Case["expect"] };
 type Score = { name: string; score: number | null; metadata?: Record<string, unknown> };
 
@@ -20,7 +20,12 @@ export const readOf = (commands: string[]) =>
   );
 // a SKILL.md written or changed: by its full path, or from inside its folder (`cd .../skillset/<name> && cat > SKILL.md`)
 export const savedOf = (commands: string[]) =>
-  commands.flatMap((c) => (/(>|\btee)\s*\S*SKILL\.md|SKILL\.md'?\s*<</.test(c) ? [/skill(?:set|s)\/([\w-]+)/.exec(c)?.[1] ?? "(unnamed)"] : []));
+  commands.flatMap((c) =>
+    /(>|\btee)\s*\S*SKILL\.md|SKILL\.md'?\s*<</.test(c) ? [/skill(?:set|s)\/([\w-]+)/.exec(c)?.[1] ?? "(unnamed)"]
+    // a job keeps what worked as a tool (src/jobs.ts RULES: emplio.tools.save), which counts as saving how it's done
+    : /\btools[ .]save\b/.test(c) ? ["(tool)"]
+    : [],
+  );
 
 // The main number: it read the skill that fits (and no other) when there was one, and saved one exactly when the job called for it.
 export function rightCall({ output, expected }: Args): Score {
@@ -38,7 +43,8 @@ export function rightCall({ output, expected }: Args): Score {
 // It read the skill before doing any of the work, not after.
 export function readsFirst({ output, expected }: Args): Score {
   if (!expected.use) return { name: "reads_first", score: null };
-  const work = output.commands.findIndex((c) => !/^\s*emplio (plan|skills use)\b/.test(c));
+  // looking in its notes and chats first isn't the work
+  const work = output.commands.findIndex((c) => !/^\s*emplio skills use\b/.test(c) && !/^\s*(emplio (plan|search|history search|history show|files list|db tables)\b|ls\b|find\b)/.test(c));
   const read = output.commands.findIndex((c) => readOf([c]).includes(expected.use!));
   return { name: "reads_first", score: read >= 0 && (work < 0 || read <= work) ? 1 : 0, metadata: { read, work } };
 }

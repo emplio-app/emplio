@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote, PYTHON_DESCRIPTION, pythonInput } from "../src/chat";
 import { HEARTBEAT } from "../src/heartbeat";
-import { AGENTS_HEADING, THREADS_HEADING } from "../src/jobs";
+import { AGENTS_HEADING, RULES, THREADS_HEADING } from "../src/jobs";
 import { inPython, sandboxPrompt, type Session } from "../src/sandbox";
 import { DEFAULTS } from "../src/settings";
 
@@ -52,6 +52,27 @@ export const system = (b: Business, round: boolean | string) => [
   }),
   "This chat's id is ab12cd34.",
   ...(round ? [] : [mainChatNote(ctx)]),
+];
+
+// A job's chat (src/chat.ts withNotes, src/jobs.ts jobReply): the shared prompt as a job gets it, then its rules,
+// its agent and its job card, in the app's order.
+export type Job = { agent: string; card: string };
+export const jobSystem = (b: Business, job: Job) => [
+  emplioPrompt({
+    rules: agentRules(ctx, undefined, true),
+    computer: sandboxPrompt(session, true),
+    team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
+    connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
+    business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
+    userName: ctx.userName,
+    personal: "Runs the shop. Prefers short answers. Hindi or English.",
+    skills: b.skills?.length ? b.skills : ["(none yet)"],
+    agent: true,
+  }),
+  "This chat's id is ab12cd34.",
+  RULES(1, "9f00aa11"),
+  job.agent,
+  job.card,
 ];
 
 // The note the app puts on the person's message: today's date, the agents and the threads to carry on.
@@ -146,6 +167,8 @@ const one = (c: string): string => {
   if (/\bemplio plan\b/.test(c)) return "Checklist saved.";
   if (/\bemplio (search|history search)\b/.test(c)) return "No matches.";
   if (/\bemplio history show\b/.test(c)) return "(nothing in it beyond what you already have)";
+  // a job's own chat: nothing more than its line in the note says, until it reports
+  if (/\bemplio threads show\b/.test(c)) return "Its brief, then its steps so far. No report yet if it's still working; a done one's report is the last message here.";
   if (/\bemplio apps list\b/.test(c)) return "gmail (connected)\ngooglesheets (connected)\nzoho_books (connected)\nwhatsapp (connected)";
   if (/\bemplio apps actions\b/.test(c))
     return "zoho_books.list_invoices  List invoices (by date, status, customer)\nzoho_books.list_items  List items with stock and price\nzoho_books.get_order  One order by number\ngmail.search  Search mail\ngmail.send_email  Send an email\ngooglesheets.get_values  Read a sheet\ngooglesheets.append_row  Add a row\ngooglesheets.update_values  Change cells in a range\ngooglesheets.delete_rows  Delete rows by number";
@@ -184,7 +207,7 @@ export const pretend = (command: string, world: World = []): string =>
 
 // Emplio's reply to a chat whose last message is the person's (the note goes on it, as in the app).
 // session: a Python session to keep across replies (code mode; a conversation's), else one for this reply only
-export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round: boolean | string = false, session?: string): Promise<Said> {
+export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round: boolean | string = false, session?: string, job?: Job): Promise<Said> {
   const last = chat.map((m) => m.role).lastIndexOf("user");
   const asked = chat[last]!;
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
@@ -233,9 +256,13 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const key = crypto.randomUUID();
   const began = Date.now();
   const { steps, response } = await generateText({
+    // many evals at once (run-all.ts): a dropped connection now and then shouldn't end a case
+    maxRetries: 6,
+    // a request that never answers fails the case instead of holding the run open
+    abortSignal: AbortSignal.timeout(600_000),
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
-    system: system(b, round).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
+    system: (job ? jobSystem(b, job) : system(b, round)).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
     messages,
     tools: CODE_MODE ? { python } : { bash },
     stopWhen: [stepCountIs(maxSteps), () => stop],
@@ -291,7 +318,8 @@ function fakeServer() {
       const a = (await req.json()) as Ask;
       const answer = answering.get(key);
       const out = answer ? answer(asCommand(a)) : "";
-      return Response.json({ out: a.args ? asData(a, out) : out, code: 0 });
+      // an empty folder is an empty list to Python, not the words "(no output)"
+      return Response.json({ out: a.args ? asData(a, out) : a.ls !== undefined && out === "(no output)" ? "" : out, code: 0 });
     },
   });
   server.unref(); // the stand-in server mustn't keep the eval run open once it's done
@@ -309,9 +337,14 @@ async function runPython(key: string, code: string, restart: boolean, answer: An
     stderr: "pipe",
     env: { PATH: process.env.PATH!, HOME: process.env.HOME!, EMPLIO_WORK: work, EMPLIO_FAKE: `http://127.0.0.1:${fakeServer().port}/${key}`, EMPLIO_FAKE_LIB: FAKE, EZ_KEY: "eval" },
   });
-  const timer = setTimeout(() => p.kill(), 120_000);
-  const [out, err, exitCode] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  // a run that hangs ends the case's step, not the whole eval: its pipes can stay open after the kill (a session
+  // process it started holds them), so the wait itself is cut off too
+  let timer: Timer | undefined;
+  const cut = new Promise<null>((done) => (timer = setTimeout(() => (p.kill(), done(null)), 120_000)));
+  const ended = await Promise.race([Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]), cut]);
   clearTimeout(timer);
+  if (!ended) return { exitCode: 124, output: "(stopped after 2 minutes)" };
+  const [out, err, exitCode] = ended;
   // the server's /work, as a person's own computer maps it back
   return { exitCode, output: (out + err).replaceAll(work, "/work").trim() || "(no output)" };
 }

@@ -208,6 +208,8 @@ export const JOB_NOTE_PREFIX = "[From a job] ";
 // In a job's own chat: a message from Emplio (its brief, or a follow-up); the rest are the person's, written to it
 // directly. Shown with an "Emplio" label.
 export const FROM_EMPLIO = "[From Emplio] ";
+// A reply that tells the person nothing (only sent work back, only answered a job): not shown, not pushed
+export const SILENT = "[SILENT]";
 // A part on a message that only the AI reads (a nudge to the AI from the server): the chat doesn't show it.
 export const HIDDEN_PART = "data-hidden";
 export const isHidden = (m: { parts: { type: string }[] }) => m.parts.some((p) => p.type === HIDDEN_PART);

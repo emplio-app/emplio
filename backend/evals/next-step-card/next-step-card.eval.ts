@@ -17,6 +17,6 @@ Eval<Turn[], Output, Case["expect"]>("Emplio", {
   scores: scorers,
   // the model doesn't answer the same way twice: a rule holds when it holds on every try
   trialCount: 3,
-  maxConcurrency: 8,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "next-step-card", model, rules: NEXT_STEP_RULES },
 });

@@ -70,6 +70,6 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
   },
   scores: scorers,
   trialCount: Number(process.env.EVAL_TRIALS) || 3,
-  maxConcurrency: 6,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "background-round", model: process.env.EVAL_MODEL || MODEL_SETS.save.backgroundModel },
 });

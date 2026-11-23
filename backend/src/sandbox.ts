@@ -1355,14 +1355,15 @@ export const commandList = (agent: boolean) =>
           "files.list(); files.get(id)",
           "apps.list(); apps.actions(app, [words]); apps.info(action)  # find an action (gmail.send_email), then its input",
           'apps.run(action, args: dict, account=None) -> the app\'s JSON  # a file: {"file": "/work/tmp/x.pdf"}',
-          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.read(*urls); web.answer(question)",
+          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.answer(question) -> short answer with sources, for a fact try it first; web.read(*urls) -> a page's whole text, only when you need all of it",
           "db.sql(query) -> [dict] (a change: {changed, last_id}); db.tables() -> [{name, type, rows}]",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None); tasks.list() -> [{id, title, status, due, assignee}]",
           "skills.use(name); logins.list(); person(email); activity([words], who=None, since=None)",
+          "plan.set(*steps); plan.done(*n); plan.update(n, step); plan.clear()",
         ]
       : [
           "ask(question, *answers, multi=False, input=None)  # 2-4 answers to tap, none: open question",
-          "hand(agent, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
+          "hand(agent_or_job_id, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
           "files.show(name_or_id); files.share(id)",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None, agent=None, every=\"<cron>\", actions=\"app.action,...\")",
           "tasks.list(all=False, who=None, due=False) -> [{id, title, status, due, assignee, agent, waiting_on}]",
@@ -1423,7 +1424,7 @@ ${only(manager, `- AGENT.md: standing instructions (below): the owner's rules fo
 ${only(agent, `- Files over 1 MB or binary in those folders are .media pointers: \`emplio media get <file.media>\` puts the file in /work/tmp/media/; \`emplio view <file.media>\` looks at it.
 - Work in /work/tmp/<short-job-name>/, then copy results where they belong. A script you keep is Python (it runs on any computer). Anything worth reusing (script, tool, app) goes in ${admin ? `company/projects/<name>/ (me/projects/<name>/ if only for ${name})` : "me/projects/<name>/"}; say where.
 - Files you make go in /work/out/ (the same name again is its next version; text for people: .md; a web page: one self-contained .html): they're stored in Files by themselves and Emplio shows them. A stored one from another chat: \`emplio files get <id>\` copies it here.
-`)}${only(manager && !background, `- out/: the same name again is its next version; text for people is .md, a web page one self-contained .html. A job's file: changes go back to that job, never into the file yourself. ${name} sees a file only when you show it (\`emplio files show <name or id>\`, after viewing it), once, finished, with your answer; never write its link or path. \`emplio files share <id>\` (a public link) only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""}
+`)}${only(manager && !background, `- out/: the same name again is its next version; text for people is .md, a web page one self-contained .html. A job's file: changes go back to that job, never into the file yourself. ${name} sees a file only when you show it (\`emplio files show <name or id>\`, after viewing it): only one they asked for (a sheet, a document, a list to keep) or ask to see, once, finished, with your answer; a job's working file (its notes, a running report, a log) stays unshown, you tell what's in it. Never write its link or path. \`emplio files share <id>\` (a public link) only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""}
 `)}
 Where things go:
 - Business facts (clients, suppliers, products, prices, how things are done, decisions): company/knowledge/${admin ? "" : " (as a proposal in inbox/)"}{clients,suppliers,people,topics}/<name>.md or decisions.md, each dated with its source ("2026-10-24, Ravi: Acme pays in 45 days"). Changed: add the new, mark the old "(replaced <date>)". People disagree: keep both and ${admin ? "ask the owner" : "say so in the proposal"}.
@@ -1467,7 +1468,7 @@ Database: the business's SQLite database, \`emplio db\` (\`emplio db help\`). St
 
 Tasks: something to do or check later goes in \`emplio tasks add "<what>" --due <date> --to <email|ai|me>\` (\`emplio tasks help\`).
 
-Web: \`emplio web search <words>\`, \`emplio web read <url>\` (clean text), \`emplio web answer <question>\` (\`emplio web help\`). Use these, or curl, before the browser.
+Web: \`emplio web search <words>\`, \`emplio web answer <question>\` (a short answer with sources: for a fact, try it first), \`emplio web read <url>\` (a public page's whole text: only when you need all of it) (\`emplio web help\`). Use these, or curl, before the browser.
 
 Pictures: \`emplio image "<full description>" [--from <image>] [--ratio 1:1|16:9|9:16|4:5...]\` makes one with the business's image model and saves it in /work/out/, and you see it and it's shown in the chat by itself; \`--from\` edits a logo or photo (\`emplio image help\`). Use it for any picture asked for (posts, banners, product shots), never code drawing (Pillow, SVG); a real logo or photo to include goes in \`--from\` (\`from_=\` in Python). Not right: make it again with a better description.
 
@@ -2168,7 +2169,7 @@ export async function toolsCommand(s: Session, args: string[], runner = (command
 
 // Swap each emplio tag in the output for its result, in place, so the agent and the chat both see it.
 // Files `emplio view` asked for also come back separately, for the model to look at.
-// `job`: run by one of the chat's jobs, which may not touch the person's checklist
+// `job`: run by one of the chat's jobs (its checklist is its own chat's, not the person's)
 export async function runEz(box: Box, s: Session, output: string, key: string, job = false) {
   const views: string[] = [];
   // emplio hand and threads run after the box is free again (runBash): wait would otherwise hold up the threads' own commands
@@ -2437,8 +2438,6 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
         },
       }, WORK));
     }
-    else if (line.startsWith(`PLAN:${key}\t`) && job)
-      lines.push("error: the checklist is Emplio's, for the person; jobs don't use emplio plan. Just do your task and report.");
     else if (line.startsWith(`PLAN:${key}\t`)) {
       const reply = await planCommand(s.conversationId, Buffer.from(line.slice(`PLAN:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(reply.text);

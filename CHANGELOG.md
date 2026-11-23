@@ -2,6 +2,31 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.4 (2026-11-23)
+
+### What's new
+
+- Long jobs stay on track. An agent keeps a job card with its task word for word and everything added to it since, plus a checklist you can watch fill in, so it no longer forgets what it was asked halfway through or takes your latest note for the whole job. Sending it more while it works adds to its job instead of replacing it.
+- Agents work quietly and finish with one clear report in a fixed shape: whether it's done, what it did, how it checked, files, what changed outside, what's left. If an agent says it's done while checklist steps are still open or its last step failed, it's sent back to finish or explain.
+- Emplio checks the proof in every report before telling you something is done, and sends back work that only says "all good".
+- Emplio splits big work into parts that run at the same time, one job per site or client, and puts their reports together.
+- Once an agent's job is finished, new work starts a fresh job; fixes and retries of the same work still go back to it.
+- Long jobs cost less and lose less: an agent is told to save what it found to a file before its chat is summed up, the summary keeps what's done, the facts found and the next step, and summaries reuse what was already sent so they cost less.
+- A job's run gets 250 steps, and agents are reminded to keep their checklist up to date when it stops moving.
+- Emplio only puts a file in the chat when it's what you asked for or you ask to see it; an agent's working files stay out of the way.
+- Emplio answers "has someone replied" or "did the payment come in" by having an agent look, never from memory.
+- New agents are named for a role, not a single task, and money, tax, legal and compliance work goes to the stronger model.
+- The sign-in box accepts a phone number as well as an email.
+
+### For developers
+
+- `jobs.ts`: `jobCard` (the latest work word for word, additions marked by `carryOn` while busy, the job chat's checklist) after the job's rules, read again after each fold. `RULES`: work silently, checklist for multi-step work, "Getting it right" block, reports in English in `REPORT_SHAPE`. `JOB_MAX_STEPS` 250 per run, then `CARRY_ON`; `stuck.ts progressGuard` reminds every 10 counted commands the checklist doesn't move.
+- `checks.ts` (new, no model calls): after a job's run, bad endings (empty, only thinking, cut off, code pasted, "next I'll"), report shape and `doneProblem` (open checklist steps, failed last command) send it back, at most `MAX_PUSHES` (3) per piece of work.
+- `emplio hand <agent>` adds to the agent's job only while it works or asks; a finished job carries on only by id. `MANAGER_PROMPT`: split independent parts into jobs side by side (worked example), check each report's proof, a send-back goes once.
+- `compact.ts`: `forkNotes` takes notes on the chat's own request (same system, tool definitions, messages) so the cache is read, on the summary model (Haiku); transcript notes as fallback. `JOB_SYSTEM` notes template for jobs. `SAVE_FIRST`: a job past 80% of `compactAt` is told once to save to a file before it's folded. `trimSteps` cuts old outputs inside a run.
+- `sandbox.ts`: `web answer` / `web read` described; files shown only when asked for or the deliverable. `SILENT` moved to `@emplio/shared` (an import cycle left it unset in jobs.ts).
+- Evals: `bun run evals` runs every eval in parallel (~2 min), on this machine by default (`EVAL_SEND=1` sends to Braintrust); new `job-report` eval; Haiku 90%+ across them. PR 362, PR 365.
+
 ## 1.4.3 (2026-11-23)
 
 ### What's new

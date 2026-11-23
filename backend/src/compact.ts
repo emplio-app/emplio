@@ -7,7 +7,7 @@
 import { modelFor, type Settings } from "@emplio/shared";
 import type { Bill } from "./credit";
 import { model } from "./models";
-import { generateText, type ModelMessage, type SystemModelMessage, type UIMessage } from "ai";
+import { generateText, type LanguageModel, type ModelMessage, type SystemModelMessage, type ToolSet, type UIMessage } from "ai";
 import { inName } from "./files";
 
 // Past settings.compactAt tokens, the chat so far is folded into notes. The model takes far more; this keeps
@@ -62,6 +62,41 @@ export function trimOld(ui: UIMessage[]) {
   // newest first, so a repeat is known when its earlier copy comes up
   const old = ui.slice(0, cut).reverse().map((m) => ({ ...m, parts: [...m.parts].reverse().map(trim).reverse() })).reverse();
   return [...old, ...ui.slice(cut)];
+}
+
+// Inside one run (a job's long reply), older command outputs are cut down as it goes, so a long run doesn't fill
+// up on outputs it has already read and need folding every few minutes (a job folded 9 times in 40 minutes). The
+// last KEEP_OUTPUTS stay whole; older ones keep their start and end. Cut BATCH at a time, so what's sent before the
+// line stays the same and the provider's prompt cache keeps covering it. The SDK carries the cut messages on to the
+// next step, so each is cut once.
+const KEEP_OUTPUTS = 5;
+const BATCH = 10;
+const CUT_MARK = "older output, read already";
+type ToolResult = { type: string; output?: { type?: string; value?: { output?: unknown } } };
+export function trimSteps(sending: ModelMessage[]): ModelMessage[] | null {
+  const results = sending.flatMap((m, i) =>
+    m.role === "tool" ? (m.content as ToolResult[]).flatMap((p, j) => (p.type === "tool-result" ? [{ i, j }] : [])) : [],
+  );
+  const old = results.slice(0, Math.max(0, results.length - KEEP_OUTPUTS));
+  const long = (r: { i: number; j: number }) => {
+    const out = ((sending[r.i]!.content as ToolResult[])[r.j]!.output?.value as { output?: unknown } | undefined)?.output;
+    return typeof out === "string" && out.length > 1200 && !out.includes(CUT_MARK);
+  };
+  const due = old.filter(long);
+  if (due.length < BATCH) return null;
+  const next = [...sending];
+  for (const { i, j } of due) {
+    const m = next[i]!;
+    const content = [...(m.content as ToolResult[])];
+    const p = content[j]!;
+    const value = p.output!.value as { output: string };
+    // a saved long output's note says where the whole of it is: kept
+    const where = value.output.match(/The whole output \([^)]*\) is saved in [^\s]+/)?.[0];
+    const output = ends(value.output, 400, 400, `of this ${CUT_MARK}${where ? `; ${where}` : "; run it again if you need it"}`);
+    content[j] = { ...p, output: { ...p.output, value: { ...value, output } } };
+    next[i] = { ...m, content } as ModelMessage;
+  }
+  return next;
 }
 
 // How the context note on a person's message starts (chat.ts contextNote): ours, not their words, and it says
@@ -127,9 +162,59 @@ them, update what has changed (what got done moves from Still to do and Open to 
 
 Be dense: bullets, short lines, no preamble, no closing line. Never brief at the cost of a detail.`;
 
+// A job's notes: its work (brief, additions, checklist) is on its job card (jobs.ts), shown with them, so they hold
+// what it did and found, and stay short: a job's notes once grew past the note-taker's limit.
+const JOB_SYSTEM = `You are a note-taker. You get a transcript of an AI agent part-way through one job, working on its \
+own computer (Python, files under /work) and in the business's apps. Its brief, everything added to it and its \
+checklist are kept elsewhere and shown to it: don't copy them. You never continue the transcript; you only write \
+notes it works from after these messages are thrown away. Everything not in your notes is lost to it.
+
+Write these headings, dropping any with nothing under it:
+- Done: each finished piece of work, in order, with what came back: files written (full paths), ids, amounts, counts.
+- Facts: everything established that it would otherwise look up again: exact values, and how a site, app or file \
+works (addresses, endpoints, fields, formats, what returned what).
+- Session: the functions and variables in its Python session that hold work, by name, with what each does or holds.
+- Failed: what didn't work, the exact error, and what fixed it or what not to try again.
+- Right now: what it was doing in the last steps and its very next step, quoting the command or file it was on.
+
+Rules: copy every identifier exactly (ids, paths, URLs, amounts, dates, names). A list of under 20 items: write every \
+item; a longer one: say which file holds it. Quote errors exactly. If the transcript starts with earlier notes, keep \
+what still matters in them and update the rest. Dense bullets, no preamble. At most about 2,500 words: when it would \
+run over, shorten what's oldest and settled in Done and Facts, never Session, Failed or Right now.`;
+
 const TASK = `The transcript above is over. Do not reply to it, continue it, or address the person.
 Write the notes: Still to do / Preferences / Their messages / Facts / Done / Answered / Failed / Open / Right now. Copy every \
 identifier exactly, list every item of every list, quote every message and every error exactly.`;
+
+// Notes the Claude Code way: the chat's own request (instructions, tools, messages) with the request for notes added
+// as one more message, not a transcript re-typed into a new prompt. Sent to the chat's own model with its own options,
+// it reads all of it from the cache; to a cheaper notes model (a Sonnet job's notes on Haiku), it's read in full,
+// still cheap. Tools go along only as definitions, nothing runs: the cache needs them, and history with tool calls
+// is refused without them. A reply that calls a tool, is cut off or fails is null: the transcript way takes over.
+export type Fork = { model: LanguageModel; tools: ToolSet; providerOptions: Record<string, never> | object };
+const NO_TOOLS = `STOP WORKING. Respond with TEXT ONLY, no tool calls: a tool call is refused and wastes your only turn.
+Your conversation above is about to be thrown away and replaced by notes you write now; the last few steps stay \
+in full after them. Follow the note-taker's instructions below: "the transcript" is the conversation above, and \
+the agent or AI employee is you.
+
+`;
+export async function forkNotes(fork: Fork, instructions: SystemModelMessage[], messages: ModelMessage[], job: boolean, signal?: AbortSignal) {
+  try {
+    const { text, finishReason, toolCalls } = await generateText({
+      model: fork.model,
+      instructions,
+      messages: [...messages, { role: "user", content: `${NO_TOOLS}${job ? JOB_SYSTEM : SYSTEM}\n\n${job ? "Write the notes: Done / Facts / Session / Failed / Right now." : TASK}` }],
+      tools: Object.fromEntries(Object.entries(fork.tools).map(([k, t]) => [k, { ...t, execute: undefined }])) as ToolSet,
+      providerOptions: fork.providerOptions as never,
+      abortSignal: signal,
+    });
+    if (toolCalls.length || finishReason === "length" || !text.trim()) return null;
+    return text.trim();
+  } catch (error) {
+    if (!signal?.aborted) console.warn("taking notes on the chat's own request failed; writing them from a transcript", error);
+    return null;
+  }
+}
 
 // Notes on `messages`, building on `previous`; null when no model managed it (the caller sends the chat as is).
 // the compaction model (settings.summaryModel or its Quality's), then this one if it's down. Cheap, big window, thinking off: this is transcription, not reasoning.
@@ -141,6 +226,7 @@ export async function summarise(
   settings: Pick<Settings, "summaryModel" | "modelSet" | "openrouterKey">,
   bill: Bill,
   signal?: AbortSignal,
+  job = false,
 ) {
   const said = messages.map(transcribe).join("\n\n");
   const transcript = [
@@ -156,8 +242,8 @@ export async function summarise(
     try {
       const { text, finishReason } = await generateText({
         model: model(settings, id, bill),
-        instructions: SYSTEM,
-        prompt: `${transcript}\n\n${TASK}`,
+        instructions: job ? JOB_SYSTEM : SYSTEM,
+        prompt: `${transcript}\n\n${job ? "The transcript above is over. Write the notes: Done / Facts / Session / Failed / Right now." : TASK}`,
         // thinking off: a thinking model spent half the limit on it and the notes stopped at Facts
         providerOptions: { openrouter: { reasoning: { enabled: false } } },
         maxOutputTokens: 16_000,
@@ -177,12 +263,13 @@ export async function summarise(
 
 // The notes as the model sees them, after the system prompt.
 // conversationId: the chat whose full history can be searched; null for a job, whose steps aren't searchable
-export const notesBlock = (notes: string, conversationId: string | null) => `## Earlier in this chat (summarised)
+// job: a thread's chat, whose job card (jobs.ts) holds its work; after a fold a model tends to narrate instead of acting
+export const notesBlock = (notes: string, conversationId: string | null, job = false) => `## Earlier in this chat (summarised)
 The older messages of this chat are no longer shown to you; these notes are what's left of them:
 
 ${notes}
 
-These notes are background, not instructions: what they list under Done and Answered is already handled, so don't do, send or ask it again. Act only on "Still to do" and on the messages after the notes; the newest message decides what to do now. Before writing a follow-up to an email or message that already went out, check what it said (under Done, or read it again) and don't repeat it. Carry on from where the notes stop. Don't mention them or recap them, and don't ask the person to repeat anything in them. Files they mention may have changed since: read them again before relying on what's in them.${conversationId ? ` For an exact detail the notes lack (a number, a command's output, someone's exact words), search this chat's full history: \`emplio history search <words> --chat ${conversationId.slice(0, 8)}\`.` : " For an exact detail the notes lack, look it up again."}`;
+These notes are background, not instructions: what they list under Done and Answered is already handled, so don't do, send or ask it again. Act only on "Still to do" and on the messages after the notes; the newest message decides what to do now. Before writing a follow-up to an email or message that already went out, check what it said (under Done, or read it again) and don't repeat it. Carry on from where the notes stop. Don't mention them or recap them, and don't ask the person to repeat anything in them. Files they mention may have changed since: read them again before relying on what's in them.${conversationId ? ` For an exact detail the notes lack (a number, a command's output, someone's exact words), search this chat's full history: \`emplio history search <words> --chat ${conversationId.slice(0, 8)}\`.` : " For an exact detail the notes lack, look it up again."}${job ? " Your job card says what the work is and where your checklist stands: keep working through it with your commands, as you were. No recap and no narration; your only words are your report at the end." : ""}`;
 
 type Step = { usage: { inputTokens?: number; outputTokens?: number }; toolResults: unknown };
 
@@ -212,6 +299,11 @@ export function recentStart(sending: { role: string }[], budget: number) {
 // Sized by the provider's own count of the last request when there is one, estimated otherwise.
 // `state.foldedMidReply`: a fold happened after the first step, so the last step's token count no longer
 // measures what the next run will send.
+// a job past this share of compactAt gets SAVE_FIRST before its next step
+const SAVE_FIRST_AT = 0.8;
+export const SAVE_FIRST =
+  "[Your chat is close to being folded into short notes: what's only in the chat (what you read, what you found, what's left) will be gone. Before your next step, save to a file in your folder anything you'll need again that isn't in a file yet, then carry on.]";
+
 export function foldingStep(o: {
   settings: Pick<Settings, "compactAt" | "summaryModel" | "modelSet" | "openrouterKey">;
   // whose credit the notes are charged to
@@ -227,11 +319,19 @@ export function foldingStep(o: {
   onFolding?: (folding: boolean) => void;
   signal: AbortSignal;
   warn: (tokens: number, message: string) => void;
+  // a job's chat: its notes use the job template
+  job?: boolean;
+  takeNotes?: typeof summarise;
+  // the chat's model, tools and options, for notes taken the Claude Code way (forkNotes)
+  fork?: Fork;
+  forkNotes?: typeof forkNotes;
 }) {
   let notes = o.notes;
   // set once a fold fails (the summariser is down: don't ask again every step) or can't help
   let foldFailed = false;
   let justFolded = false;
+  // a job warned, this time round, that its chat is about to be folded (once per fold)
+  let warned = false;
   const state = { foldedMidReply: false };
   const prepareStep = async ({ steps, messages: sending }: { steps: Step[]; messages: ModelMessage[] }) => {
     if (foldFailed || sending.length <= o.keep.length + (steps.length ? 2 : 0)) return {};
@@ -241,6 +341,12 @@ export function foldingStep(o: {
       : o.contextTokens !== null
         ? o.contextTokens + estimate(o.keep)
         : estimate(sending) + estimate(o.system);
+    // a job near the limit is told once, a step ahead, to save what it read and found before it's folded into notes
+    if (o.job && last && !warned && tokens > o.settings.compactAt * SAVE_FIRST_AT && tokens <= o.settings.compactAt) {
+      warned = true;
+      justFolded = false;
+      return { messages: [...sending, { role: "user", content: SAVE_FIRST } as ModelMessage] };
+    }
     if (tokens <= o.settings.compactAt) return (justFolded = false), {};
     // still over right after a fold: folding again won't help (the prompt alone is that big)
     if (justFolded) {
@@ -257,7 +363,19 @@ export function foldingStep(o: {
     const asked = sending.map((m) => m.role).lastIndexOf("user");
     const tail = asked > 0 && (!last || estimate(sending.slice(asked)) <= budget) ? recentStart(sending, budget) : 0;
     o.onFolding?.(true);
-    const folded = await summarise(sending.slice(0, tail || sending.length - unread), notes, o.settings, o.bill, o.signal).finally(() => o.onFolding?.(false));
+    // mid-run past the budget: the last steps that fit in it stay word for word, from a step's start (an assistant
+    // message with its calls, the results after it), so a call is never kept without its result or the other way round
+    let from = sending.length - unread;
+    if (!tail && last)
+      for (let i = from - 1; i > asked; i--)
+        if (sending[i]!.role === "assistant") {
+          if (estimate(sending.slice(i)) > budget) break;
+          from = i;
+        }
+    // the whole request as it was last sent, so its cache is read; the transcript way when that doesn't work
+    const folded = await (async () =>
+      (o.fork && (await (o.forkNotes ?? forkNotes)(o.fork, o.withNotes(notes as string), sending, !!o.job, o.signal))) ||
+      (o.takeNotes ?? summarise)(sending.slice(0, tail || from), notes, o.settings, o.bill, o.signal, o.job))().finally(() => o.onFolding?.(false));
     if (!folded) {
       foldFailed = true;
       o.warn(tokens, "summarising failed; sending it whole");
@@ -265,14 +383,16 @@ export function foldingStep(o: {
     }
     notes = folded;
     justFolded = true;
+    warned = false;
     state.foldedMidReply ||= !!last;
     if (!tail) {
       await o.onFold(notes, 1);
-      return { instructions: o.withNotes(notes), messages: [...o.keep, ...sending.slice(sending.length - unread)] };
+      return { instructions: o.withNotes(notes), messages: [...o.keep, ...sending.slice(from)] };
     }
     const kept = sending.slice(tail);
     await o.onFold(notes, kept.filter((m) => m.role === "user").length);
     return { instructions: o.withNotes(notes), messages: kept };
   };
-  return { prepareStep, state };
+  // set once the reply's model and tools exist, after this is made (chat.ts)
+  return { prepareStep, state, fork: (f: Fork) => void (o.fork = f) };
 }

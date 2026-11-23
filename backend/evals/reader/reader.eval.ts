@@ -23,6 +23,6 @@ Eval<{ title: string; chat: string }, string, Case["expect"]>("Emplio", {
   },
   scores: scorers,
   trialCount: 3,
-  maxConcurrency: 8,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "reader", model },
 });

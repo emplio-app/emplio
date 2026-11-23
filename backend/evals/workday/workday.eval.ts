@@ -28,7 +28,7 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
   const jobs: Job[] = [];
   let routes: Route[] = [];
   let lastJob: Job | undefined;
-  const line = (j: Job) => `- ${j.id} · ${j.agent ?? "myself"} · ${j.name} · ${j.status}${j.status === "working" ? "" : ", 12 Nov, 10:05 am"}`;
+  const line = (j: Job) => `- ${j.id} · ${j.agent ?? "myself"} · ${j.name} · ${j.status}${j.status === "working" ? "" : ", 10 Nov, 10:05 am"}`;
   const head = (j: Job) => `${j.id} "${j.name}"${j.agent ? ` (${j.agent})` : ""}`;
   const latestOf = (agent: string | null) => [...jobs].reverse().find((j) => j.agent === agent);
   const carry = (j: Job, brief: string): string => {
@@ -62,9 +62,8 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
       agents.push(agent);
     }
     const current = latestOf(agent.name);
-    if (carriesOn && current && !/--new\b/.test(flags)) return carry(current, brief);
-    if (carriesOn && current && current.status !== "done")
-      return `error: ${agent.name}'s job "${current.name}" is still ${current.status === "asking" ? "waiting on an answer" : "working"}. Nothing was started: send this to it without --new.`;
+    // the new hand-off: an agent's job still working or asking gets this added; a finished one, a fresh job
+    if (carriesOn && current && current.status !== "done" && !/--new\b/.test(flags)) return carry(current, brief);
     return start(agent.name, brief);
   };
   const business = (): Business => ({ agents: agents.map((a) => `- ${a.name} (agents/${a.slug}, light): ${AGENTS.find((l) => l.includes(`agents/${a.slug},`))?.split("): ")[1] ?? "made today"}`), threads: [...jobs].reverse().map(line) });
@@ -175,12 +174,12 @@ Eval<Input, Output, void>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "workday",
   data: async () => {
     const { THREADS_HEADING } = (await app())[2];
-    const carriesOn = THREADS_HEADING.includes("--new");
+    const carriesOn = THREADS_HEADING.includes("adds to its job");
     return (await import("./scenarios")).scenarios().map((scenario) => ({ input: { scenario, carriesOn }, metadata: { name: scenario.name } }));
   },
   task,
   scores: [stepsRight, allRight, noBrowser],
   trialCount: Number(process.env.EVAL_TRIALS) || 3,
-  maxConcurrency: 6,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "workday", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });
