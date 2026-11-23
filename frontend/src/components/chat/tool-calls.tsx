@@ -470,9 +470,7 @@ function ToolCall({
           {p.output?.pid && (
             <span className="text-xs">background · pid {p.output.pid}</span>
           )}
-          {stopped && <span className="text-xs">stopped</span>}
-          {!pending && p.output?.ms !== undefined && <span className="shrink-0 text-xs tabular-nums">{duration(p.output.ms)}</span>}
-          {failed && (
+          {stopped && <span className="text-xs">stopped</span>}          {failed && (
             // the agent usually tries another way next: a quiet note, not an alarm
             <span className="text-xs text-muted-foreground" title={`exit ${p.output?.exitCode ?? "error"}`}>
               Error
