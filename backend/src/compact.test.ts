@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ModelMessage, UIMessage } from "ai";
-import { foldingStep, recentStart, trimOld, trimSteps } from "./compact";
+import { SAVE_FIRST, foldingStep, recentStart, trimOld, trimSteps } from "./compact";
 
 const ask = (text: string, extra: object[] = []) => ({ id: text, role: "user", parts: [{ type: "text", text }, ...extra] }) as UIMessage;
 const ran = (output: string) => ({ id: output.slice(0, 9), role: "assistant", parts: [{ type: "tool-bash", state: "output-available", toolCallId: "c", input: {}, output: { exitCode: 0, output } }] }) as unknown as UIMessage;
@@ -55,6 +55,34 @@ test("a fold in the middle of a long run keeps its last steps word for word, nev
   expect(out.messages.length).toBeGreaterThan(3);
   expect(out.messages.slice(1)).toEqual(sending.slice(sending.length - (out.messages.length - 1)));
   expect(folded.length + out.messages.length - 1).toBe(sending.length);
+});
+
+test("a job near the limit is told once to save first, then folded as usual", async () => {
+  const make = () =>
+    foldingStep({
+      settings: { compactAt: 10_000, summaryModel: "auto", modelSet: "save", openrouterKey: null } as never,
+      bill: {} as never,
+      keep: [{ role: "user", content: "the brief" }],
+      notes: null,
+      contextTokens: null,
+      system: [],
+      withNotes: () => [],
+      onFold: async () => {},
+      signal: new AbortController().signal,
+      warn: () => {},
+      job: true,
+      takeNotes: async () => "notes",
+    });
+  const sending = run(20, 3_000);
+  const near = [{ usage: { inputTokens: 8_500 }, toolResults: [] }];
+  const step = make();
+  const out = (await step.prepareStep({ steps: near, messages: sending })) as { messages: ModelMessage[] };
+  expect(out.messages.at(-1)).toEqual({ role: "user", content: SAVE_FIRST });
+  // once: the next step near the limit goes on as it is
+  expect(await step.prepareStep({ steps: near, messages: sending })).toEqual({});
+  // past it: folded
+  const folded = (await step.prepareStep({ steps: [{ usage: { inputTokens: 50_000 }, toolResults: [] }], messages: sending })) as { messages: ModelMessage[] };
+  expect(folded.messages.length).toBeLessThan(sending.length);
 });
 
 test("notes are taken on the chat's own request when that works, from a transcript when it doesn't", async () => {

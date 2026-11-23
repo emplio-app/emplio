@@ -299,6 +299,11 @@ export function recentStart(sending: { role: string }[], budget: number) {
 // Sized by the provider's own count of the last request when there is one, estimated otherwise.
 // `state.foldedMidReply`: a fold happened after the first step, so the last step's token count no longer
 // measures what the next run will send.
+// a job past this share of compactAt gets SAVE_FIRST before its next step
+const SAVE_FIRST_AT = 0.8;
+export const SAVE_FIRST =
+  "[Your chat is close to being folded into short notes: what's only in the chat (what you read, what you found, what's left) will be gone. Before your next step, save to a file in your folder anything you'll need again that isn't in a file yet, then carry on.]";
+
 export function foldingStep(o: {
   settings: Pick<Settings, "compactAt" | "summaryModel" | "modelSet" | "openrouterKey">;
   // whose credit the notes are charged to
@@ -325,6 +330,8 @@ export function foldingStep(o: {
   // set once a fold fails (the summariser is down: don't ask again every step) or can't help
   let foldFailed = false;
   let justFolded = false;
+  // a job warned, this time round, that its chat is about to be folded (once per fold)
+  let warned = false;
   const state = { foldedMidReply: false };
   const prepareStep = async ({ steps, messages: sending }: { steps: Step[]; messages: ModelMessage[] }) => {
     if (foldFailed || sending.length <= o.keep.length + (steps.length ? 2 : 0)) return {};
@@ -334,6 +341,12 @@ export function foldingStep(o: {
       : o.contextTokens !== null
         ? o.contextTokens + estimate(o.keep)
         : estimate(sending) + estimate(o.system);
+    // a job near the limit is told once, a step ahead, to save what it read and found before it's folded into notes
+    if (o.job && last && !warned && tokens > o.settings.compactAt * SAVE_FIRST_AT && tokens <= o.settings.compactAt) {
+      warned = true;
+      justFolded = false;
+      return { messages: [...sending, { role: "user", content: SAVE_FIRST } as ModelMessage] };
+    }
     if (tokens <= o.settings.compactAt) return (justFolded = false), {};
     // still over right after a fold: folding again won't help (the prompt alone is that big)
     if (justFolded) {
@@ -370,6 +383,7 @@ export function foldingStep(o: {
     }
     notes = folded;
     justFolded = true;
+    warned = false;
     state.foldedMidReply ||= !!last;
     if (!tail) {
       await o.onFold(notes, 1);
