@@ -550,7 +550,7 @@ export type JobInfo = {
   // its own chat (a conversation of kind "job"), where it works and the person can talk to it; null: a job
   // from before jobs were chats
   chatId: string | null;
-  // how long this run took, once it's finished; missing for an earlier run of a job given more work since
+  // how long this run has taken: so far while it works, in all once finished; missing for an earlier run of a job given more work since
   ms?: number;
 };
 

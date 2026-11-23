@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { BotIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, TerminalIcon, XIcon } from "lucide-react";
 import Link from "next/link";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { BrowserChip } from "@/components/chat/browser-panel";
 import { ApprovalCard } from "@/components/chat/approval-card";
 import { AskCard } from "@/components/chat/ask-card";
@@ -145,10 +145,10 @@ export function AssistantParts({
   });
 }
 
-// how long a command or a run took: "0.4s", "12s", "1m 12s"
-const duration = (ms: number) => {
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  const s = Math.round(ms / 1000);
+// how long a run took: "0.4s", "12s", "1m 12s"; whole: no tenths (a clock that ticks once a second)
+const duration = (ms: number, whole = false) => {
+  if (ms < 10_000 && !whole) return `${(ms / 1000).toFixed(1)}s`;
+  const s = whole ? Math.floor(ms / 1000) : Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
 };
 
@@ -298,7 +298,7 @@ function Results({
 // the prompt it was handed), so an earlier one stays finished when the job is given more work.
 function Job({ id, run }: { id: string; run?: string }) {
   const [open, setOpen] = useState(false);
-  const { data: w, isError } = useQuery({
+  const { data: w, isError, dataUpdatedAt } = useQuery({
     queryKey: ["job", id, run],
     queryFn: () => api<JobInfo>(`/jobs/${id}${run ? `?run=${encodeURIComponent(run)}` : ""}`),
     // a card that can't load (the job was deleted) stops asking instead of spinning for good
@@ -309,6 +309,14 @@ function Job({ id, run }: { id: string; run?: string }) {
   const working = status === "working";
   const now = working ? actions.findLast((a) => !a.done)?.description ?? (actions.length ? "Thinking…" : "Starting…") : null;
   const n = actions.length;
+  // its time: while it works, counted on each second from what the server last said (no clock of the server's needed)
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+  const took = w?.ms === undefined ? undefined : working ? w.ms + Date.now() - dataUpdatedAt : w.ms;
   return (
     <div className="flex w-full flex-col gap-1.5">
       <div className="w-full rounded-lg border bg-card text-sm">
@@ -341,10 +349,9 @@ function Job({ id, run }: { id: string; run?: string }) {
                   ? `· ${n} ${n === 1 ? "action" : "actions"}`
                   : status === "asking"
                     ? "· has a question"
-                    : `· ${status}`}
-              {w?.ms !== undefined && ` · ${duration(w.ms)}`}
-            </span>
+                    : `· ${status}`}            </span>
           )}
+          {took !== undefined && <span className="shrink-0 text-xs tabular-nums">{duration(took, working)}</span>}
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
         {open && (

@@ -499,7 +499,11 @@ export function runSpan<M extends { id: string; role: string; parts: unknown }>(
 
 // ponytail: an earlier run's time isn't kept (finishedAt is the latest run's); store it per run if those cards need one
 async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "report" | "actions" | "ms">> {
-  const took = (from?: Date) => (from && w.finishedAt && w.status !== "working" ? { ms: w.finishedAt.getTime() - new Date(from).getTime() } : {});
+  // how long it's been at it: up to now while it works (the card counts on from there), to its end once finished
+  const took = (from?: Date, working = w.status === "working") => {
+    const end = working ? Date.now() : w.finishedAt?.getTime();
+    return from && end ? { ms: end - new Date(from).getTime() } : {};
+  };
   if (!run || !w.chatId) return { status: w.status, report: w.report, actions: await actionsOf(w), ...took(w.createdAt) };
   const span = runSpan(await loadMessages(w.chatId), run);
   if (!span) return { status: "working", report: null, actions: [] };
@@ -508,7 +512,7 @@ async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "re
     // just handed it, not begun: the job still holds the run before's status and report, and a finished card stops checking
     const asked = (span.msgs[0]?.metadata as { createdAt?: Date } | undefined)?.createdAt;
     const stale = asked && w.finishedAt && w.finishedAt < new Date(asked);
-    return stale && w.status !== "working" ? { status: "working", report: null, actions } : { status: w.status, report: w.report, actions, ...took(asked) };
+    return stale && w.status !== "working" ? { status: "working", report: null, actions, ...took(asked, true) } : { status: w.status, report: w.report, actions, ...took(asked) };
   }
   const last = [...span.msgs].reverse().find((m) => m.role === "assistant" && textOf(m).trim());
   const text = last ? textOf(last).trim() : "";
