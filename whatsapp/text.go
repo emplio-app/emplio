@@ -175,6 +175,29 @@ func PhoneOf(jid string) *string {
 var phoneLike = regexp.MustCompile(`^\+?[\d\s()-]{8,}$`)
 var nonDigits = regexp.MustCompile(`\D`)
 
+// Mentions is text that tags people (by phone id) and the ids to list on the message: WhatsApp highlights "@<number>"
+// in the text when that id is listed. In groups that hide numbers (lidOf finds the hidden id), the tag uses that id.
+// Someone not already tagged in the text is tagged at the start.
+func Mentions(text string, phones []types.JID, lidOf func(types.JID) types.JID) (string, []string) {
+	ids, lead := []string{}, ""
+	for _, pn := range phones {
+		to := pn
+		if lidOf != nil {
+			if l := lidOf(pn); l.Server == types.HiddenUserServer {
+				to = l
+			}
+		}
+		tag := "@" + to.User
+		if strings.Contains(text, "@"+pn.User) {
+			text = strings.ReplaceAll(text, "@"+pn.User, tag)
+		} else if !strings.Contains(text, tag) {
+			lead += tag + " "
+		}
+		ids = append(ids, to.String())
+	}
+	return lead + text, ids
+}
+
 // TargetOf is where a send goes, from what the agent wrote: an id, a phone number, or a chat's name.
 func TargetOf(to string) (jid, name string) {
 	s := strings.TrimSpace(to)
