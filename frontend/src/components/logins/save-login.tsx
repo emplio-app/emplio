@@ -91,7 +91,7 @@ export function SaveLoginDialog({ card, onClose, onSaved }: { card?: SaveLoginCa
               <label key={label} className="grid gap-1.5 text-sm font-medium">
                 {label}
                 <Input
-                  type={isSecretField(label) ? "password" : /mail/i.test(label) ? "email" : /phone|mobile/i.test(label) ? "tel" : "text"}
+                  type={isSecretField(label) ? "password" : /^e-?mail( address)?$/i.test(label) ? "email" : /^(phone|mobile)( number)?$/i.test(label) ? "tel" : "text"}
                   autoComplete={isSecretField(label) ? "new-password" : "off"}
                   autoFocus={!!card && i === 0}
                   required={!!card?.fields?.length}
