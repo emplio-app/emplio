@@ -53,6 +53,8 @@ type BashPart = {
     plan?: PlanStep[];
     // queued messages the agent took in when this command finished (chat.ts steering)
     messagesFromPerson?: { id: string; text: string }[];
+    // how long it took (chat.ts); older replies don't have it
+    ms?: number;
   };
   errorText?: string;
   preliminary?: boolean;
@@ -143,6 +145,13 @@ export function AssistantParts({
   });
 }
 
+// how long a command or a run took: "0.4s", "12s", "1m 12s"
+const duration = (ms: number) => {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
+};
+
 // The model's thinking: open while it thinks, folded to one "Thought" line once it's done; a tap opens it again.
 // "Thought for 4s", "Thought for 1m 12s"; replies from before it was timed just say "Thought"
 const tookFor = (ms?: number) => {
@@ -206,7 +215,10 @@ function Actions({ steps, streaming, live }: { steps: (BashPart | ThoughtPart)[]
   const saved = tools.flatMap((p) => p.output?.saved ?? []);
   const cards = [...new Map(tools.flatMap((p) => p.output?.connect ?? []).map((c) => [c.app, c])).values()];
   const usedBrowser = tools.some((p) => p.output?.browser);
-  const wording = live ? `Running ${n} ${noun}…` : `Ran ${n} ${noun}`;
+  // once done, the run's time: its commands and the thinking between them
+  const times = steps.map((t) => (isThought(t) ? t.ms : t.output?.ms)).filter((ms) => ms !== undefined);
+  const total = times.length ? times.reduce((a, b) => a + b, 0) : undefined;
+  const wording = live ? `Running ${n} ${noun}…` : `Ran ${n} ${noun}${total === undefined ? "" : ` · ${duration(total)}`}`;
   return (
     <div className="flex w-full flex-col gap-1.5">
       <button
@@ -330,6 +342,7 @@ function Job({ id, run }: { id: string; run?: string }) {
                   : status === "asking"
                     ? "· has a question"
                     : `· ${status}`}
+              {w?.ms !== undefined && ` · ${duration(w.ms)}`}
             </span>
           )}
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -458,6 +471,7 @@ function ToolCall({
             <span className="text-xs">background · pid {p.output.pid}</span>
           )}
           {stopped && <span className="text-xs">stopped</span>}
+          {!pending && p.output?.ms !== undefined && <span className="shrink-0 text-xs tabular-nums">{duration(p.output.ms)}</span>}
           {failed && (
             // the agent usually tries another way next: a quiet note, not an alarm
             <span className="text-xs text-muted-foreground" title={`exit ${p.output?.exitCode ?? "error"}`}>
