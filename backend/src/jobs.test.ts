@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, RESTARTED, CARRY_ON, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue } from "./jobs";
+import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, RESTARTED, CARRY_ON, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runEnd, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue } from "./jobs";
 import { SILENT } from "./reader";
 
 const card = (id: string, decision?: Approval["decision"]) => ({ id, ...(decision && { decision }) }) as Approval;
@@ -203,6 +203,16 @@ test("each hand-off card is one run of its job: the prompt it was handed, and wh
   expect(runSpan(msgs, "m2")).toEqual({ msgs: msgs.slice(2), latest: true });
   // a prompt not in the chat yet has no run
   expect(runSpan(msgs, "m3")).toBeNull();
+  // a restart's "carry on" goes on with the run it cut off
+  const cut = [said("m1", "user", `${FROM_EMPLIO}brief`), said("a1", "assistant", ""), said("r", "user", FROM_EMPLIO + RESTARTED), said("a2", "assistant", "report")];
+  expect(runSpan(cut, "m1")).toEqual({ msgs: cut, latest: true });
+});
+
+test("an earlier run's time: to the tool-saving nudge sent as it ended, else its last reply's start plus its steps", () => {
+  const at = (id: string, role: string, s: number, parts: unknown[] = []) => ({ id, role, parts, metadata: { createdAt: new Date(s * 1000) } });
+  const span = [at("m1", "user", 0), at("a1", "assistant", 2, [{ type: "reasoning", providerMetadata: { emplio: { ms: 1000 } } }, { type: "tool-python", output: { ms: 5000 } }])];
+  expect(runEnd(span as never, at("k", "user", 90, [{ type: "text", text: FROM_EMPLIO + SAVE_TOOL }]) as never)).toBe(90_000);
+  expect(runEnd(span as never, at("m2", "user", 500, [{ type: "text", text: `${FROM_EMPLIO}next` }]) as never)).toBe(8_000);
 });
 
 test("a plain copy's finished work gets the agent nudge; an agent's, a deeper thread's or unfinished work doesn't", () => {
