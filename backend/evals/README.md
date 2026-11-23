@@ -12,6 +12,9 @@ evals/
                             stand-in computer that answers commands without running them
   next-step-card/           the card under a reply (src/next-step.ts)
   hand-off/                 does it do the work itself or hand it off, and to whom (src/jobs.ts MANAGER_PROMPT)
+  job-report/               a job at the end of its work: checks before calling it done, reports what's true in the
+                            shape the manager reads, asks when only the person can decide (src/jobs.ts RULES,
+                            src/checks.ts, whose checks are replayed once)
   manager/                  Emplio as manager: every job to an agent, carry on its job or --new, no browser of its
                             own, the person's words kept, reports checked (src/jobs.ts MANAGER_PROMPT)
   workday/                  whole conversations: several pieces of work, jobs' reports coming back (half done, a
@@ -36,7 +39,10 @@ background agent files each note where it belongs (`background-round`).
 From `backend/`, with `OPENROUTER_API_KEY` set (in `.env`):
 
 ```bash
-bun run eval evals                             # every behaviour
+bun run evals                                  # every behaviour at once, each in its own process (~3 min)
+bun run evals manager job-report               # some of them; logs in .evals/<name>.log
+EVAL_CONCURRENCY=8 bun run evals               # fewer cases at a time per eval (default 24), if the provider throttles
+bun run eval evals/manager                     # one, the plain way
 bun run eval evals/next-step-card              # one
 EVAL_EXPERIMENT=card-shorter-rules bun run eval evals/next-step-card   # name the run, to compare later
 EVAL_MODEL=google/gemini-3.8-flash bun run eval evals/next-step-card   # try another model on the same cases

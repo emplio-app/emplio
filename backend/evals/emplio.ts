@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentRules, BASH_DESCRIPTION, bashInput, contextNote, emplioPrompt, mainChatNote, PYTHON_DESCRIPTION, pythonInput } from "../src/chat";
 import { HEARTBEAT } from "../src/heartbeat";
-import { AGENTS_HEADING, THREADS_HEADING } from "../src/jobs";
+import { AGENTS_HEADING, RULES, THREADS_HEADING } from "../src/jobs";
 import { inPython, sandboxPrompt, type Session } from "../src/sandbox";
 import { DEFAULTS } from "../src/settings";
 
@@ -52,6 +52,27 @@ export const system = (b: Business, round: boolean | string) => [
   }),
   "This chat's id is ab12cd34.",
   ...(round ? [] : [mainChatNote(ctx)]),
+];
+
+// A job's chat (src/chat.ts withNotes, src/jobs.ts jobReply): the shared prompt as a job gets it, then its rules,
+// its agent and its job card, in the app's order.
+export type Job = { agent: string; card: string };
+export const jobSystem = (b: Business, job: Job) => [
+  emplioPrompt({
+    rules: agentRules(ctx, undefined, true),
+    computer: sandboxPrompt(session, true),
+    team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
+    connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
+    business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
+    userName: ctx.userName,
+    personal: "Runs the shop. Prefers short answers. Hindi or English.",
+    skills: b.skills?.length ? b.skills : ["(none yet)"],
+    agent: true,
+  }),
+  "This chat's id is ab12cd34.",
+  RULES(1, "9f00aa11"),
+  job.agent,
+  job.card,
 ];
 
 // The note the app puts on the person's message: today's date, the agents and the threads to carry on.
@@ -184,7 +205,7 @@ export const pretend = (command: string, world: World = []): string =>
 
 // Emplio's reply to a chat whose last message is the person's (the note goes on it, as in the app).
 // session: a Python session to keep across replies (code mode; a conversation's), else one for this reply only
-export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round: boolean | string = false, session?: string): Promise<Said> {
+export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn, maxSteps = 4, round: boolean | string = false, session?: string, job?: Job): Promise<Said> {
   const last = chat.map((m) => m.role).lastIndexOf("user");
   const asked = chat[last]!;
   const messages = [...chat.slice(0, last), { ...asked, content: `${asked.content as string}\n\n${note(b)}` } as ModelMessage, ...chat.slice(last + 1)];
@@ -235,7 +256,7 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const { steps, response } = await generateText({
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
     providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
-    system: system(b, round).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
+    system: (job ? jobSystem(b, job) : system(b, round)).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
     messages,
     tools: CODE_MODE ? { python } : { bash },
     stopWhen: [stepCountIs(maxSteps), () => stop],

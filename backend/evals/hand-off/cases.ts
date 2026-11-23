@@ -105,11 +105,12 @@ export const cases = (): Case[] => [
   { name: "gst on an amount", category: "quick", source: "written", chat: [person("whats 18% gst on 4500")], expect: { hand: false } },
   { name: "hello", category: "quick", source: "written", chat: [person("hi")], expect: { hand: false } },
   { name: "one email", category: "quick", source: "written", chat: [person("email raj that the shop opens at 11 tomorrow")], expect: { hand: false } },
-  { name: "one look-up in the books", category: "quick", source: "written", chat: [person("did sharma traders pay invoice 212")], world: BOOKS, expect: { hand: false } },
+  // a look-up in an app is an agent's, like any app work (src/jobs.ts MANAGER_PROMPT "Yours": notes and files only)
+  { name: "one look-up in the books", category: "quick", source: "written", chat: [person("did sharma traders pay invoice 212")], world: BOOKS, expect: { hand: true } },
   { name: "a reminder", category: "quick", source: "written", chat: [person("remind me friday to call the landlord")], expect: { hand: false } },
   { name: "a short draft", category: "quick", source: "written", chat: [person("write a 2 line whatsapp msg saying we're closed on diwali day")], expect: { hand: false } },
   { name: "a plain question", category: "quick", source: "written", chat: [person("what's the difference between blackout and dimout curtains")], expect: { hand: false } },
-  { name: "add one row", category: "quick", source: "written", chat: [person("add a row to the orders sheet: Anita Desai, 2 king bedsheets, 3200")], expect: { hand: false } },
+  { name: "add one row", category: "quick", source: "written", chat: [person("add a row to the orders sheet: Anita Desai, 2 king bedsheets, 3200")], expect: { hand: true } },
   {
     name: "a quick question about work an agent does",
     category: "quick",
@@ -149,7 +150,9 @@ export const cases = (): Case[] => [
     source: "written",
     chat: [person("log in to our indiamart seller account, i'll give you the otp when it comes")],
     world: SIGN_IN,
-    expect: { hand: false },
+    // a sign-in is browser work, which goes to an agent from the first step (src/jobs.ts MANAGER_PROMPT); the agent
+    // asks for the code on a card and gets it straight back
+    expect: { hand: true },
   },
   {
     name: "answering its question",
@@ -246,7 +249,8 @@ export const cases = (): Case[] => [
     source: "written",
     business: { agents: AGENTS, threads: THREADS },
     chat: [person("in the october payment reminders also say we now take UPI, and skip hotel sai residency, they called me. go through all of them again")],
-    expect: { hand: true, picks: ["thread:b81d04aa"] },
+    // its job is still working: its id, or its agent's name, which adds to that job (src/jobs.ts hand)
+    expect: { hand: true, picks: ["thread:b81d04aa", "agent:Invoice Chaser"] },
   },
   {
     name: "new work the agent does",
@@ -280,7 +284,8 @@ export const cases = (): Case[] => [
     business: { agents: AGENTS, threads: THREADS },
     chat: [person("my daughter's school wants a list of 10 good science project ideas with materials and cost for each, can you research properly")],
     world: SCIENCE,
-    expect: { hand: true, picks: ["myself"] },
+    // there is no plain copy of Emplio any more: a one-off goes to a new agent (src/jobs.ts MANAGER_PROMPT)
+    expect: { hand: true, picks: ["new"] },
   },
   {
     name: "no agents yet",

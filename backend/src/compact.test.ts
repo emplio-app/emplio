@@ -57,6 +57,37 @@ test("a fold in the middle of a long run keeps its last steps word for word, nev
   expect(folded.length + out.messages.length - 1).toBe(sending.length);
 });
 
+test("notes are taken on the chat's own request when that works, from a transcript when it doesn't", async () => {
+  const sending = run(20, 3_000);
+  const make = (forked: string | null, seen: { fork?: ModelMessage[]; transcript?: number }) =>
+    foldingStep({
+      settings: { compactAt: 10_000, summaryModel: "auto", modelSet: "save", openrouterKey: null } as never,
+      bill: {} as never,
+      keep: [{ role: "user", content: "the brief" }],
+      notes: null,
+      contextTokens: null,
+      system: [],
+      withNotes: () => [],
+      onFold: async () => {},
+      signal: new AbortController().signal,
+      warn: () => {},
+      job: true,
+      fork: { model: "m", tools: {}, providerOptions: {} },
+      forkNotes: async (_f, _i, m) => ((seen.fork = m), forked),
+      takeNotes: async (m) => ((seen.transcript = m.length), "from transcript"),
+    });
+  const step = [{ usage: { inputTokens: 50_000 }, toolResults: [] }];
+  const a: { fork?: ModelMessage[]; transcript?: number } = {};
+  const out = (await make("forked notes", a).prepareStep({ steps: step, messages: sending })) as { instructions: unknown };
+  // the whole request as sent, so its cache is read; no transcript
+  expect(a.fork).toEqual(sending);
+  expect(a.transcript).toBeUndefined();
+  expect(out.instructions).toEqual([]);
+  const b: { fork?: ModelMessage[]; transcript?: number } = {};
+  await make(null, b).prepareStep({ steps: step, messages: sending });
+  expect(b.transcript).toBeGreaterThan(0);
+});
+
 test("older turns are cut down ten at a time, the last three never", () => {
   const big = "x".repeat(10_000);
   const chat = (n: number) => Array.from({ length: n }, (_, i) => [ask(`q${i}`), ran(`${i}${big}`)]).flat();

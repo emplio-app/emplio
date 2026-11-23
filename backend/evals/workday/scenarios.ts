@@ -117,7 +117,7 @@ export const scenarios = (): Scenario[] => [
       },
       { person: "482913", expect: { hand: [{ cont: true, say: ["482913"] }] } },
       {
-        report: { from: "latest", text: "Downloaded 6 October invoices, total ₹48,250. Sheet: /work/out/delhivery-oct-2026.xlsx with each invoice and the total.", files: { "/work/out/delhivery-oct-2026.xlsx": sheet([["Invoice", "Date", "Amount (₹)"], ["DLV-OCT-0412", "2026-10-03", 7850], ["DLV-OCT-0587", "2026-10-08", 9120], ["DLV-OCT-0733", "2026-10-13", 6400], ["DLV-OCT-0901", "2026-10-18", 8930], ["DLV-OCT-1066", "2026-10-24", 7250], ["DLV-OCT-1210", "2026-10-30", 8700], ["Total", "", 48250]]) } },
+        report: { from: "latest", text: "Status: Done\nResult: Downloaded 6 October invoices, total ₹48,250. Sheet: /work/out/delhivery-oct-2026.xlsx with each invoice and the total.\nChecked: the dashboard lists 6 invoices for October; the sheet has 6 rows and its total, worked out in code, is ₹48,250.\nFiles: /work/out/delhivery-oct-2026.xlsx\nChanged outside: nothing\nLeft: nothing", files: { "/work/out/delhivery-oct-2026.xlsx": sheet([["Invoice", "Date", "Amount (₹)"], ["DLV-OCT-0412", "2026-10-03", 7850], ["DLV-OCT-0587", "2026-10-08", 9120], ["DLV-OCT-0733", "2026-10-13", 6400], ["DLV-OCT-0901", "2026-10-18", 8930], ["DLV-OCT-1066", "2026-10-24", 7250], ["DLV-OCT-1210", "2026-10-30", 8700], ["Total", "", 48250]]) } },
         expect: { none: true, tell: ["48,250"] },
       },
     ],
@@ -138,7 +138,7 @@ export const scenarios = (): Scenario[] => [
         expect: { hand: [{ agent: ["Community Manager"], cont: true, say: ["first", "discount"] }] },
       },
       {
-        report: { from: "Community Manager", text: "Posted the first reply on r/pune without the discount line: https://reddit.example/r/pune/comments/abc123" },
+        report: { from: "Community Manager", text: "Status: Done\nResult: Posted the first reply on r/pune without the discount line: https://reddit.example/r/pune/comments/abc123\nChecked: opened the link: the reply is up, without the discount line.\nFiles: none\nChanged outside: one Reddit comment, https://reddit.example/r/pune/comments/abc123\nLeft: nothing" },
         expect: { none: true, tell: ["reddit\\.example|posted"] },
       },
       {

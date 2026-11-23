@@ -20,7 +20,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { FROM_EMPLIO, MODEL_SETS, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
+import { FROM_EMPLIO, MODEL_SETS, modelFor, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -1099,14 +1099,26 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   if (job) jobStops.get(job.startedIn)?.signal.addEventListener("abort", stopAll, { once: true });
   const jobEnded = job ? await job.began(stopAll) : null;
 
+  // check-ins, automations and tasks: nobody waits on them, so a cheaper model
+  const replyModel = job
+    ? modelForJob(settings, job.strong ? "chatModel" : "jobModel", { ...bill, agent: job.agent })
+    : automation === HEARTBEAT
+      ? // background rounds file and check, whatever the business's quality setting: always the cheap model
+        model(settings, MODEL_SETS[settings.modelSet === "free" ? "free" : "save"].backgroundModel, bill)
+      : modelForJob(settings, automation ? "backgroundModel" : "chatModel", bill);
+  const tools = { [codeMode() ? "python" : "bash"]: makeBash(job?.caller ?? EMPLIO, guard) };
+  // notes are always the notes model's (Haiku): on the reply's own model and options when that's it, so they're read
+  // from its cache; else the same request, read in full on the cheaper model, thinking off (compact.ts forkNotes)
+  const notesId = modelFor(settings, "summaryModel");
+  const sameModel = typeof replyModel !== "string" && replyModel.modelId === notesId;
+  folding.fork(
+    sameModel
+    ? { model: replyModel, tools, providerOptions }
+    : { model: model(settings, notesId, bill), tools, providerOptions: { openrouter: { reasoning: { enabled: false } } } },
+  );
+
   const result = streamText({
-    // check-ins, automations and tasks: nobody waits on them, so a cheaper model
-    model: job
-      ? modelForJob(settings, job.strong ? "chatModel" : "jobModel", { ...bill, agent: job.agent })
-      : automation === HEARTBEAT
-        ? // background rounds file and check, whatever the business's quality setting: always the cheap model
-          model(settings, MODEL_SETS[settings.modelSet === "free" ? "free" : "save"].backgroundModel, bill)
-        : modelForJob(settings, automation ? "backgroundModel" : "chatModel", bill),
+    model: replyModel,
     // Anthropic automatic caching: the whole prompt so far (system + history + this reply's tool steps) is
     // cached and the breakpoint moves forward each step, so long chats and tool loops aren't re-billed in full
     providerOptions,
@@ -1118,9 +1130,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       const trimmed = trimSteps(step.messages);
       return trimmed ? { messages: trimmed } : folding.prepareStep(step);
     }, guard),
-    tools: {
-      [codeMode() ? "python" : "bash"]: makeBash(job?.caller ?? EMPLIO, guard),
-    },
+    tools,
     // browser work (emplio browser) takes many small steps. A message they sent meanwhile ends the reply after the
     // command running now, so it goes in as their own message and the next reply carries on from there
     stopWhen: [stepCountIs(maxSteps), () => !!steering.get(id)?.size],
@@ -1213,6 +1223,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
                 steps.length >= maxSteps && steps.at(-1)?.finishReason === "tool-calls",
                 // it asked the person with a card (emplio ask), which waits for their answer
                 (responseMessage.parts as unknown as ScreenPart[]).flatMap((p) => (p.output?.asks as AskCard[] | undefined) ?? []),
+                // how its last step ended, for the checks on it (checks.ts)
+                { text: report, reasoned: responseMessage.parts.slice(lastStep).some((p) => p.type === "reasoning"), finishReason: steps.at(-1)?.finishReason },
               ),
             )
             .catch((error) => log.error(error, "ending the job failed"));

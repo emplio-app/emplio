@@ -21,7 +21,10 @@ import { settingsFor } from "./settings";
 // messages before the new part, so it reads in context
 const CONTEXT = 4;
 const AT_ONCE = 5;
-export const SILENT = "[SILENT]";
+// here too for what imports it from here; it lives in shared so jobs.ts can read it as it loads (an import cycle
+// through reader.ts left it unset there)
+import { SILENT } from "@emplio/shared";
+export { SILENT };
 
 // A reply in the chat is starting: no read until it's quiet again.
 export const holdRead = (conversationId: string) => db.update(conversations).set({ readDueAt: null }).where(eq(conversations.id, conversationId));

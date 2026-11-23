@@ -38,7 +38,8 @@ export function rightCall({ output, expected }: Args): Score {
 // It read the skill before doing any of the work, not after.
 export function readsFirst({ output, expected }: Args): Score {
   if (!expected.use) return { name: "reads_first", score: null };
-  const work = output.commands.findIndex((c) => !/^\s*emplio (plan|skills use)\b/.test(c));
+  // looking in its notes and chats first isn't the work
+  const work = output.commands.findIndex((c) => !/^\s*emplio (plan|skills use|search|history search)\b/.test(c));
   const read = output.commands.findIndex((c) => readOf([c]).includes(expected.use!));
   return { name: "reads_first", score: read >= 0 && (work < 0 || read <= work) ? 1 : 0, metadata: { read, work } };
 }

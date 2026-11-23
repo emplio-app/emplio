@@ -7,7 +7,7 @@
 import { modelFor, type Settings } from "@emplio/shared";
 import type { Bill } from "./credit";
 import { model } from "./models";
-import { generateText, type ModelMessage, type SystemModelMessage, type UIMessage } from "ai";
+import { generateText, type LanguageModel, type ModelMessage, type SystemModelMessage, type ToolSet, type UIMessage } from "ai";
 import { inName } from "./files";
 
 // Past settings.compactAt tokens, the chat so far is folded into notes. The model takes far more; this keeps
@@ -186,6 +186,36 @@ const TASK = `The transcript above is over. Do not reply to it, continue it, or 
 Write the notes: Still to do / Preferences / Their messages / Facts / Done / Answered / Failed / Open / Right now. Copy every \
 identifier exactly, list every item of every list, quote every message and every error exactly.`;
 
+// Notes the Claude Code way: the chat's own request (instructions, tools, messages) with the request for notes added
+// as one more message, not a transcript re-typed into a new prompt. Sent to the chat's own model with its own options,
+// it reads all of it from the cache; to a cheaper notes model (a Sonnet job's notes on Haiku), it's read in full,
+// still cheap. Tools go along only as definitions, nothing runs: the cache needs them, and history with tool calls
+// is refused without them. A reply that calls a tool, is cut off or fails is null: the transcript way takes over.
+export type Fork = { model: LanguageModel; tools: ToolSet; providerOptions: Record<string, never> | object };
+const NO_TOOLS = `STOP WORKING. Respond with TEXT ONLY, no tool calls: a tool call is refused and wastes your only turn.
+Your conversation above is about to be thrown away and replaced by notes you write now; the last few steps stay \
+in full after them. Follow the note-taker's instructions below: "the transcript" is the conversation above, and \
+the agent or AI employee is you.
+
+`;
+export async function forkNotes(fork: Fork, instructions: SystemModelMessage[], messages: ModelMessage[], job: boolean, signal?: AbortSignal) {
+  try {
+    const { text, finishReason, toolCalls } = await generateText({
+      model: fork.model,
+      instructions,
+      messages: [...messages, { role: "user", content: `${NO_TOOLS}${job ? JOB_SYSTEM : SYSTEM}\n\n${job ? "Write the notes: Done / Facts / Session / Failed / Right now." : TASK}` }],
+      tools: Object.fromEntries(Object.entries(fork.tools).map(([k, t]) => [k, { ...t, execute: undefined }])) as ToolSet,
+      providerOptions: fork.providerOptions as never,
+      abortSignal: signal,
+    });
+    if (toolCalls.length || finishReason === "length" || !text.trim()) return null;
+    return text.trim();
+  } catch (error) {
+    if (!signal?.aborted) console.warn("taking notes on the chat's own request failed; writing them from a transcript", error);
+    return null;
+  }
+}
+
 // Notes on `messages`, building on `previous`; null when no model managed it (the caller sends the chat as is).
 // the compaction model (settings.summaryModel or its Quality's), then this one if it's down. Cheap, big window, thinking off: this is transcription, not reasoning.
 const BACKUP_MODEL = "deepseek/deepseek-v4-flash";
@@ -287,6 +317,9 @@ export function foldingStep(o: {
   // a job's chat: its notes use the job template
   job?: boolean;
   takeNotes?: typeof summarise;
+  // the chat's model, tools and options, for notes taken the Claude Code way (forkNotes)
+  fork?: Fork;
+  forkNotes?: typeof forkNotes;
 }) {
   let notes = o.notes;
   // set once a fold fails (the summariser is down: don't ask again every step) or can't help
@@ -326,7 +359,10 @@ export function foldingStep(o: {
           if (estimate(sending.slice(i)) > budget) break;
           from = i;
         }
-    const folded = await (o.takeNotes ?? summarise)(sending.slice(0, tail || from), notes, o.settings, o.bill, o.signal, o.job).finally(() => o.onFolding?.(false));
+    // the whole request as it was last sent, so its cache is read; the transcript way when that doesn't work
+    const folded = await (async () =>
+      (o.fork && (await (o.forkNotes ?? forkNotes)(o.fork, o.withNotes(notes as string), sending, !!o.job, o.signal))) ||
+      (o.takeNotes ?? summarise)(sending.slice(0, tail || from), notes, o.settings, o.bill, o.signal, o.job))().finally(() => o.onFolding?.(false));
     if (!folded) {
       foldFailed = true;
       o.warn(tokens, "summarising failed; sending it whole");
@@ -343,5 +379,6 @@ export function foldingStep(o: {
     await o.onFold(notes, kept.filter((m) => m.role === "user").length);
     return { instructions: o.withNotes(notes), messages: kept };
   };
-  return { prepareStep, state };
+  // set once the reply's model and tools exist, after this is made (chat.ts)
+  return { prepareStep, state, fork: (f: Fork) => void (o.fork = f) };
 }

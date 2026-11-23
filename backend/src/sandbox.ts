@@ -1355,7 +1355,7 @@ export const commandList = (agent: boolean) =>
           "files.list(); files.get(id)",
           "apps.list(); apps.actions(app, [words]); apps.info(action)  # find an action (gmail.send_email), then its input",
           'apps.run(action, args: dict, account=None) -> the app\'s JSON  # a file: {"file": "/work/tmp/x.pdf"}',
-          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.read(*urls); web.answer(question)",
+          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.answer(question) -> short answer with sources, for a fact try it first; web.read(*urls) -> a page's whole text, only when you need all of it",
           "db.sql(query) -> [dict] (a change: {changed, last_id}); db.tables() -> [{name, type, rows}]",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None); tasks.list() -> [{id, title, status, due, assignee}]",
           "skills.use(name); logins.list(); person(email); activity([words], who=None, since=None)",
@@ -1468,7 +1468,7 @@ Database: the business's SQLite database, \`emplio db\` (\`emplio db help\`). St
 
 Tasks: something to do or check later goes in \`emplio tasks add "<what>" --due <date> --to <email|ai|me>\` (\`emplio tasks help\`).
 
-Web: \`emplio web search <words>\`, \`emplio web read <url>\` (clean text), \`emplio web answer <question>\` (\`emplio web help\`). Use these, or curl, before the browser.
+Web: \`emplio web search <words>\`, \`emplio web answer <question>\` (a short answer with sources: for a fact, try it first), \`emplio web read <url>\` (a public page's whole text: only when you need all of it) (\`emplio web help\`). Use these, or curl, before the browser.
 
 Pictures: \`emplio image "<full description>" [--from <image>] [--ratio 1:1|16:9|9:16|4:5...]\` makes one with the business's image model and saves it in /work/out/, and you see it and it's shown in the chat by itself; \`--from\` edits a logo or photo (\`emplio image help\`). Use it for any picture asked for (posts, banners, product shots), never code drawing (Pillow, SVG); a real logo or photo to include goes in \`--from\` (\`from_=\` in Python). Not right: make it again with a better description.
 
