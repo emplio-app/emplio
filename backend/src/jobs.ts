@@ -122,6 +122,8 @@ export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; 
 const MAX_RUNNING = 10; // per chat at once, every level: a runaway plan can't fan out forever
 const LISTED = 8; // threads on Emplio's list
 const SIDEBAR_DAYS = 7;
+// a job's steps per run; past them it carries on in a fresh run, within JOB_MINUTES
+export const JOB_MAX_STEPS = 250;
 export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
 const WAIT_MS = 10 * 60_000;
 
@@ -677,7 +679,7 @@ const notFound = (ref?: string) => `error: none of your threads starts with ${re
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
 export const AGENTS_HEADING = "Your agents (`emplio hand <name>`):";
-export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` carries on its job; `--new` starts a fresh one):";
+export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` adds to its job while it works, else starts a fresh one; `emplio hand <id>` carries on a finished one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   // each agent's latest job: the one `emplio hand <agent>` goes to
   const all = await db
@@ -700,10 +702,10 @@ const USAGE = `usage: emplio hand <agent> [--new] [--description <what it does>]
        <brief; its first line names the work in a few words>
        EOF
 Work goes to an agent. In this chat each agent keeps one job going:
-  emplio hand <agent>          to that agent's job here: it carries on with everything it knew (busy, it reads this
-                               after its current step); with no job here yet, its first one starts
-  emplio hand <agent> --new    a fresh job, for work unrelated to the one it has here; not while that one is still
-                               working or waiting on an answer
+  emplio hand <agent>          while that agent's job here is working or waiting on an answer: adds to it (it reads
+                               this after its current step); otherwise a fresh job
+  emplio hand <id>             carries on that finished job with everything it knew: the same piece of work only
+  emplio hand <agent> --new    a second job for the agent while its first is still working
   emplio hand "<New Agent>" --description "<the kind of work it does>"
                                no agent fits: it's made, and its first job starts
 A new job sees nothing of this chat: the brief must say everything it needs.
@@ -807,9 +809,10 @@ export async function jobsCommand(who: Who, conversationId: string, args: string
       const current = agent
         ? (await db.select().from(jobs).where(and(mine(who, conversationId, caller), eq(jobs.agent, agent.slug), isNotNull(jobs.chatId))).orderBy(desc(jobs.createdAt)).limit(1))[0]
         : undefined;
-      if (current && !fresh) return carryOn(who, conversationId, current, brief);
-      if (current && (current.status === "working" || current.status === "asking"))
-        return { text: `error: ${agent!.name}'s job "${current.name}" is still ${current.status === "asking" ? "waiting on an answer" : "working"}. Nothing was started: send this to it without --new (it reads it after its current step), or wait for it to finish.` };
+      // still at it: this adds to its work. Finished: a fresh job (a finished one carries on only by its id), so one
+      // job doesn't pile up unrelated work: a job once went from LinkedIn posts to X sign-in to a video, 446 steps
+      const active = current && (current.status === "working" || current.status === "asking");
+      if (active && !fresh) return carryOn(who, conversationId, current, brief);
       const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(jobs).where(and(eq(jobs.conversationId, conversationId), eq(jobs.status, "working")));
       if (n! >= MAX_RUNNING) return { text: `error: ${MAX_RUNNING} threads are already running in this chat; wait for some first` };
       const name = brief.split("\n")[0]!.trim().slice(0, 80);
@@ -922,17 +925,19 @@ yours failed: hand it off with what you have (and the error). Don't start work y
 - A matching skill is an agent's work: hand it to the agent that has it (your agents list says which), naming the \
 skill in the brief; don't run it yourself. More of work you did yourself ("send it", "try again"): hand that off too.
 - Independent parts go to different agents, all started in one command; steps needing the last one's result stay \
-in one job.
+in one job. Before handing off big work, list its parts: parts that don't need each other's results (each client, \
+site, app, month or source; reading two systems side by side) are separate jobs, run at the same time, and you put \
+their reports together. Two of the same kind go to one agent as two jobs (\`--new\`).
 
 ## Handing off
 \`emplio hand <agent> <<'EOF'\`, the brief, EOF. The note on the person's message lists your agents and each one's \
 job in this chat. Every piece of work goes to an agent; there is no plain copy of you.
-1. **Its kind of work, same purpose as its job here** (more of it, the next one, a fix, a gap, a change while it \
-runs, an answer to its question; "too", "also", "like you did"): \`emplio hand <agent>\`. That job carries on with \
-everything it found (running, it reads it after its current step). Its name doesn't matter: "Post one reply" and \
-"list all our comments" on one forum are one job.
-2. **Its kind of work, new goal** (a subject or audience its job found nothing for: would that job's findings help? \
-No → new): \`emplio hand <agent> --new\`; not while its job here is working or waiting on an answer.
+1. **Its job here is still working or waiting on an answer**: \`emplio hand <agent>\` adds this to it (it reads it \
+after its current step).
+2. **Its job here has finished**: \`emplio hand <agent>\` starts a fresh job, so one job never piles up unrelated work. \
+Only the same piece of work goes back to the finished job, by its id (\`emplio hand <id>\`, ids in the note on the \
+person's message): a fix, a gap, a retry, "send it", the next batch of the same list, an answer it asked for. A new \
+goal, site, client or document is a fresh job, even for the same agent.
 3. **No agent fits**: make one named like a job title: \`emplio hand "Invoice Chaser" --description "Chases unpaid \
 invoices by email" <<'EOF'\`. One of yours is close: use it (\`emplio agents update\` widens it).
 
@@ -980,6 +985,12 @@ it changes your work.
 Your saved specialists, each with its own instructions, skills, tools and lessons (saved for it automatically).
 - One agent per kind of work, named like a job title ("Supplier Finder"), not the task ("Weekly Task Summary") or \
 one instance ("Flour suppliers Pune"). Widen the closest rather than make a near-copy; archive unused ones.
+- The right size is a role someone could be hired for, with work most weeks: one app or one area of the business, \
+never one task. Too narrow → right: "Flight Fare Checker" → "Travel Desk"; "WhatsApp Chat Reader" and "WhatsApp \
+Group Poster" → "WhatsApp Assistant"; "Annual Filing Drafter" and "MCA Form Filler" → "Company Filings Clerk"; \
+"LinkedIn Invite Sender" and "LinkedIn Request Replier" → "LinkedIn Outreach"; "Menu Card Maker" → "Designer"; \
+"Invoice Maker" and "Payment Chaser" → "Accounts Assistant". Too broad: "Assistant", "Helper", "Operations". Before \
+making one, read your agents list by what each does, not by name: one that covers the kind of work gets it.
 - Level light (default) for reading, searching, sorting, drafting; strong where judgment matters (negotiating, a \
 tricky reply, a decision, and money, tax, legal or compliance work: books, reconciliations, filings, contracts); \`--level strong\` raises one hand-off.
 - Repeating work is a repeating task naming its agent (\`emplio tasks add "Find new flour suppliers" --every \

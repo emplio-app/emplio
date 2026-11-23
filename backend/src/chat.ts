@@ -39,14 +39,14 @@ import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summ
 import { settingsFor } from "./settings";
 import { model, modelForJob } from "./models";
 import { timezoneOf, when } from "./time";
-import { failureGuard, outOfUsage, progressGuard, STALLED_NOTE, unlessStuck, type FailureGuard } from "./stuck";
+import { failureGuard, outOfUsage, progressGuard, unlessStuck, type FailureGuard } from "./stuck";
 import type { Bill } from "./credit";
 import { cloud } from "./cloud";
 import { slashCommand } from "./skills";
 import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { AGENTS_HEADING, EMPLIO, JOB_MAX_STEPS, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -912,7 +912,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   const asJob = job ? [{ role: "system" as const, content: job.prompt }] : [];
   // its job card (jobs.ts): last, so the shared prompt and its rules stay cached; read again after each fold
   let card = job ? await job.card().catch((error) => (log.error(error, "reading the job card failed"), "")) : "";
-  // a job that keeps working while its checklist never moves is stopped (stuck.ts)
+  // a job's run gets more steps than a reply to a person: past them it carries on in a fresh run (jobs.ts CARRY_ON)
+  const maxSteps = job ? JOB_MAX_STEPS : settings.maxSteps;
+  // a job whose checklist doesn't move is reminded about it (stuck.ts)
   const progress = progressGuard(!!chat.plan?.length);
   // code mode: every command they mention, as the Python library spells it (sandbox.ts inPython)
   const python = (m: SystemModelMessage) => (codeMode() ? { ...m, content: inPython(m.content) } : m);
@@ -1065,8 +1067,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
       if (job) {
-        const said = progress.check(!!(result.plan || moved), !notCounted(command));
-        const note = said === STALLED_NOTE ? guard.end(said) : said;
+        const note = progress.check(!!(result.plan || moved), !notCounted(command));
         if (note) result = { ...result, output: `${String(result.output ?? "")}\n\n${code !== undefined ? inPython(note) : note}` };
       }
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }), ms: Date.now() - began };
@@ -1122,7 +1123,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     },
     // browser work (emplio browser) takes many small steps. A message they sent meanwhile ends the reply after the
     // command running now, so it goes in as their own message and the next reply carries on from there
-    stopWhen: [stepCountIs(settings.maxSteps), () => !!steering.get(id)?.size],
+    stopWhen: [stepCountIs(maxSteps), () => !!steering.get(id)?.size],
     // one git save per reply (stopped or not), not per command
     onFinish: async ({ steps }) => {
       // the next message is measured from here. After a fold mid-reply, the steps before it go out again
@@ -1209,7 +1210,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
                 // aborted without Stop: its time ran out
                 stopper.signal.aborted ? "stopped" : outcome.status === "failed" || outcome.status === "aborted" ? "failed" : "completed",
                 interrupted || steered(id),
-                steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === "tool-calls",
+                steps.length >= maxSteps && steps.at(-1)?.finishReason === "tool-calls",
                 // it asked the person with a card (emplio ask), which waits for their answer
                 (responseMessage.parts as unknown as ScreenPart[]).flatMap((p) => (p.output?.asks as AskCard[] | undefined) ?? []),
               ),

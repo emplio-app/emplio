@@ -52,30 +52,21 @@ export function failureGuard() {
 }
 export type FailureGuard = ReturnType<typeof failureGuard>;
 
-// A job that keeps working without getting anywhere: commands that succeed while its checklist (emplio plan) never
-// moves. No checklist by NO_PLAN commands: asked to write one. Not moved in QUIET: told to tick what's done or say
-// what's blocking. Not moved in STALLED: its commands are taken away (guard.end), so it reports where it got to, and
-// whoever started it can carry it on. Commands that only manage (emplio plan, hand, ask) aren't counted.
-// ponytail: counts commands, not time; a job of many tiny browser steps reaches it soonest, so STALLED is generous
-const NO_PLAN = 15;
-const QUIET = 40;
-const STALLED = 80;
-const WRITE_PLAN =
-  "[That's a long job with no checklist. Write one now (emplio plan set ...), a step for each part of your job card, ticking what's done already, and keep it ticked as you go.]";
-const QUIET_NOTE = `[Your checklist hasn't moved in ${QUIET} commands. Tick what's done (emplio plan done <n>). If you're going round in circles or something blocks you, stop and say so in your report.]`;
-export const STALLED_NOTE = `[Stopped: ${STALLED} commands with no step of your checklist done. No more commands this time: report what's done, what's left, and what's in the way.]`;
+// A job's checklist (emplio plan) going stale: every EVERY commands without it moving, a reminder to write one or
+// tick what's done (as Claude Code reminds about its to-do list). Never stops the job: its time limit and the
+// failure guard do that. Commands that only manage (emplio plan, hand, ask) aren't counted.
+const EVERY = 10;
+const WRITE_PLAN = "[Reminder: no checklist yet. If this takes more than a few steps, write one (emplio plan set ...), ticking what's done already.]";
+const TICK = "[Reminder: your checklist hasn't moved in a while. Tick what's done (emplio plan done <n>) and keep the rest up to date.]";
 export function progressGuard(planned: boolean) {
   let since = 0;
-  let asked = planned;
+  let has = planned;
   return {
     // what to add to a command's output, if anything; moved: the checklist changed with it
     check(moved: boolean, counted: boolean): string | null {
-      if (moved) return (since = 0), (asked = true), null;
-      if (!counted) return null;
-      since++;
-      if (!asked && since >= NO_PLAN) return (asked = true), WRITE_PLAN;
-      if (since === QUIET) return QUIET_NOTE;
-      return since >= STALLED ? STALLED_NOTE : null;
+      if (moved) return (since = 0), (has = true), null;
+      if (!counted || ++since % EVERY) return null;
+      return has ? TICK : WRITE_PLAN;
     },
   };
 }

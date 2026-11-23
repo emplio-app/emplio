@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { failureGuard, outOfUsage, progressGuard, STALLED_NOTE, unlessStuck } from "./stuck";
+import { failureGuard, outOfUsage, progressGuard, unlessStuck } from "./stuck";
 
 test("same failure: warned the second time, stopped the third", () => {
   const g = failureGuard();
@@ -21,19 +21,16 @@ test("the same read with the same result a third time gets a note, and never sto
   expect(g.stuck).toBe(false);
 });
 
-test("a job whose checklist never moves is asked for one, told, then stopped; ticking starts the count again", () => {
+test("a job's checklist gets a reminder every 10 commands it doesn't move, and is never stopped", () => {
   const g = progressGuard(false);
-  const notes = Array.from({ length: 80 }, () => g.check(false, true));
-  expect(notes[14]).toContain("no checklist");
-  expect(notes[39]).toContain("hasn't moved in 40");
-  expect(notes[79]).toBe(STALLED_NOTE);
+  const notes = Array.from({ length: 30 }, () => g.check(false, true));
+  expect(notes[9]).toContain("no checklist");
   expect(notes.filter(Boolean).length).toBe(3);
-  const h = progressGuard(true);
-  for (let i = 0; i < 70; i++) h.check(false, true);
-  expect(h.check(true, true)).toBeNull();
-  for (let i = 0; i < 79; i++) expect(h.check(false, true) ?? "").not.toBe(STALLED_NOTE);
+  expect(g.check(true, true)).toBeNull();
+  const after = Array.from({ length: 10 }, () => g.check(false, true));
+  expect(after[9]).toContain("Tick what's done");
   // managing commands (emplio plan, hand, ask) aren't counted
-  expect(h.check(false, false)).toBeNull();
+  expect(Array.from({ length: 20 }, () => g.check(false, false)).filter(Boolean)).toEqual([]);
 });
 
 test("different searches finding nothing never stop it", () => {

@@ -1363,7 +1363,7 @@ export const commandList = (agent: boolean) =>
         ]
       : [
           "ask(question, *answers, multi=False, input=None)  # 2-4 answers to tap, none: open question",
-          "hand(agent, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
+          "hand(agent_or_job_id, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
           "files.show(name_or_id); files.share(id)",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None, agent=None, every=\"<cron>\", actions=\"app.action,...\")",
           "tasks.list(all=False, who=None, due=False) -> [{id, title, status, due, assignee, agent, waiting_on}]",
