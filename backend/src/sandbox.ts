@@ -1696,12 +1696,22 @@ async function sandboxFor(s: Session): Promise<Box> {
   // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
   const mine = deviceFor(s.user.id, true);
   const right = known && (known.local ? !!mine && known.id.startsWith(`local:${mine.id}:`) : !mine);
-  if (known && right && (await known.keepAwake(awakeFor).then(() => true, () => false))) {
-    if (!known.local) meter(s, awakeFor);
-    return known;
+  if (known && right) {
+    // asked every command, so it stays awake as long as before; waited on only when it was last confirmed a while
+    // ago, since the answer is one more trip to the computer before the command can start
+    const recent = Date.now() - (keptAt.get(known.id) ?? 0) < KEPT_FRESH_MS;
+    const kept = known.keepAwake(awakeFor).then(
+      () => (keptAt.set(known.id, Date.now()), true),
+      () => (keptAt.delete(known.id), false),
+    );
+    if (recent || (await kept)) {
+      if (!known.local) meter(s, awakeFor);
+      return known;
+    }
   }
   const start = async () => {
     const box = await findOrCreate(s, !!known?.local);
+    keptAt.set(box.id, Date.now());
     live.set(boxKey(s), box);
     if (!box.local) meter(s, IDLE_MS);
     return box;
@@ -1710,6 +1720,11 @@ async function sandboxFor(s: Session): Promise<Box> {
   if (mine || (awake.get(boxKey(s))?.until ?? 0) > Date.now()) return start();
   return withComputer(s.watched ? PRIORITY.person : s.background ? PRIORITY.background : PRIORITY.work, s.watched ? PERSON_WAIT_MS : WORK_WAIT_MS, start, s.signal);
 }
+// when each computer last said it was awake. Well inside IDLE_MS: one that can't have gone to sleep since isn't waited on.
+// ponytail: never pruned; a few bytes per computer
+const keptAt = new Map<string, number>();
+const KEPT_FRESH_MS = 60_000;
+
 // how long a start waits for a free computer: a person in a live chat a little, work nobody watches a while
 const PERSON_WAIT_MS = 2 * 60_000;
 const WORK_WAIT_MS = 20 * 60_000;
@@ -1815,18 +1830,22 @@ export const outPath = (p: string) => {
 };
 
 // `show`: paths in out/ to put in the chat, stored first if they're new or changed
-export async function collectOut(box: Box, s: Session, others: boolean, show: string[] = []) {
-  const r = await exec(box, `cat ${OUT_SEEN} 2>/dev/null; echo '${SEP}'; ${LIST_OUT}; echo '${SEP}'; ${others ? OPEN_OUT : "true"}`);
+// listed: the same listing, printed at the end of the command (afterTrailer) instead of asked for after it
+export async function collectOut(box: Box, s: Session, others: boolean, show: string[] = [], listed?: string) {
+  const r = listed !== undefined ? { exitCode: 0, result: listed } : await exec(box, `cat ${OUT_SEEN} 2>/dev/null; echo '${SEP}'; ${LIST_OUT}; echo '${SEP}'; ${others ? OPEN_OUT : "true"}`);
   // a computer that didn't answer gave "Command timed out after 60s", not a list of files
   if (r.exitCode === 124 || !r.result?.includes(SEP)) return { stored: [] as Saved[], shown: [] as Saved[], failed: [] as string[] };
-  const [seenText = "", nowText = "", openText = ""] = r.result.split(SEP);
+  let [seenText = "", nowText = "", openText = ""] = r.result.split(SEP);
+  // a listing from the command's end can be older than another chat's pickup since: what that one stored is known here
+  if (listed !== undefined) seenText = seenOn.get(box.id) ?? seenText;
   const rows = (t: string) =>
     t
       .split("\n").filter(Boolean)
       .map((l) => l.split("\t"));
   const seen = new Map<string, { sig: string; id?: string }>(rows(seenText).map(([path, sig, id]) => [path!, { sig: sig!, id: id || undefined }]));
   const open = new Set(openText.split("\n").filter(Boolean));
-  const now = new Map(rows(nowText).map(([path, time, size]) => [path!, `${time}:${size}`]));
+  // only the listing's own lines: something the command left running can print after the command ended
+  const now = new Map(rows(nowText).filter(([path]) => path!.startsWith(`${WORK}/out/`)).map(([path, time, size]) => [path!, `${time}:${size}`]));
   const stored: Saved[] = [];
   const failed: string[] = [];
   for (const [path, sig] of now) {
@@ -1854,7 +1873,9 @@ export async function collectOut(box: Box, s: Session, others: boolean, show: st
   }
   // gone from out/: forgotten, so a file made again under that name is stored again
   const keep = [...seen].filter(([path]) => now.has(path));
-  if (stored.length || keep.length !== seen.size) await upload(box, OUT_SEEN, keep.map(([path, v]) => `${path}\t${v.sig}\t${v.id ?? ""}\n`).join(""));
+  const seenNow = keep.map(([path, v]) => `${path}\t${v.sig}\t${v.id ?? ""}\n`).join("");
+  if (stored.length || keep.length !== seen.size) await upload(box, OUT_SEEN, seenNow);
+  seenOn.set(box.id, seenNow);
   const shown: Saved[] = [];
   for (const path of show) {
     const id = seen.get(path)?.id;
@@ -1864,6 +1885,10 @@ export async function collectOut(box: Box, s: Session, others: boolean, show: st
   }
   return { stored, shown, failed };
 }
+
+// what each computer's out-seen file holds, as of its last pickup
+// ponytail: never pruned; a line per file in out/ per computer
+const seenOn = new Map<string, string>();
 
 // Revert what a non-admin may not change in company/. Cheap, so it runs after every command and the
 // agent hears about it straight away.
@@ -2070,10 +2095,25 @@ async function park(box: Box, name: string, text: string, ext = "json") {
 // After the command: the emplio requests it made, printed with their contents (and removed), the page's new calls
 // to its server if it used the browser, then any browser step that failed, whatever the command did with its output;
 // keeping its exit code.
-export const requestsTrailer = (key: string) =>
+export const requestsTrailer = (key: string, more = "") =>
   `\n__ez=$?; for f in $(ls -tr /tmp/emplio-req.${key}.* 2>/dev/null); do printf 'EZREQ:${key}\\t%s\\t%s\\n' "$f" "$(cat "$f")"; rm -f "$f"; done; ` +
   `{ [ -n "$BROWSER_CDP_URL" ] || [ -s /tmp/emplio-browser.${key} ]; } && emplio browser calls --new 2>/dev/null; rm -f /tmp/emplio-browser.${key}; ` +
-  `if [ -s /tmp/emplio-failed.${key} ]; then printf '\\n[Browser steps that failed in this command, whatever the output above shows; check before carrying on:\\n'; cat /tmp/emplio-failed.${key}; printf ']\\n'; fi; rm -f /tmp/emplio-failed.${key}; exit $__ez`;
+  `if [ -s /tmp/emplio-failed.${key} ]; then printf '\\n[Browser steps that failed in this command, whatever the output above shows; check before carrying on:\\n'; cat /tmp/emplio-failed.${key}; printf ']\\n'; fi; rm -f /tmp/emplio-failed.${key}; ${more}exit $__ez`;
+
+// The out/ listing (collectOut) and a member's check (scopeScript), printed at the end of the command itself rather
+// than asked for in trips of their own after it. Each part ends in `|| true`: a command that turned on `set -e`
+// must not end here, with another exit code. Missing when the command didn't reach its end (an `exit`, a timeout):
+// then they're asked for after it, as before.
+const afterMark = (key: string) => `AFTER:${key}`;
+export const afterTrailer = (key: string, member: boolean) =>
+  `printf '\\n%s\\n' '${afterMark(key)}'; cat ${OUT_SEEN} 2>/dev/null || true; echo '${SEP}'; ${LIST_OUT} || true; echo '${SEP}'; ${OPEN_OUT} || true; echo '${SEP}'; ` +
+  (member ? `(${scopeScript}) || true; ` : "");
+export function splitAfter(output: string, key: string): { output: string; listed?: string; rejected?: string[] } {
+  const at = output.lastIndexOf(`\n${afterMark(key)}\n`);
+  if (at < 0) return { output };
+  const [seen = "", now = "", open = "", checked] = output.slice(at + afterMark(key).length + 2).split(SEP);
+  return { output: output.slice(0, at), listed: [seen, now, open].join(SEP), rejected: checked === undefined ? undefined : tagged(checked, "REJECTED") };
+}
 
 // Puts each request's contents back in place of its marker. A marker a pipe dropped or cut short
 // (emplio ... | grep x, | head -c 300) still runs, from its file, after the rest.
@@ -2629,7 +2669,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (refused) return { box, switched, browserId: undefined, result: { exitCode: 1, output: refused } as BoxResult };
 
     // a command that drives the browser gets this chat's browser, started on first use
-    let env: Record<string, string> = { TZ: await timezoneOf(s.user.id), EMPLIO_WORK: WORK };
+    const looked = lookups(s);
+    let env: Record<string, string> = { TZ: await looked.tz, EMPLIO_WORK: WORK };
     let browserId: string | undefined;
     // code mode: a function an earlier step wrote that drives the browser doesn't say so when it's called, so while
     // this chat's browser is up every step gets it
@@ -2644,7 +2685,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     const git = gitForCommand(s);
     if (git) env = { ...env, ...git.env };
     // its commits name the person as GitHub knows them, not the computer's BOX_EMAIL, so a repo's deploys accept them
-    env = { ...env, ...gitAuthor(s, await githubAddress(s)) };
+    env = { ...env, ...gitAuthor(s, await looked.github) };
 
     if (background) {
       // code mode: its emplio calls are answered live for an hour (nothing collects them after)
@@ -2678,9 +2719,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   let browserId = ran.browserId;
   let result = ran.result;
   const key = crypto.randomUUID();
+  let ended: ReturnType<typeof splitAfter> | undefined;
   if (!result) {
     const answering = liveFor(s, box, key, job, false);
-    const done = await exec(box, `${command}${requestsTrailer(key)}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
+    const done = await exec(box, `${command}${requestsTrailer(key, afterTrailer(key, !isAdmin(s)))}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
     if (done.exitCode === 124 || done.exitCode === 125) console.warn(`command in chat ${s.conversationId} ended ${done.exitCode} on ${box.id} after ${Math.round((Date.now() - ready) / 1000)}s`);
     const bag = liveDone(answering?.token);
     browserId ??= bag?.browserId;
@@ -2695,7 +2737,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         output: `${done.result}\n\nThe computer froze (most likely out of memory: too much running at once) and has been replaced by a fresh one for your next command. Company files are safe as of the last save; anything only in /work/tmp or not yet saved is gone. Run heavy commands (installs, builds) one at a time.`,
       };
     }
-    const printed = ran.git ? (done.result ?? "").replaceAll(ran.git.proxy, "https://") : (done.result ?? "");
+    ended = splitAfter(done.result ?? "", key);
+    const printed = ran.git ? ended.output.replaceAll(ran.git.proxy, "https://") : ended.output;
     const emplio = await runEz(box, s, withRequests(printed, key), key, job);
     // what live requests put on screen (cards, the checklist, files to look at) comes with the result as usual
     if (bag) {
@@ -2745,7 +2788,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     }
     const saved = (out.shown as Saved[] | undefined) ?? [];
     await after("storing files from out/", async () => {
-      const made = await collectOut(box, s, commandsOn(boxKey(s)) > 0, (out.showOut as string[] | undefined) ?? []);
+      const made = await collectOut(box, s, commandsOn(boxKey(s)) > 0, (out.showOut as string[] | undefined) ?? [], ended?.listed);
       saved.push(...made.shown);
       if (made.stored.length) out.stored = made.stored.map((f) => `${f.filename}${f.id ? ` (${f.id.slice(0, 8)})` : ""}`);
       if (made.failed.length) notDone.push(`not stored or shown yet (still in ${WORK}/out, tried again after your next command): ${made.failed.join(", ")}`);
@@ -2755,7 +2798,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (saved.length) out.saved = saved;
     if (!isAdmin(s))
       await after("checking what this person may change", async () => {
-        const rejected = tagged((await exec(box, scopeScript)).result, "REJECTED");
+        const rejected = ended?.rejected ?? tagged((await exec(box, scopeScript)).result, "REJECTED");
         if (rejected.length) out.rejected = { paths: rejected, reason: "only admins can change these; reverted" };
       });
     // Emplio hears it: the command ran, so it isn't one to repeat
@@ -2764,6 +2807,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     return out;
   });
 }
+
+// what a command's environment needs that doesn't change within a reply, looked up at its first command only
+const perReply = new WeakMap<Session, { tz: Promise<string>; github: Promise<string | null> }>();
+const lookups = (s: Session) => perReply.get(s) ?? perReply.set(s, { tz: timezoneOf(s.user.id), github: githubAddress(s) }).get(s)!;
 
 // boxes that ran a command since their last save (a reply's save also carries other chats' changes)
 const used = new Set<string>();
