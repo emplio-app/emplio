@@ -550,6 +550,8 @@ export type JobInfo = {
   // its own chat (a conversation of kind "job"), where it works and the person can talk to it; null: a job
   // from before jobs were chats
   chatId: string | null;
+  // how long this run has taken: so far while it works, in all once finished
+  ms?: number;
 };
 
 // GET /knowledge: the notes (.md files) this person can see, by folder (a git repo)

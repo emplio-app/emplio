@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import { BotIcon, CheckIcon, ChevronRightIcon, CircleHelpIcon, TerminalIcon, XIcon } from "lucide-react";
 import Link from "next/link";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { BrowserChip } from "@/components/chat/browser-panel";
 import { ApprovalCard } from "@/components/chat/approval-card";
 import { AskCard } from "@/components/chat/ask-card";
@@ -53,6 +53,8 @@ type BashPart = {
     plan?: PlanStep[];
     // queued messages the agent took in when this command finished (chat.ts steering)
     messagesFromPerson?: { id: string; text: string }[];
+    // how long it took (chat.ts); older replies don't have it
+    ms?: number;
   };
   errorText?: string;
   preliminary?: boolean;
@@ -143,6 +145,13 @@ export function AssistantParts({
   });
 }
 
+// how long a run took: "0.4s", "12s", "1m 12s"; whole: no tenths (a clock that ticks once a second)
+const duration = (ms: number, whole = false) => {
+  if (ms < 10_000 && !whole) return `${(ms / 1000).toFixed(1)}s`;
+  const s = whole ? Math.floor(ms / 1000) : Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
+};
+
 // The model's thinking: open while it thinks, folded to one "Thought" line once it's done; a tap opens it again.
 // "Thought for 4s", "Thought for 1m 12s"; replies from before it was timed just say "Thought"
 const tookFor = (ms?: number) => {
@@ -206,7 +215,10 @@ function Actions({ steps, streaming, live }: { steps: (BashPart | ThoughtPart)[]
   const saved = tools.flatMap((p) => p.output?.saved ?? []);
   const cards = [...new Map(tools.flatMap((p) => p.output?.connect ?? []).map((c) => [c.app, c])).values()];
   const usedBrowser = tools.some((p) => p.output?.browser);
-  const wording = live ? `Running ${n} ${noun}…` : `Ran ${n} ${noun}`;
+  // once done, the run's time: its commands and the thinking between them
+  const times = steps.map((t) => (isThought(t) ? t.ms : t.output?.ms)).filter((ms) => ms !== undefined);
+  const total = times.length ? times.reduce((a, b) => a + b, 0) : undefined;
+  const wording = live ? `Running ${n} ${noun}…` : `Ran ${n} ${noun}${total === undefined ? "" : ` · ${duration(total)}`}`;
   return (
     <div className="flex w-full flex-col gap-1.5">
       <button
@@ -286,7 +298,7 @@ function Results({
 // the prompt it was handed), so an earlier one stays finished when the job is given more work.
 function Job({ id, run }: { id: string; run?: string }) {
   const [open, setOpen] = useState(false);
-  const { data: w, isError } = useQuery({
+  const { data: w, isError, dataUpdatedAt } = useQuery({
     queryKey: ["job", id, run],
     queryFn: () => api<JobInfo>(`/jobs/${id}${run ? `?run=${encodeURIComponent(run)}` : ""}`),
     // a card that can't load (the job was deleted) stops asking instead of spinning for good
@@ -297,6 +309,14 @@ function Job({ id, run }: { id: string; run?: string }) {
   const working = status === "working";
   const now = working ? actions.findLast((a) => !a.done)?.description ?? (actions.length ? "Thinking…" : "Starting…") : null;
   const n = actions.length;
+  // its time: while it works, counted on each second from what the server last said (no clock of the server's needed)
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+  const took = w?.ms === undefined ? undefined : working ? w.ms + Date.now() - dataUpdatedAt : w.ms;
   return (
     <div className="flex w-full flex-col gap-1.5">
       <div className="w-full rounded-lg border bg-card text-sm">
@@ -329,9 +349,9 @@ function Job({ id, run }: { id: string; run?: string }) {
                   ? `· ${n} ${n === 1 ? "action" : "actions"}`
                   : status === "asking"
                     ? "· has a question"
-                    : `· ${status}`}
-            </span>
+                    : `· ${status}`}            </span>
           )}
+          {took !== undefined && <span className="shrink-0 text-xs tabular-nums">{duration(took, working)}</span>}
           <ChevronRightIcon className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
         {open && (
@@ -457,8 +477,7 @@ function ToolCall({
           {p.output?.pid && (
             <span className="text-xs">background · pid {p.output.pid}</span>
           )}
-          {stopped && <span className="text-xs">stopped</span>}
-          {failed && (
+          {stopped && <span className="text-xs">stopped</span>}          {failed && (
             // the agent usually tries another way next: a quiet note, not an alarm
             <span className="text-xs text-muted-foreground" title={`exit ${p.output?.exitCode ?? "error"}`}>
               Error

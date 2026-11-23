@@ -2,6 +2,19 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.2 (2026-11-23)
+
+### What's new
+
+- Commands run faster: the checks around each step take one trip to Emplio's computer instead of three or four, about 0.3 seconds less per step.
+- See how long work takes: a group of steps shows its total time ("Ran 3 actions · 14s"), and an agent's card counts up while it works and keeps its time once done.
+
+### For developers
+
+- `sandbox.ts`: the out/ listing and a member's file check are printed at the end of the command itself (`afterTrailer`, `splitAfter`); asked for separately only when the command didn't reach its end. The keep-awake call runs alongside a command when the computer answered one in the last minute. Timezone and GitHub address are looked up once per reply.
+- Command outputs carry `ms` (kept from the model in `toModelOutput`); `JobInfo.ms` is a run's time so far, or in all once finished.
+- `jobs.ts`: a restart's or the step limit's "carry on" no longer ends a run's card (`runSpan`); an earlier run's end is the tool-saving nudge's time, or its last reply's start plus its steps (`runEnd`).
+
 ## 1.4.1 (2026-11-22)
 
 ### What's new

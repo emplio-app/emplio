@@ -76,9 +76,10 @@ export const SAVE_TOOL =
 // two), or it ran SMALL_WORK commands or fewer. Each follow-up a job is given gets its own nudge.
 const NUDGED = /^\[From Emplio\] (\[Keep tools\] )?(Your report has gone|Before your report)/;
 const SMALL_WORK = 2;
+// a new piece of work handed to a job; a restart's or the step limit's "carry on" goes on with the one before
+const brief = (m: { role: string; parts: unknown }) =>
+  m.role === "user" && textOf(m).startsWith(FROM_EMPLIO) && ![RESTARTED, CARRY_ON].includes(textOf(m).slice(FROM_EMPLIO.length));
 export const nudged = (msgs: { role: string; parts: unknown }[]) => {
-  const brief = (m: { role: string; parts: unknown }) =>
-    m.role === "user" && textOf(m).startsWith(FROM_EMPLIO) && ![RESTARTED, CARRY_ON].includes(textOf(m).slice(FROM_EMPLIO.length));
   const at = msgs.length - 1 - [...msgs].reverse().findIndex(brief);
   if (at === msgs.length) return true;
   if (NUDGED.test(textOf(msgs[at]!))) return true;
@@ -489,28 +490,48 @@ const asks = (report: string) => /^\W*question\b/i.test(report) && !/^\W*questio
 const textOf = (m: { parts: unknown }) =>
   ((m.parts as { type?: string; text?: string }[]) ?? []).flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("");
 
-// The messages of one run: from its prompt up to the next prompt from Emplio. null while the prompt isn't in the chat.
+// The messages of one run: from its prompt up to the next piece of work from Emplio (a restart cutting it in two
+// doesn't end it). null while the prompt isn't in the chat.
 export function runSpan<M extends { id: string; role: string; parts: unknown }>(msgs: M[], run: string) {
   const at = msgs.findIndex((m) => m.id === run);
   if (at < 0) return null;
-  const next = msgs.findIndex((m, i) => i > at && m.role === "user" && textOf(m).startsWith(FROM_EMPLIO));
+  const next = msgs.findIndex((m, i) => i > at && brief(m));
   return { msgs: msgs.slice(at, next < 0 ? undefined : next), latest: next < 0 };
 }
 
-async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "report" | "actions">> {
-  if (!run || !w.chatId) return { status: w.status, report: w.report, actions: await actionsOf(w) };
-  const span = runSpan(await loadMessages(w.chatId), run);
+async function runOf(w: Row, run?: string): Promise<Pick<JobInfo, "status" | "report" | "actions" | "ms">> {
+  // how long it's been at it: up to now while it works (the card counts on from there), to its end once finished
+  const took = (from?: Date, working = w.status === "working") => {
+    const end = working ? Date.now() : w.finishedAt?.getTime();
+    return from && end ? { ms: end - new Date(from).getTime() } : {};
+  };
+  if (!run || !w.chatId) return { status: w.status, report: w.report, actions: await actionsOf(w), ...took(w.createdAt) };
+  const all = await loadMessages(w.chatId);
+  const span = runSpan(all, run);
   if (!span) return { status: "working", report: null, actions: [] };
   const actions = actionsIn(span.msgs);
   if (span.latest) {
     // just handed it, not begun: the job still holds the run before's status and report, and a finished card stops checking
     const asked = (span.msgs[0]?.metadata as { createdAt?: Date } | undefined)?.createdAt;
     const stale = asked && w.finishedAt && w.finishedAt < new Date(asked);
-    return stale && w.status !== "working" ? { status: "working", report: null, actions } : { status: w.status, report: w.report, actions };
+    return stale && w.status !== "working" ? { status: "working", report: null, actions, ...took(asked, true) } : { status: w.status, report: w.report, actions, ...took(asked) };
   }
   const last = [...span.msgs].reverse().find((m) => m.role === "assistant" && textOf(m).trim());
   const text = last ? textOf(last).trim() : "";
-  return { status: asks(text) ? "asking" : "done", report: text || null, actions };
+  const ended = runEnd(span.msgs, all[all.indexOf(span.msgs.at(-1)!) + 1]);
+  return { status: asks(text) ? "asking" : "done", report: text || null, actions, ...(ended && { ms: ended - sentAt(span.msgs[0]!) }) };
+}
+
+const sentAt = (m: UIMessage) => new Date((m.metadata as { createdAt: Date | string }).createdAt).getTime();
+// When an earlier run ended, which the job no longer holds (its finishedAt is the latest run's): the tool-saving
+// nudge after it is sent the moment it ends; otherwise its last reply's start plus the time its steps and thinking
+// took (chat.ts), a little short of the whole.
+export function runEnd(span: UIMessage[], after?: UIMessage) {
+  if (after && textOf(after).startsWith(FROM_EMPLIO + KEEP_TOOLS_PREFIX)) return sentAt(after);
+  const last = [...span].reverse().find((m) => m.role === "assistant");
+  if (!last) return undefined;
+  type Timed = { output?: { ms?: number }; providerMetadata?: { emplio?: { ms?: number } } };
+  return sentAt(last) + (last.parts as Timed[]).reduce((sum, p) => sum + (p.output?.ms ?? p.providerMetadata?.emplio?.ms ?? 0), 0);
 }
 
 const agentName = (slug: string | null) => slug?.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ?? null;

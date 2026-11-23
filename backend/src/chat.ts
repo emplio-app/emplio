@@ -984,6 +984,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     // A generator so a command waiting on the person's OK for an app action (approvals.ts) can show the
     // card while it waits: each yield before the last is an in-progress output the chat draws.
     async *execute(input, { abortSignal }) {
+      // how long it took, shown on its line in the chat (tool-calls.tsx); kept from the model (toModelOutput)
+      const began = Date.now();
       const { description, background, step } = input;
       // code mode: the checks read the code as commands; the computer runs it in this chat's Python session
       const code = (input as unknown as { code?: string }).code;
@@ -1055,11 +1057,11 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
-      yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }) };
+      yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }), ms: Date.now() - began };
     },
     // files from `emplio view` go to the model as real images/PDFs, not as JSON
     toModelOutput: async ({ output: all }) => {
-      const output = withoutCards(all);
+      const { ms: _ms, ...output } = withoutCards(all) as Record<string, unknown>;
       const viewed = ((output as { viewed?: unknown }).viewed ?? []) as { url?: string; mediaType?: string; filename?: string }[];
       if (!viewed.some((f) => f.url)) return { type: "json", value: output as never };
       return {
