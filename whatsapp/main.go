@@ -585,6 +585,11 @@ func (s *Server) Routes() *http.ServeMux {
 			}
 			msg = a.replyTo(q, w, text)
 		}
+		if tags := strs(b["mention"]); len(tags) > 0 {
+			if msg, err = a.mention(chat, msg, text, tags); err != nil {
+				return nil, err
+			}
+		}
 		return a.Send(chat, msg)
 	}))
 	mux.HandleFunc("POST /accounts/{id}/send-file", s.acct(func(a *Account, r *http.Request) (any, error) {

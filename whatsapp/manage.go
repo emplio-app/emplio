@@ -117,6 +117,41 @@ func withContext(m *waE2E.Message, ci *waE2E.ContextInfo) *waE2E.Message {
 	return m
 }
 
+// mention tags people (phone numbers) in a text message going to chat.
+func (a *Account) mention(chat string, msg *waE2E.Message, text string, tags []string) (*waE2E.Message, error) {
+	if len(tags) > 50 {
+		return nil, refuse(400, "tag at most 50 people")
+	}
+	phones := []types.JID{}
+	for _, p := range tags {
+		jid, _ := TargetOf(p)
+		j, err := types.ParseJID(jid)
+		if jid == "" || err != nil || j.Server != types.DefaultUserServer {
+			return nil, refuse(400, "%q isn't a phone number with country code", p)
+		}
+		phones = append(phones, j)
+	}
+	var lidOf func(types.JID) types.JID
+	if g, _ := types.ParseJID(chat); g.Server == types.GroupServer {
+		if info, err := a.groupInfo(g); err == nil && info.AddressingMode == types.AddressingModeLID {
+			if cli := a.client(); cli != nil {
+				lidOf = func(pn types.JID) types.JID { l, _ := cli.Store.LIDs.GetLIDForPN(bg, pn); return l }
+			}
+		}
+	}
+	text, ids := Mentions(text, phones, lidOf)
+	if msg.ExtendedTextMessage == nil {
+		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{}}
+	}
+	ext := msg.ExtendedTextMessage
+	ext.Text = proto.String(text)
+	if ext.ContextInfo == nil {
+		ext.ContextInfo = &waE2E.ContextInfo{}
+	}
+	ext.ContextInfo.MentionedJID = ids
+	return msg, nil
+}
+
 // replyTo is text sent as a reply to a saved message (it shows quoted above).
 func (a *Account) replyTo(q *Message, w *waE2E.Message, text string) *waE2E.Message {
 	return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: &waE2E.ContextInfo{

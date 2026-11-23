@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.3 (2026-11-23)
+
+### What's new
+
+- Emplio can tag people in your WhatsApp groups. Ask it to mention someone and they get a real @ tag and a notification, not just their name in the text.
+
+### For developers
+
+- `whatsapp_linked.send_message` takes `mention` (phone numbers, up to 50). The worker's `/send` lists them in `ContextInfo.MentionedJID` and makes sure the text has `@<number>` for each (added at the start if missing). In groups that hide numbers (`AddressingModeLID`) the tag uses the person's hidden id. `Mentions` in `text.go`, tested in `TestMentions`.
+- Going live needs the Go worker redeployed on the WhatsApp box.
+
 ## 1.4.2 (2026-11-23)
 
 ### What's new
