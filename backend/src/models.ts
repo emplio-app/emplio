@@ -103,23 +103,11 @@ const routing = (id: string) => ({ provider: { data_collection: "deny" as const,
 
 // What OpenRouter charged for one call (its usage.cost, in dollars), taken from the business's credit (credit.ts).
 const costOf = (usage: { raw?: unknown }) => Number((usage.raw as { cost?: number } | undefined)?.cost ?? 0);
-// What each chat's AI calls have cost since the server started, in dollars, for a job's spending cap (chat.ts).
-// ponytail: in memory, so a restart starts it again from nothing; the oldest chats drop off past 5,000
-const spentBy = new Map<string, number>();
-export const spent = (conversationId: string) => spentBy.get(conversationId) ?? 0;
-const charge = (bill: Bill, id: string, ownKey: boolean, usd: number) => {
-  cloud.credit.chargeQuietly(bill, "ai", usd, bill.agent ? `${id} · ${bill.agent}` : id, { ownKey });
-  if (!bill.conversationId) return;
-  const before = spent(bill.conversationId);
-  spentBy.delete(bill.conversationId);
-  spentBy.set(bill.conversationId, before + usd);
-  if (spentBy.size > 5_000) spentBy.delete(spentBy.keys().next().value!);
-};
 const metering = (bill: Bill, id: string, ownKey: boolean): LanguageModelMiddleware => ({
   specificationVersion: "v4",
   wrapGenerate: async ({ doGenerate }) => {
     const result = await doGenerate();
-    charge(bill, id, ownKey, costOf(result.usage));
+    cloud.credit.chargeQuietly(bill, "ai", costOf(result.usage), bill.agent ? `${id} · ${bill.agent}` : id, { ownKey });
     return result;
   },
   wrapStream: async ({ doStream }) => {
@@ -127,7 +115,7 @@ const metering = (bill: Bill, id: string, ownKey: boolean): LanguageModelMiddlew
     const stream = result.stream.pipeThrough(
       new TransformStream({
         transform(part, out) {
-          if (part.type === "finish") charge(bill, id, ownKey, costOf(part.usage));
+          if (part.type === "finish") cloud.credit.chargeQuietly(bill, "ai", costOf(part.usage), bill.agent ? `${id} · ${bill.agent}` : id, { ownKey });
           out.enqueue(part);
         },
       }),

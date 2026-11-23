@@ -37,7 +37,7 @@ import { onboarding } from "./setup";
 import { businessInstructions, codeMode, computerNote, inPython, personalFiles, pythonCommand, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
 import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld, trimSteps } from "./compact";
 import { settingsFor } from "./settings";
-import { model, modelForJob, spent } from "./models";
+import { model, modelForJob } from "./models";
 import { timezoneOf, when } from "./time";
 import { failureGuard, outOfUsage, progressGuard, STALLED_NOTE, unlessStuck, type FailureGuard } from "./stuck";
 import type { Bill } from "./credit";
@@ -46,7 +46,7 @@ import { slashCommand } from "./skills";
 import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { AGENTS_HEADING, EMPLIO, JOB_MAX_STEPS, JOB_SPEND_USD, jobReply, SPENT_NOTE, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -912,10 +912,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   const asJob = job ? [{ role: "system" as const, content: job.prompt }] : [];
   // its job card (jobs.ts): last, so the shared prompt and its rules stay cached; read again after each fold
   let card = job ? await job.card().catch((error) => (log.error(error, "reading the job card failed"), "")) : "";
-  // a job runs on its own limits (jobs.ts), not the steps a reply to a person gets
-  const maxSteps = job ? JOB_MAX_STEPS : settings.maxSteps;
+  // a job that keeps working while its checklist never moves is stopped (stuck.ts)
   const progress = progressGuard(!!chat.plan?.length);
-  const spendBase = job ? await job.spendBase().catch(() => spent(id)) : 0;
   // code mode: every command they mention, as the Python library spells it (sandbox.ts inPython)
   const python = (m: SystemModelMessage) => (codeMode() ? { ...m, content: inPython(m.content) } : m);
   const withNotes = (n: string | null) =>
@@ -1066,10 +1064,9 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
-      // a job's limits (jobs.ts): what its work on hand may cost, and its checklist moving (stuck.ts)
       if (job) {
         const said = progress.check(!!(result.plan || moved), !notCounted(command));
-        const note = spent(id) - spendBase > JOB_SPEND_USD ? guard.end(SPENT_NOTE) : said === STALLED_NOTE ? guard.end(said) : said;
+        const note = said === STALLED_NOTE ? guard.end(said) : said;
         if (note) result = { ...result, output: `${String(result.output ?? "")}\n\n${code !== undefined ? inPython(note) : note}` };
       }
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }), ms: Date.now() - began };
@@ -1125,7 +1122,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     },
     // browser work (emplio browser) takes many small steps. A message they sent meanwhile ends the reply after the
     // command running now, so it goes in as their own message and the next reply carries on from there
-    stopWhen: [stepCountIs(maxSteps), () => !!steering.get(id)?.size],
+    stopWhen: [stepCountIs(settings.maxSteps), () => !!steering.get(id)?.size],
     // one git save per reply (stopped or not), not per command
     onFinish: async ({ steps }) => {
       // the next message is measured from here. After a fold mid-reply, the steps before it go out again
@@ -1212,7 +1209,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
                 // aborted without Stop: its time ran out
                 stopper.signal.aborted ? "stopped" : outcome.status === "failed" || outcome.status === "aborted" ? "failed" : "completed",
                 interrupted || steered(id),
-                steps.length >= maxSteps && steps.at(-1)?.finishReason === "tool-calls",
+                steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === "tool-calls",
                 // it asked the person with a card (emplio ask), which waits for their answer
                 (responseMessage.parts as unknown as ScreenPart[]).flatMap((p) => (p.output?.asks as AskCard[] | undefined) ?? []),
               ),

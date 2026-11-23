@@ -26,7 +26,6 @@ import { timezoneOf, when } from "./time";
 import { isReplying } from "./live";
 import { cloud } from "./cloud";
 import { planText } from "./plan";
-import { spent } from "./models";
 
 type Action = JobInfo["actions"][number];
 
@@ -123,14 +122,6 @@ export const reportGoes = (o: { depth: number; stopped: boolean; owed: boolean; 
 const MAX_RUNNING = 10; // per chat at once, every level: a runaway plan can't fan out forever
 const LISTED = 8; // threads on Emplio's list
 const SIDEBAR_DAYS = 7;
-// A job's limits instead of a step count per run (chat.ts): its time (JOB_MINUTES), what its work on hand may cost
-// (about the dearest 1 in 100 jobs, Nov 2026), its checklist moving (stuck.ts progressGuard), and a backstop.
-export const JOB_SPEND_USD = 2;
-export const JOB_MAX_STEPS = 400;
-export const SPENT_NOTE = `[Stopped: this piece of work has cost $${JOB_SPEND_USD} in AI so far, the most it may use before someone says to carry on. No more commands this time: report what's done, what's left, and that it can carry on from there.]`;
-// what its work on hand had cost when it began (models.ts spent), by the message that handed it the work
-// ponytail: in memory; after a restart the count starts again
-const spendFrom = new Map<string, number>();
 export const JOB_MINUTES = 120; // a job's runs, carry-ons after the step limit included (chat.ts); a person's reply gets 15
 const WAIT_MS = 10 * 60_000;
 
@@ -322,12 +313,6 @@ export async function jobReply(chatId: string) {
     unattended: await unattended(w.conversationId),
     until: deadline(w.id),
     began: (stop: () => void) => began(w, stop),
-    spendBase: async () => {
-      const msgs = await loadMessages(chatId);
-      const key = (msgs[workAt(msgs)] as { id?: string } | undefined)?.id ?? chatId;
-      if (!spendFrom.has(key)) spendFrom.set(key, spent(chatId));
-      return spendFrom.get(key)!;
-    },
     card: async () => jobCard(await loadMessages(chatId), (await db.query.conversations.findFirst({ where: eq(conversations.id, chatId), columns: { plan: true } }))?.plan),
   };
 }
