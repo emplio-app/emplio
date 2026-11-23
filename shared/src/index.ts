@@ -328,7 +328,7 @@ export const SETTING_FIELDS = [
     key: "maxSteps",
     section: "work",
     label: "Max steps per reply",
-    help: "Stops a reply after this many actions, so a stuck one can't run up costs. A thread that hits it carries on in a fresh run.",
+    help: "Stops a reply after this many actions, so a stuck one can't run up costs. Agents' jobs have their own limits: time, cost, and whether their checklist keeps moving.",
     type: "number",
     default: 100,
     min: 1,

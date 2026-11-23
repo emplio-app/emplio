@@ -1359,6 +1359,7 @@ export const commandList = (agent: boolean) =>
           "db.sql(query) -> [dict] (a change: {changed, last_id}); db.tables() -> [{name, type, rows}]",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None); tasks.list() -> [{id, title, status, due, assignee}]",
           "skills.use(name); logins.list(); person(email); activity([words], who=None, since=None)",
+          "plan.set(*steps); plan.done(*n); plan.update(n, step); plan.clear()",
         ]
       : [
           "ask(question, *answers, multi=False, input=None)  # 2-4 answers to tap, none: open question",
@@ -2168,7 +2169,7 @@ export async function toolsCommand(s: Session, args: string[], runner = (command
 
 // Swap each emplio tag in the output for its result, in place, so the agent and the chat both see it.
 // Files `emplio view` asked for also come back separately, for the model to look at.
-// `job`: run by one of the chat's jobs, which may not touch the person's checklist
+// `job`: run by one of the chat's jobs (its checklist is its own chat's, not the person's)
 export async function runEz(box: Box, s: Session, output: string, key: string, job = false) {
   const views: string[] = [];
   // emplio hand and threads run after the box is free again (runBash): wait would otherwise hold up the threads' own commands
@@ -2437,8 +2438,6 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
         },
       }, WORK));
     }
-    else if (line.startsWith(`PLAN:${key}\t`) && job)
-      lines.push("error: the checklist is Emplio's, for the person; jobs don't use emplio plan. Just do your task and report.");
     else if (line.startsWith(`PLAN:${key}\t`)) {
       const reply = await planCommand(s.conversationId, Buffer.from(line.slice(`PLAN:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(reply.text);

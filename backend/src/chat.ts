@@ -35,18 +35,18 @@ import { recordUploads } from "./made";
 import { listTeam } from "./team";
 import { onboarding } from "./setup";
 import { businessInstructions, codeMode, computerNote, inPython, personalFiles, pythonCommand, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
-import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld } from "./compact";
+import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld, trimSteps } from "./compact";
 import { settingsFor } from "./settings";
-import { model, modelForJob } from "./models";
+import { model, modelForJob, spent } from "./models";
 import { timezoneOf, when } from "./time";
-import { failureGuard, outOfUsage, unlessStuck, type FailureGuard } from "./stuck";
+import { failureGuard, outOfUsage, progressGuard, STALLED_NOTE, unlessStuck, type FailureGuard } from "./stuck";
 import type { Bill } from "./credit";
 import { cloud } from "./cloud";
 import { slashCommand } from "./skills";
 import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
-import { AGENTS_HEADING, EMPLIO, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
+import { AGENTS_HEADING, EMPLIO, JOB_MAX_STEPS, JOB_SPEND_USD, jobReply, SPENT_NOTE, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
@@ -345,7 +345,7 @@ export async function foldIdle(chat: typeof conversations.$inferSelect, takeNote
   const sent = history.slice(upto + 1);
   const folded = sent.slice(0, recentStart(sent, RECENT_TOKENS));
   if (!folded.length) return;
-  const notes = await takeNotes(await toNotes(folded), chat.summary, await settingsFor(chat.workspaceId), { workspaceId: chat.workspaceId, userId: chat.userId, conversationId: chat.id });
+  const notes = await takeNotes(await toNotes(folded), chat.summary, await settingsFor(chat.workspaceId), { workspaceId: chat.workspaceId, userId: chat.userId, conversationId: chat.id }, undefined, chat.kind === "job");
   if (!notes) return;
   // updatedAt stays: nothing happened in the chat, as far as the person can tell
   await db
@@ -825,7 +825,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       job ? null : untoldReports(id).catch((error) => (log.error(error, "reading jobs' reports failed"), null)),
     ])
   ).filter((t): t is string => !!t);
-  const setup = await onboarding({ workspaceId: ctx.workspaceId, userId: ctx.userId, role: ctx.role, name: ctx.userName, automation: session.automation, task: session.task }).catch(() => "");
+  const setup = await onboarding({ workspaceId: ctx.workspaceId, userId: ctx.userId, role: ctx.role, name: ctx.userName, automation: session.automation || !!job, task: session.task }).catch(() => "");
   // on their own clock (time.ts)
   const tz = await timezoneOf(ctx.userId);
   const today = new Date().toLocaleDateString("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -910,9 +910,16 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   const here = { role: "system" as const, content: `This chat's id is ${id.slice(0, 8)}.` };
   // a job's rules and agent go after the shared prompt, so it stays cached for Emplio and every job alike
   const asJob = job ? [{ role: "system" as const, content: job.prompt }] : [];
+  // its job card (jobs.ts): last, so the shared prompt and its rules stay cached; read again after each fold
+  let card = job ? await job.card().catch((error) => (log.error(error, "reading the job card failed"), "")) : "";
+  // a job runs on its own limits (jobs.ts), not the steps a reply to a person gets
+  const maxSteps = job ? JOB_MAX_STEPS : settings.maxSteps;
+  const progress = progressGuard(!!chat.plan?.length);
+  const spendBase = job ? await job.spendBase().catch(() => spent(id)) : 0;
   // code mode: every command they mention, as the Python library spells it (sandbox.ts inPython)
   const python = (m: SystemModelMessage) => (codeMode() ? { ...m, content: inPython(m.content) } : m);
-  const withNotes = (n: string | null) => [...system, ...(n ? [{ role: "system" as const, content: notesBlock(n, id) }] : []), here, ...main, ...asJob].map(python);
+  const withNotes = (n: string | null) =>
+    [...system, ...(n ? [{ role: "system" as const, content: notesBlock(n, id, !!job) }] : []), here, ...main, ...asJob, ...(card ? [{ role: "system" as const, content: card }] : [])].map(python);
   // past settings.compactAt, everything sent so far is folded into notes (compact.ts), but for the last few
   // exchanges; the notes end just before one of their messages, so what's sent after them starts with the person
   // set once the reply's stream exists (below)
@@ -927,7 +934,8 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     system,
     withNotes,
     // the notes end just before the first of their messages kept word for word (the last `kept` of them)
-    onFold: (n, kept) => {
+    onFold: async (n, kept) => {
+      if (job) card = await job.card().catch(() => card);
       const asks = history.flatMap((m, i) => (m.role === "user" ? [i] : []));
       const upto = history[(asks[asks.length - kept] ?? history.length - 1) - 1]?.id ?? null;
       session.notesUpto = upto;
@@ -937,6 +945,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     onFolding: (on) => announce({ type: "data-summarizing", data: on, transient: true }),
     signal: stopper.signal,
     warn: (tokens, message) => log.error({ conversationId: id, tokens }, message),
+    job: !!job,
   });
 
   // reasoning: thinks before answering and between tool calls (high: better plans, slower and pricier replies)
@@ -1057,6 +1066,12 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       // fresh in its mind as it finishes: the steps its answer covers get ticked too
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
+      // a job's limits (jobs.ts): what its work on hand may cost, and its checklist moving (stuck.ts)
+      if (job) {
+        const said = progress.check(!!(result.plan || moved), !notCounted(command));
+        const note = spent(id) - spendBase > JOB_SPEND_USD ? guard.end(SPENT_NOTE) : said === STALLED_NOTE ? guard.end(said) : said;
+        if (note) result = { ...result, output: `${String(result.output ?? "")}\n\n${code !== undefined ? inPython(note) : note}` };
+      }
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }), ms: Date.now() - began };
     },
     // files from `emplio view` go to the model as real images/PDFs, not as JSON
@@ -1101,14 +1116,16 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     messages: [...(await toModel(trimOld(sent).slice(0, -1))), ...turn],
     prepareStep: unlessStuck(async (step: Parameters<typeof folding.prepareStep>[0]) => {
       if ((step.steps.at(-1) as { text?: string } | undefined)?.text?.trim()) heard = Date.now();
-      return folding.prepareStep(step);
+      // older outputs cut down first (compact.ts trimSteps); the fold waits a step, until the smaller size is measured
+      const trimmed = trimSteps(step.messages);
+      return trimmed ? { messages: trimmed } : folding.prepareStep(step);
     }, guard),
     tools: {
       [codeMode() ? "python" : "bash"]: makeBash(job?.caller ?? EMPLIO, guard),
     },
     // browser work (emplio browser) takes many small steps. A message they sent meanwhile ends the reply after the
     // command running now, so it goes in as their own message and the next reply carries on from there
-    stopWhen: [stepCountIs(settings.maxSteps), () => !!steering.get(id)?.size],
+    stopWhen: [stepCountIs(maxSteps), () => !!steering.get(id)?.size],
     // one git save per reply (stopped or not), not per command
     onFinish: async ({ steps }) => {
       // the next message is measured from here. After a fold mid-reply, the steps before it go out again
@@ -1148,6 +1165,10 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     // the chat stops showing as working only once the whole reply is saved, so a reload then shows all of it
     onEnd: ({ responseMessage, outcome }) => {
       const answer = responseMessage.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n").trim();
+      // a job's report is what it wrote in its last step, not every line it said on the way
+      let lastStep = responseMessage.parts.length;
+      while (lastStep > 0 && responseMessage.parts[lastStep - 1]!.type !== "step-start") lastStep--;
+      const report = job ? responseMessage.parts.slice(lastStep).flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n").trim() : answer;
       // with what it cost in tokens, cache reads and writes apart, to see whether the prompt cache is working
       void Promise.resolve(result.totalUsage)
         .catch(() => null)
@@ -1187,11 +1208,11 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
             .catch(() => [])
             .then((steps) =>
               jobEnded?.(
-                answer,
+                report,
                 // aborted without Stop: its time ran out
                 stopper.signal.aborted ? "stopped" : outcome.status === "failed" || outcome.status === "aborted" ? "failed" : "completed",
                 interrupted || steered(id),
-                steps.length >= settings.maxSteps && steps.at(-1)?.finishReason === "tool-calls",
+                steps.length >= maxSteps && steps.at(-1)?.finishReason === "tool-calls",
                 // it asked the person with a card (emplio ask), which waits for their answer
                 (responseMessage.parts as unknown as ScreenPart[]).flatMap((p) => (p.output?.asks as AskCard[] | undefined) ?? []),
               ),

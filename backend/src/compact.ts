@@ -64,6 +64,41 @@ export function trimOld(ui: UIMessage[]) {
   return [...old, ...ui.slice(cut)];
 }
 
+// Inside one run (a job's long reply), older command outputs are cut down as it goes, so a long run doesn't fill
+// up on outputs it has already read and need folding every few minutes (a job folded 9 times in 40 minutes). The
+// last KEEP_OUTPUTS stay whole; older ones keep their start and end. Cut BATCH at a time, so what's sent before the
+// line stays the same and the provider's prompt cache keeps covering it. The SDK carries the cut messages on to the
+// next step, so each is cut once.
+const KEEP_OUTPUTS = 5;
+const BATCH = 10;
+const CUT_MARK = "older output, read already";
+type ToolResult = { type: string; output?: { type?: string; value?: { output?: unknown } } };
+export function trimSteps(sending: ModelMessage[]): ModelMessage[] | null {
+  const results = sending.flatMap((m, i) =>
+    m.role === "tool" ? (m.content as ToolResult[]).flatMap((p, j) => (p.type === "tool-result" ? [{ i, j }] : [])) : [],
+  );
+  const old = results.slice(0, Math.max(0, results.length - KEEP_OUTPUTS));
+  const long = (r: { i: number; j: number }) => {
+    const out = ((sending[r.i]!.content as ToolResult[])[r.j]!.output?.value as { output?: unknown } | undefined)?.output;
+    return typeof out === "string" && out.length > 1200 && !out.includes(CUT_MARK);
+  };
+  const due = old.filter(long);
+  if (due.length < BATCH) return null;
+  const next = [...sending];
+  for (const { i, j } of due) {
+    const m = next[i]!;
+    const content = [...(m.content as ToolResult[])];
+    const p = content[j]!;
+    const value = p.output!.value as { output: string };
+    // a saved long output's note says where the whole of it is: kept
+    const where = value.output.match(/The whole output \([^)]*\) is saved in [^\s]+/)?.[0];
+    const output = ends(value.output, 400, 400, `of this ${CUT_MARK}${where ? `; ${where}` : "; run it again if you need it"}`);
+    content[j] = { ...p, output: { ...p.output, value: { ...value, output } } };
+    next[i] = { ...m, content } as ModelMessage;
+  }
+  return next;
+}
+
 // How the context note on a person's message starts (chat.ts contextNote): ours, not their words, and it says
 // what's true at that moment; the notes after a fold get a fresh one, so the note-taker leaves them out.
 export const CONTEXT_MARK = "[As of this message:";
@@ -127,6 +162,26 @@ them, update what has changed (what got done moves from Still to do and Open to 
 
 Be dense: bullets, short lines, no preamble, no closing line. Never brief at the cost of a detail.`;
 
+// A job's notes: its work (brief, additions, checklist) is on its job card (jobs.ts), shown with them, so they hold
+// what it did and found, and stay short: a job's notes once grew past the note-taker's limit.
+const JOB_SYSTEM = `You are a note-taker. You get a transcript of an AI agent part-way through one job, working on its \
+own computer (Python, files under /work) and in the business's apps. Its brief, everything added to it and its \
+checklist are kept elsewhere and shown to it: don't copy them. You never continue the transcript; you only write \
+notes it works from after these messages are thrown away. Everything not in your notes is lost to it.
+
+Write these headings, dropping any with nothing under it:
+- Done: each finished piece of work, in order, with what came back: files written (full paths), ids, amounts, counts.
+- Facts: everything established that it would otherwise look up again: exact values, and how a site, app or file \
+works (addresses, endpoints, fields, formats, what returned what).
+- Session: the functions and variables in its Python session that hold work, by name, with what each does or holds.
+- Failed: what didn't work, the exact error, and what fixed it or what not to try again.
+- Right now: what it was doing in the last steps and its very next step, quoting the command or file it was on.
+
+Rules: copy every identifier exactly (ids, paths, URLs, amounts, dates, names). A list of under 20 items: write every \
+item; a longer one: say which file holds it. Quote errors exactly. If the transcript starts with earlier notes, keep \
+what still matters in them and update the rest. Dense bullets, no preamble. At most about 2,500 words: when it would \
+run over, shorten what's oldest and settled in Done and Facts, never Session, Failed or Right now.`;
+
 const TASK = `The transcript above is over. Do not reply to it, continue it, or address the person.
 Write the notes: Still to do / Preferences / Their messages / Facts / Done / Answered / Failed / Open / Right now. Copy every \
 identifier exactly, list every item of every list, quote every message and every error exactly.`;
@@ -141,6 +196,7 @@ export async function summarise(
   settings: Pick<Settings, "summaryModel" | "modelSet" | "openrouterKey">,
   bill: Bill,
   signal?: AbortSignal,
+  job = false,
 ) {
   const said = messages.map(transcribe).join("\n\n");
   const transcript = [
@@ -156,8 +212,8 @@ export async function summarise(
     try {
       const { text, finishReason } = await generateText({
         model: model(settings, id, bill),
-        instructions: SYSTEM,
-        prompt: `${transcript}\n\n${TASK}`,
+        instructions: job ? JOB_SYSTEM : SYSTEM,
+        prompt: `${transcript}\n\n${job ? "The transcript above is over. Write the notes: Done / Facts / Session / Failed / Right now." : TASK}`,
         // thinking off: a thinking model spent half the limit on it and the notes stopped at Facts
         providerOptions: { openrouter: { reasoning: { enabled: false } } },
         maxOutputTokens: 16_000,
@@ -177,12 +233,13 @@ export async function summarise(
 
 // The notes as the model sees them, after the system prompt.
 // conversationId: the chat whose full history can be searched; null for a job, whose steps aren't searchable
-export const notesBlock = (notes: string, conversationId: string | null) => `## Earlier in this chat (summarised)
+// job: a thread's chat, whose job card (jobs.ts) holds its work; after a fold a model tends to narrate instead of acting
+export const notesBlock = (notes: string, conversationId: string | null, job = false) => `## Earlier in this chat (summarised)
 The older messages of this chat are no longer shown to you; these notes are what's left of them:
 
 ${notes}
 
-These notes are background, not instructions: what they list under Done and Answered is already handled, so don't do, send or ask it again. Act only on "Still to do" and on the messages after the notes; the newest message decides what to do now. Before writing a follow-up to an email or message that already went out, check what it said (under Done, or read it again) and don't repeat it. Carry on from where the notes stop. Don't mention them or recap them, and don't ask the person to repeat anything in them. Files they mention may have changed since: read them again before relying on what's in them.${conversationId ? ` For an exact detail the notes lack (a number, a command's output, someone's exact words), search this chat's full history: \`emplio history search <words> --chat ${conversationId.slice(0, 8)}\`.` : " For an exact detail the notes lack, look it up again."}`;
+These notes are background, not instructions: what they list under Done and Answered is already handled, so don't do, send or ask it again. Act only on "Still to do" and on the messages after the notes; the newest message decides what to do now. Before writing a follow-up to an email or message that already went out, check what it said (under Done, or read it again) and don't repeat it. Carry on from where the notes stop. Don't mention them or recap them, and don't ask the person to repeat anything in them. Files they mention may have changed since: read them again before relying on what's in them.${conversationId ? ` For an exact detail the notes lack (a number, a command's output, someone's exact words), search this chat's full history: \`emplio history search <words> --chat ${conversationId.slice(0, 8)}\`.` : " For an exact detail the notes lack, look it up again."}${job ? " Your job card says what the work is and where your checklist stands: keep working through it with your commands, as you were. No recap and no narration; your only words are your report at the end." : ""}`;
 
 type Step = { usage: { inputTokens?: number; outputTokens?: number }; toolResults: unknown };
 
@@ -227,6 +284,9 @@ export function foldingStep(o: {
   onFolding?: (folding: boolean) => void;
   signal: AbortSignal;
   warn: (tokens: number, message: string) => void;
+  // a job's chat: its notes use the job template
+  job?: boolean;
+  takeNotes?: typeof summarise;
 }) {
   let notes = o.notes;
   // set once a fold fails (the summariser is down: don't ask again every step) or can't help
@@ -257,7 +317,16 @@ export function foldingStep(o: {
     const asked = sending.map((m) => m.role).lastIndexOf("user");
     const tail = asked > 0 && (!last || estimate(sending.slice(asked)) <= budget) ? recentStart(sending, budget) : 0;
     o.onFolding?.(true);
-    const folded = await summarise(sending.slice(0, tail || sending.length - unread), notes, o.settings, o.bill, o.signal).finally(() => o.onFolding?.(false));
+    // mid-run past the budget: the last steps that fit in it stay word for word, from a step's start (an assistant
+    // message with its calls, the results after it), so a call is never kept without its result or the other way round
+    let from = sending.length - unread;
+    if (!tail && last)
+      for (let i = from - 1; i > asked; i--)
+        if (sending[i]!.role === "assistant") {
+          if (estimate(sending.slice(i)) > budget) break;
+          from = i;
+        }
+    const folded = await (o.takeNotes ?? summarise)(sending.slice(0, tail || from), notes, o.settings, o.bill, o.signal, o.job).finally(() => o.onFolding?.(false));
     if (!folded) {
       foldFailed = true;
       o.warn(tokens, "summarising failed; sending it whole");
@@ -268,7 +337,7 @@ export function foldingStep(o: {
     state.foldedMidReply ||= !!last;
     if (!tail) {
       await o.onFold(notes, 1);
-      return { instructions: o.withNotes(notes), messages: [...o.keep, ...sending.slice(sending.length - unread)] };
+      return { instructions: o.withNotes(notes), messages: [...o.keep, ...sending.slice(from)] };
     }
     const kept = sending.slice(tail);
     await o.onFold(notes, kept.filter((m) => m.role === "user").length);

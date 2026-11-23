@@ -1,10 +1,61 @@
 import { expect, test } from "bun:test";
 import type { ModelMessage, UIMessage } from "ai";
-import { recentStart, trimOld } from "./compact";
+import { foldingStep, recentStart, trimOld, trimSteps } from "./compact";
 
 const ask = (text: string, extra: object[] = []) => ({ id: text, role: "user", parts: [{ type: "text", text }, ...extra] }) as UIMessage;
 const ran = (output: string) => ({ id: output.slice(0, 9), role: "assistant", parts: [{ type: "tool-bash", state: "output-available", toolCallId: "c", input: {}, output: { exitCode: 0, output } }] }) as unknown as UIMessage;
 const outputOf = (m: UIMessage) => (m.parts[0] as unknown as { output: { output: string } }).output.output;
+
+const call = (id: string) => ({ role: "assistant", content: [{ type: "tool-call", toolCallId: id, toolName: "python", input: {} }] }) as ModelMessage;
+const result = (id: string, output: string) =>
+  ({ role: "tool", content: [{ type: "tool-result", toolCallId: id, toolName: "python", output: { type: "json", value: { exitCode: 0, output } } }] }) as ModelMessage;
+const resultText = (m: ModelMessage) => ((m.content as unknown as { output: { value: { output: string } } }[])[0]!.output.value.output);
+const run = (n: number, size = 5_000) => [
+  { role: "user", content: "the brief" } as ModelMessage,
+  ...Array.from({ length: n }, (_, i) => [call(`c${i}`), result(`c${i}`, `${i} ${"o".repeat(size)}`)]).flat(),
+];
+
+test("inside a long run, older outputs are cut ten at a time, the last five never", () => {
+  // 14 outputs: only 9 are old enough, not a batch yet
+  expect(trimSteps(run(14))).toBeNull();
+  const t = trimSteps(run(15))!;
+  expect(resultText(t[2]!).length).toBeLessThan(1_000);
+  expect(resultText(t[2]!)).toContain("older output, read already");
+  expect(t.slice(-10)).toEqual(run(15).slice(-10));
+  // once cut, they stay cut, and nothing changes again until ten more are due
+  expect(trimSteps([...t, call("x"), result("x", "o".repeat(5_000))])).toBeNull();
+  // a short output, and one that says where its whole is kept, keep what matters
+  const saved = "The whole output (90,000 characters) is saved in /work/tmp/output/abc.txt (if missing: emplio output abc).";
+  const mixed = trimSteps([...run(10), call("s"), result("s", `${saved} ${"o".repeat(5_000)}`), ...run(5).slice(1)])!;
+  expect(resultText(mixed.find((m) => m.role === "tool" && resultText(m).includes("abc.txt"))!)).toContain("saved in /work/tmp/output/abc.txt");
+  expect(trimSteps(run(30, 500))).toBeNull();
+});
+
+test("a fold in the middle of a long run keeps its last steps word for word, never a call without its result", async () => {
+  let folded: ModelMessage[] = [];
+  const step = foldingStep({
+    settings: { compactAt: 10_000, summaryModel: "auto", modelSet: "save", openrouterKey: null } as never,
+    bill: {} as never,
+    keep: [{ role: "user", content: "the brief" }],
+    notes: null,
+    contextTokens: null,
+    system: [],
+    withNotes: () => [],
+    onFold: async () => {},
+    signal: new AbortController().signal,
+    warn: () => {},
+    job: true,
+    takeNotes: async (m) => ((folded = m), "notes"),
+  });
+  const sending = run(20, 3_000);
+  const out = (await step.prepareStep({ steps: [{ usage: { inputTokens: 50_000 }, toolResults: [] }], messages: sending })) as { messages: ModelMessage[] };
+  // budget is a quarter of compactAt: the brief, then the last steps that fit, each call with its result
+  expect(out.messages[0]).toEqual({ role: "user", content: "the brief" });
+  expect(out.messages[1]!.role).toBe("assistant");
+  expect(out.messages.length).toBeGreaterThan(3);
+  expect(out.messages.slice(1)).toEqual(sending.slice(sending.length - (out.messages.length - 1)));
+  expect(folded.length + out.messages.length - 1).toBe(sending.length);
+});
 
 test("older turns are cut down ten at a time, the last three never", () => {
   const big = "x".repeat(10_000);
