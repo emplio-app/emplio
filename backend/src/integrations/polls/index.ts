@@ -71,6 +71,17 @@ import { lemlist } from "./lemlist";
 import { postgresql } from "./postgresql";
 import { mysql } from "./mysql";
 import { whatsapp_linked } from "./whatsapp_linked";
+import { supernormal } from "./supernormal";
+import { circleback } from "./circleback";
+import { jamie } from "./jamie";
+import { otter } from "./otter";
+import { tldv } from "./tldv";
+import { readai } from "./readai";
+import { fellow } from "./fellow";
+import { meetgeek } from "./meetgeek";
+import { leexi } from "./leexi";
+import { gong } from "./gong";
+import { sybill } from "./sybill";
 
 export type Run = (action: string, input: unknown) => Promise<unknown>;
 export type PollTrigger = {
@@ -87,7 +98,7 @@ export type PollTrigger = {
 };
 
 // Every app's polled triggers, one file per app (polls/<app>.ts), each exporting its triggers by short name.
-const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, payu, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello, klaviyo, activecampaign, webflow, figma, typeform, close, apollo, wrike, smartsheet, teamwork, everhour, chargebee, calcom, karbon, lemlist };
+const APPS: Record<string, Record<string, PollTrigger>> = { todoist, indiamart, razorpay, payu, swipe, github, hubspot, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello, klaviyo, activecampaign, webflow, figma, typeform, close, apollo, wrike, smartsheet, teamwork, everhour, chargebee, calcom, karbon, lemlist, supernormal, circleback, jamie, otter, tldv, readai, fellow, meetgeek, leexi, gong, sybill };
 const POLLS: Record<string, PollTrigger> = Object.fromEntries(
   Object.entries(APPS).flatMap(([app, triggers]) => Object.entries(triggers).map(([name, t]) => [`${app}.${name}`, t])),
 );
