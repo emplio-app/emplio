@@ -10,7 +10,7 @@ import { activityCommand, record } from "./activity";
 import { syncSkills } from "./skills";
 import { deviceFor, localBox, type Conn } from "./devices";
 import { browserKindFor, isDeviceBrowser } from "./device-browser";
-import { BrowserGone, browserFor, browserLocal, browserOpen, browserSize, connectionFor, forget, socketUrl, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
+import { BrowserGone, browserFor, browserForget, browserLocal, browserOpen, browserSize, connectionFor, forget, socketUrl, stopBrowser, newDownloads, pageChecked, signInLink } from "./browser";
 import { gitAfter, gitAuthor, gitForCommand, githubAddress } from "./git-proxy";
 import { isShowing, takeShown } from "./browser-show";
 import { timezoneOf } from "./time";
@@ -336,6 +336,7 @@ A confirm box: emplio browser dialog accept (or dismiss)
 - "covered by ...": a banner or pop-up is on top; close it, then click again.
 - Ref not found: the page changed; snapshot again.
 - Fill does nothing: emplio browser focus @e1 && emplio browser keyboard inserttext "text"
+- A sign-in page says cookies are off or mismatched (Google's CookieMismatch), or a site won't stay signed in: emplio browser forget <site> (google.com google.co.uk), then open it and sign in again. Only that site; never cookies clear, which signs out of every site.
 - More on one topic: emplio browser skill --ref commands
 `;
 
@@ -616,6 +617,9 @@ export const BROWSER_COMMANDS = String.raw`# emplio.browser.<command>(...): one 
 # Go
 open(url); back(); forward(); reload(); pushstate(url)   # pushstate: in-app navigation on single-page sites
 close()                                   # the next step starts a fresh browser (sign-ins are kept)
+forget(*sites)                            # a sign-in page says cookies are off or mismatched (Google's CookieMismatch), or a site
+#                                           won't stay signed in: forget("google.com", "google.co.uk"), then sign in again. Only those
+#                                           sites; never cookies("clear"), which signs out of every site
 local()                                   # this page again through the person's country (local prices, a site refusing you)
 # Look
 snapshot("-i") -> str                     # buttons, links, boxes with refs; blank: still loading. snapshot(): the whole tree
@@ -651,7 +655,7 @@ dialog("accept", [text]); dialog("dismiss"); dialog("status")
 # Page settings
 viewport(w, h); set("device", "iPhone 14"); set("geo", lat, lng); set("offline", "on"|"off"); set("media", "dark"|"light")
 set("headers", json); set("credentials", user, password)   # extra request headers; a site's own browser sign-in box
-cookies(); cookies("set", name, value); cookies("clear"); storage("local"|"session", [key]); storage("local", "set", key, value)
+cookies(); cookies("set", name, value); storage("local"|"session", [key]); storage("local", "set", key, value)
 record("start", path); record("stop")     # a video of the steps
 # The site's own requests: faster than the page
 calls() -> str; calls(method, path)       # what the page asked its server, and one in full
@@ -826,6 +830,8 @@ GUIDE
       close) : > "/tmp/emplio-resize.$EZ_KEY"; req BROWSERCLOSE; exit 0 ;;
       # onto the paid connection in the person's country; the server does the switching
       local) req BROWSERLOCAL "$(run get url 2>/dev/null)"; exit 0 ;;
+      # one site's cookies and saved data, here and in the kept sign-ins; the server does it (cookies clear would sign out of every site)
+      forget) shift; [ $# -gt 0 ] || { echo "usage: emplio browser forget <site>..." >&2; exit 2; }; req BROWSERFORGET "$@"; exit $? ;;
       # the page size: emplio browser viewport 390 844 means set viewport 390 844
       viewport) shift; set -- set viewport "$@" ;;
       # a saved script: its emplio browser commands inherit the browser, which the words in this command attached.
@@ -2387,6 +2393,10 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       const [width, height, url] = Buffer.from(line.slice(`BROWSERSIZE:${key}\t`.length), "base64").toString().split("\0");
       lines.push(await browserSize(s.conversationId, Number(width), Number(height), url).catch((error) => (console.error("browser resize failed", error), "emplio browser set viewport: that didn't work")));
     }
+    else if (line.startsWith(`BROWSERFORGET:${key}\t`)) {
+      const sites = Buffer.from(line.slice(`BROWSERFORGET:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
+      lines.push(await browserForget(s.conversationId, { workspaceId: s.workspaceId, userId: s.user.id }, sites).catch((error) => (console.error("browser forget failed", error), "emplio browser forget: that didn't work")));
+    }
     else if (line.startsWith(`BROWSERCLOSE:${key}\t`)) {
       await stopBrowser(s.conversationId).catch((error) => console.error("browser close failed", error));
       lines.push("The browser is closed, sign-ins kept. The next emplio browser command starts a fresh one at the usual size, with no phone setting.");
@@ -2492,7 +2502,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       jobCalls.push(Buffer.from(line.slice(`WORK:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(jobMark(key, jobCalls.length - 1));
     }
-    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
+    else if (!/^(VIEW|TEAM|APPS|MCP|AUTO|ACT|ASK|HIST|EXPORT|MEDIA|DB|MEM|CHAN|TASK|LOGIN|SETUP|SETTINGS|TOOLS|NOTE|PERSON|HTTP|WORK|AGENTS|REPORT|SITECALLS|SITECHECK|BROWSERLOCAL|BROWSERSIZE|BROWSERCLOSE|BROWSERFORGET|SITES|PLAN|WEB|IMAGE|OUT|FILES):\S*\t/.test(line)) lines.push(line);
   };
   // one at a time, so `emplio team add x && emplio team role x admin` happen in order. One that fails doesn't take the
   // others' answers or the command's output with it.
