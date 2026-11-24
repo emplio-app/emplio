@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.8 (2026-11-24)
+
+### What's new
+
+- Connect your Plaud or NeoSapien recorder: sign in once, and Emplio can find a recorded conversation, read its transcript and notes, and turn them into follow-ups. ![](frontend/public/whats-new/1.4.8-recorders.webp)
+
+### For developers
+
+- `own/mcp-app.ts`: apps whose maker offers only a hosted MCP server with its own sign-in. They connect like our other OAuth apps (Connect card, connection, refresh), but sign themselves up with the server (dynamic client registration, PKCE, no client id to configure, so self-hosting works), keep the client id with the refresh token, and list the server's tools live as actions (read-only ones run unasked). `OwnApp.oauth.authorizeUrl` may now be async.
+- Plaud (`https://mcp.plaud.ai/mcp`) and NeoSapien (`https://api.neosapien.ai/mcp`), with COVERAGE notes; neither has a public API for customer accounts.
+
 ## 1.4.7 (2026-11-24)
 
 ### What's new

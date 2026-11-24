@@ -92,7 +92,7 @@ test("SQL goes as plain text and vectors as NDJSON", async () => {
 
 test("sign-in always shows Cloudflare's consent screen, asks for a refresh token, and swaps codes with Basic auth", async () => {
   Object.assign(process.env, { CLOUDFLARE_CLIENT_ID: "cid", CLOUDFLARE_CLIENT_SECRET: "cs", CLOUDFLARE_OAUTH_SCOPES: "zone.read dns.write" });
-  const url = new URL(cloudflare.oauth!.authorizeUrl("https://api.test/oauth/cloudflare/callback", "st"));
+  const url = new URL(await cloudflare.oauth!.authorizeUrl("https://api.test/oauth/cloudflare/callback", "st"));
   expect(url.origin + url.pathname).toBe("https://dash.cloudflare.com/oauth2/auth");
   expect(url.searchParams.get("prompt")).toBe("consent");
   expect(url.searchParams.get("scope")).toBe("zone.read dns.write offline_access");
