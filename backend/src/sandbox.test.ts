@@ -591,3 +591,19 @@ test("a pickup from the command's end trusts what this server last stored over i
   await collectOut(box as never, who as never, false, [], listed);
   expect(stored).toEqual([]);
 });
+
+test("forget asks the server to clear those sites, without touching the browser tool", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\necho done\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const key = `f${Date.now()}`;
+  const p = Bun.spawn(["bash", "-c", "./emplio browser forget google.com google.co.uk"], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: key, BROWSER_CDP_URL: "x", BROWSER_SESSION: "chat-1", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+  const out = await new Response(p.stdout).text();
+  expect(out).toContain(`BROWSERFORGET:${key}\t@`);
+  const file = out.match(/\t@(\S+)/)![1]!;
+  expect(Buffer.from(readFileSync(file, "utf8"), "base64").toString().split("\0").slice(0, -1)).toEqual(["google.com", "google.co.uk"]);
+  expect(existsSync(join(home, "calls"))).toBe(false);
+  rmSync(home, { recursive: true, force: true });
+  rmSync(file, { force: true });
+});

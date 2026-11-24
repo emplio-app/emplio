@@ -496,6 +496,62 @@ export async function pageChecked(conversationId: string, workspaceId: string, e
     : null;
 }
 
+// `emplio browser forget <site>...`: those sites' cookies, local storage and Indexed DB gone, from the open browser and the
+// kept copy, so the next sign-in there starts clean (Google's CookieMismatch after sign-ins carried over from another
+// browser). Every other site stays signed in. A site covers its subdomains: google.com is accounts.google.com too.
+const ofSites = (sites: string[]) => (host: string) => {
+  const h = host.replace(/^\./, "").split(":")[0]!.toLowerCase();
+  return sites.some((s) => h === s || h.endsWith(`.${s}`));
+};
+const hostOfOrigin = (origin: string) => URL.canParse(origin) ? new URL(origin).host : origin;
+
+export const withoutSites = (state: BrowserState, sites: string[]): BrowserState => {
+  const mine = ofSites(sites);
+  const others = <T>(o: Record<string, T> = {}) => Object.fromEntries(Object.entries(o).filter(([origin]) => !mine(hostOfOrigin(origin))));
+  return { ...state, cookies: state.cookies.filter((c) => !mine(c.domain)), storage: others(state.storage), indexedDb: others(state.indexedDb) };
+};
+
+export async function browserForget(conversationId: string, owner: Owner, words: string[]) {
+  const urls = words.map((w) => (/^[a-z]+:\/\//i.test(w) ? w : `https://${w}`));
+  const sites = [...new Set(urls.map((u) => (URL.canParse(u) ? siteOf(new URL(u).host) : "")))];
+  if (!sites.length || sites.some((s) => !s.includes("."))) return "usage: emplio browser forget <site>... e.g. emplio browser forget google.com google.co.uk";
+  const mine = ofSites(sites);
+  const saved = await savedState(owner);
+  let cookies = 0;
+  const live = await openBrowser(conversationId);
+  if (live) {
+    const cdp = await devtools(live.cdpUrl);
+    try {
+      const all = (await cdp.send("Storage.getCookies")).cookies as Cookie[];
+      const kept = all.filter((c) => !mine(c.domain));
+      cookies = all.length - kept.length;
+      // the browser-wide session has no "delete these": clear the jar, put the others back
+      if (cookies) {
+        await cdp.send("Storage.clearCookies");
+        await cdp.send("Storage.setCookies", { cookies: kept });
+      }
+      const { targetInfos } = await cdp.send("Target.getTargets");
+      const origins = new Set<string>();
+      for (const s of sites) for (const h of [s, `www.${s}`]) origins.add(`https://${h}`);
+      for (const c of all.filter((c) => mine(c.domain))) origins.add(`https://${c.domain.replace(/^\./, "")}`);
+      for (const t of targetInfos as { url: string }[]) if (/^https?:/.test(t.url) && mine(new URL(t.url).host)) origins.add(new URL(t.url).origin);
+      for (const o of Object.keys({ ...saved?.storage, ...saved?.indexedDb })) if (mine(hostOfOrigin(o))) origins.add(o);
+      for (const origin of origins)
+        await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "local_storage,indexeddb,cache_storage,service_workers" }).catch(() => {});
+      live.print = signInPrint(kept);
+      live.signedIn = undefined;
+    } finally {
+      cdp.close();
+    }
+  }
+  if (saved) {
+    const left = withoutSites(saved, sites);
+    cookies = Math.max(cookies, saved.cookies.length - left.cookies.length);
+    await db.update(workspaceMembers).set({ browserState: encrypt(JSON.stringify({ ...left, savedAt: new Date().toISOString() })) }).where(memberWhere(owner));
+  }
+  return `Forgot ${sites.join(", ")}: ${cookies} cookies and the sites' saved data, in this browser and the kept sign-ins. Other sites are still signed in. Open the page again and sign in fresh.`;
+}
+
 // `emplio browser local`: url is the page it's on, remembered for next time.
 export async function browserLocal(conversationId: string, workspaceId: string, url?: string) {
   const live = await openBrowser(conversationId);
