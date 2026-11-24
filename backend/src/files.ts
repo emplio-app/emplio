@@ -45,7 +45,7 @@ export const isOwnFile = (url: string, workspaceId: string) => FILE_PATH.exec(ur
 // Swap our file paths for something the model can use: images/PDFs inline as data URLs (a link fails
 // wherever the model's host won't download from our storage), text inline as text.
 // Photos go to the model at most 1200px on their long side (Anthropic shrinks past 1568 anyway): a phone photo is 12 megapixels, sent whole with every message it stays in. The stored file stays as it was.
-const MAX_SIDE = 1200;
+export const MAX_SIDE = 1200;
 export async function forModel(bytes: Uint8Array, mediaType: string) {
   if (!["image/png", "image/jpeg", "image/webp"].includes(mediaType)) return bytes;
   try {

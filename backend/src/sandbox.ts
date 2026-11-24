@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Box } from "./computer";
 import { cloud } from "./cloud";
 import { basename } from "node:path";
-import { MODEL_MAX, inName, readStored, storeFile } from "./files";
+import { MAX_SIDE as SHOT_SIDE, MODEL_MAX, inName, readStored, storeFile } from "./files";
 import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
@@ -306,7 +306,7 @@ emplio browser fill @e5 "text"        # clears, then types; type @e5 "more" adds
 emplio browser select @e4 "Shipped"   # a dropdown, by its label
 emplio browser check @e6              # uncheck too
 emplio browser press Enter
-Refs change when the page does: after a click that opens something or goes somewhere, snapshot again.
+click, fill, select, press and find answer with what's new on the page (refs included): snapshot only for the rest.
 Long page: emplio browser snapshot -i | grep -i "save\|next" , or one part: snapshot -i -s "main"
 
 ## Without a ref
@@ -324,7 +324,8 @@ emplio browser read                    # the page's text
 emplio browser eval "document.title"   # a script; long ones: eval --stdin <<'EOF' ... EOF
 
 ## Seeing it
-emplio browser screenshot /work/tmp/x.png, then emplio view /work/tmp/x.png
+emplio browser screenshot             # you see the page (screenshot /work/tmp/x.png keeps a copy there)
+emplio browser click 640 320          # a spot in the screenshot you last saw; you see the page after it
 screenshot --annotate: numbered labels, number N is ref @eN
 
 ## Tabs and pop-ups
@@ -610,8 +611,8 @@ else: sys.exit(calls(args[1:]))
 // read (Nov 2026): sent with the first browser result and by emplio.browser.help(). ponytail: by hand from agent-browser
 // v0.41.2's commands; bump it with the version in EZ
 export const BROWSER_COMMANDS = String.raw`# emplio.browser.<command>(...): one step on this chat's browser, which stays open between runs. Inputs in order, flags as
-# keywords (snapshot("-i") works too). ref: "@e3" from the latest snapshot, or a CSS selector. Refs go stale when the page
-# changes: snapshot again. A failing step raises EmplioError.
+# keywords (snapshot("-i") works too). ref: "@e3" from the latest snapshot, or a CSS selector. click, fill, select, press
+# and find answer with what's new on the page (refs included): snapshot only for the rest. A failing step raises EmplioError.
 # Go
 open(url); back(); forward(); reload(); pushstate(url)   # pushstate: in-app navigation on single-page sites
 close()                                   # the next step starts a fresh browser (sign-ins are kept)
@@ -622,7 +623,7 @@ snapshot(interactive=True, urls=True, compact=True, depth=3, selector="#main")  
 read() -> str                             # the page as readable text; read(url): another page, without leaving this one
 get("text"|"html"|"value"|"box"|"styles", ref) -> str; get("attr", ref, name); get("title"|"url"); get("count", css)
 is_("visible"|"enabled"|"checked", ref) -> str
-screenshot(path, full=False, annotate=False)   # annotate: [N] labels are refs @eN; then emplio.view(path)
+screenshot([path], full=False, annotate=False)   # you see it; annotate: [N] labels are refs @eN
 pdf(path)                                 # the page as a PDF
 console(); errors()                       # the page's console messages and script errors
 # Act
@@ -636,7 +637,8 @@ upload(file_box_or_upload_button, *files) # files on this computer
 find(by, value, action, [text], name=None, exact=False)   # no ref needed
 #   by: role|text|label|placeholder|alt|title|testid, or first|last (css) and nth (n, css); action: click|fill|type|hover|focus|check|uncheck|text
 #   find("role", "button", "click", name="Save"); find("label", "Email", "fill", "a@b.com"); find("nth", 2, "a", "click")
-mouse("move", x, y); mouse("down"|"up", "left"); mouse("wheel", dy)   # no ref works: a spot from an annotated screenshot
+click(x, y)                               # a spot in the screenshot you last saw; you see the page after it
+mouse("move", x, y); mouse("down"|"up", "left"); mouse("wheel", dy)
 # Wait
 wait(ref); wait(ms); wait(text="Saved"); wait(url="**/done"); wait(load="load"|"domcontentloaded"|"networkidle"); wait(fn="window.ready")
 # Script
@@ -910,6 +912,35 @@ JS
       "set viewport"|"set device") ;;
       *) [ -f "$size" ] && { was=(); while IFS= read -r w; do was+=("$w"); done < "$size"; run "\${was[@]}" >/dev/null 2>&1; } ;;
     esac
+    # click <x> <y>: a spot in the last screenshot, then a look at the page. The model sees screenshots shrunk to
+    # ${SHOT_SIDE}px on their long side at most (files.ts forModel), so its x y are turned back into the page's own
+    if [ "$1" = click ] && [ $# = 3 ] && [ -n "$2$3" ] && [ -z "\${2//[0-9.]/}" ] && [ -z "\${3//[0-9.]/}" ]; then
+      # a native dropdown opens a list screenshots don't show (and on a Mac, keys can't pick from): it's named instead
+      at="$(run eval "(() => { const d = devicePixelRatio, s = d * Math.min(1, ${SHOT_SIDE} / (Math.max(innerWidth, innerHeight) * d)), x = Math.round($2 / s), y = Math.round($3 / s); const box = document.elementFromPoint(x, y)?.closest('select'); if (box) return 'SELECT|' + (box.id ? '#' + CSS.escape(box.id) : box.name ? 'select[name=' + box.name + ']' : '') + '|' + [...box.options].map((o) => o.text.trim()).join(', '); return x + ' ' + y })()" 2>/dev/null | tr -d '"')"
+      case "$at" in SELECT\|*)
+        q="$(printf '%s' "$at" | cut -d'|' -f2)"; [ -n "$q" ] || q="@<its ref from snapshot -i>"
+        echo "emplio browser click: that's a dropdown ($(printf '%s' "$at" | cut -d'|' -f3-)); clicking can't pick from it. Pick by name: emplio browser select '$q' \\"<option>\\"" >&2
+        exit 1 ;;
+      esac
+      # no page size read (a page still loading): no guessing where to click
+      case "$at" in [0-9]*" "[0-9]*) ;; *) echo "emplio browser click: the page isn't ready, try again in a moment" >&2; exit 1 ;; esac
+      run mouse move \${at% *} \${at#* } >/dev/null && run mouse down left >/dev/null && run mouse up left >/dev/null || { echo "emplio browser click: clicking at $2 $3 failed" >&2; exit 1; }
+      sleep 0.5
+      set -- screenshot
+    fi
+    # a screenshot is shown to you too (as emplio view would); with no file named it's kept in /work/tmp/.browser
+    shot=
+    if [ "$1" = screenshot ]; then
+      for a in "\${@:2}"; do case "$(lower "$a")" in *.png|*.jpg|*.jpeg) shot="$a" ;; esac; done
+      [ -n "$shot" ] || { mkdir -p "$W/tmp/.browser"; shot="$W/tmp/.browser/shot-$(date +%s)-$RANDOM.png"; set -- "$@" "$shot"; }
+    fi
+    # After a step that changes the page, its answer says what changed (a message, a box that opened, a new page), refs
+    # included, so no separate look is needed. A page's refs stay the same for what didn't change.
+    # ponytail: two extra page reads per step; skip on huge pages if that turns out slow
+    mkdir -p "$guides"; look="$guides/look-$BROWSER_SESSION"; acts=
+    case "$1" in click|dblclick|fill|type|select|check|uncheck|press|find|upload|dialog|keyboard)
+      [ -n "$shot" ] || { acts=1; [ -s "$look" ] || { run snapshot -c > "$look" 2>/dev/null; run get url > "$look.url" 2>/dev/null; }; } ;;
+    esac
     # a failure is also noted for the end of the result (requestsTrailer), since >/dev/null or | tail -1 can hide it
     # (141: | head stopped reading, not a failure)
     e="$(mktemp)"
@@ -925,6 +956,19 @@ ${CALLS_PY}
 PY
       AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" EMPLIO_AB="$ab" python3 -c "$py" "$@" 2>"$e"; rc=$?
     else run "$@" 2>"$e"; rc=$?; fi
+    if [ "$rc" = 0 ] && [ -n "$acts" ]; then
+      sleep 0.3
+      now="$(mktemp)"; run snapshot -c > "$now" 2>/dev/null
+      url="$(run get url 2>/dev/null)"
+      [ "$url" = "$(cat "$look.url" 2>/dev/null)" ] || echo "Now on $url"
+      new="$(grep -vxF -f "$look" "$now" | cut -c1-200)"
+      n=$(printf '%s\n' "$new" | grep -c .)
+      if [ "$n" = 0 ]; then echo "Nothing changed on the page."
+      else echo "New on the page:"; printf '%s\n' "$new" | head -25; [ "$n" -gt 25 ] && echo "...and $((n - 25)) more lines: snapshot -i"; fi
+      mv "$now" "$look"; printf '%s\n' "$url" > "$look.url"
+    elif [ "$rc" = 0 ]; then
+      case "$1" in open|goto|navigate|back|forward|reload|tab|pushstate) run snapshot -c > "$look" 2>/dev/null; run get url > "$look.url" 2>/dev/null ;; esac
+    fi
     [ "$rc" = 0 ] && case "$1 $2" in "set viewport"|"set device") mkdir -p "$guides" && printf '%s\\n' "$@" > "$size" ;; esac
     # Some browser services say yes to a new page size and keep the old one: theirs is fixed when the browser starts.
     # So look, and if the width didn't take, ask the server to start this chat's browser again at that size
@@ -936,6 +980,7 @@ PY
       esac
     fi
     cat "$e" >&2
+    [ "$rc" = 0 ] && [ -n "$shot" ] && [ -f "$shot" ] && printf 'VIEW:%s\t%s\n' "$EZ_KEY" "$(realpath "$shot")"
     step="$*"; [ "$rc" = 0 ] || [ "$rc" = 141 ] || printf '%s: %s\\n' "\${step:0:80}" "$(head -c 300 "$e")" >> "/tmp/emplio-failed.$EZ_KEY"
     rm -f "$e"; exit $rc ;;
   team)
@@ -1474,7 +1519,7 @@ Pictures: \`emplio image "<full description>" [--from <image>] [--ratio 1:1|16:9
 
 Browser: \`emplio browser\` drives ${browserKindFor(s.user.id, cloud.browser.BROWSER_KIND)} that stays open between commands: \`emplio browser open <url>\`, \`emplio browser snapshot -i\` (refs), \`emplio browser click @e3\`. Every browser command, and how to work a site, come with your first browser result; \`emplio browser help\` shows them again.
 On a site: an app connection first; then the site's own requests (each browser result lists them); page steps only when neither can.
-- Downloads land in ${DOWNLOADS}/. Screenshots: \`emplio browser screenshot /work/tmp/x.png\`, then \`emplio view\`.${bg ? "" : `
+- Downloads land in ${DOWNLOADS}/. Screenshots: \`emplio browser screenshot\` shows you the page.${bg ? "" : `
 
 ${cloud.computer.previewNote(name)}`}`)}
 Never ask anyone to paste a password or key in chat; if one is pasted, don't repeat it.`;
@@ -1508,7 +1553,7 @@ ${py ? `- Doing the same thing on a site a second time: make it a function using
 5. Look for what you need (\`snapshot -i | grep -i save\`); the whole page only on a first look.
 6. One step at a time only where the next depends on what appears.
 - Keep output (no /dev/null). Tokens never go in files, skills or messages; don't read \`network requests --json\` (it prints login tokens). After saving, check every record on the site against what you meant.
-- Refs go stale when the page changes: snapshot again. No ref works (a canvas, a map, an unlabelled icon): \`emplio browser screenshot --annotate /work/tmp/x.png\` and \`emplio view\` it (its numbers are refs); not there either, click the spot: \`emplio browser mouse move <x> <y> && emplio browser mouse down left && emplio browser mouse up left\`, then look again. Before anything that can't be undone, check the row.
+- Reading a page or clicking by its refs is usually cheapest; seeing it is fine whenever that's easier (no labels, a canvas or map, a layout to check, refs that keep missing): \`emplio browser screenshot\` shows you the page, \`emplio browser click <x> <y>\` clicks a spot in it and shows you the page after. Refs go stale when the page changes: snapshot again. Before anything that can't be undone, check the row.
 - Local prices or a site refusing it: \`emplio browser local\`, then open again. Tabs persist (\`emplio browser tab\`): reuse the one on that site.
 - ${s.channel === "web" && !bg ? `${name} watches it live and can take over. Going round in circles: ask them to click Show Emplio how and do it once.` : `${name} isn't watching it.`} Sign-ins are saved for all their chats: try the site first. A CAPTCHA: wait ~10 s. A login you can't do: ${bg ? "say so in your report" : s.channel === "web" ? `nothing saved: \`emplio logins ask\` first; still stuck: ask ${name} to sign in in the live browser` : `send ${name} the sign-in link (browser.signInLink in the result)`}. Never guess passwords.]`;
   return py ? inPython(text) : text;
