@@ -23,4 +23,4 @@ a partner contract and doesn't reach customers' own recordings.
 
 ## Triggers
 
-None yet. The server has no webhooks; a polled "new recording" trigger is possible later through `polls/`.
+`plaud.new_recording`, polled every 15 minutes (at least 5) in `polls/recorders.ts`: the newest 50 from `list_files`, those from the last day. The server has no webhooks.

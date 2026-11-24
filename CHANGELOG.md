@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.12 (2026-11-24)
+
+### What's new
+
+- Plaud and NeoSapien can now start an automation: Emplio checks for a new recording every 15 minutes, so you can have it send notes, update a task list or draft a follow-up after every conversation.
+
+### For developers
+
+- `polls/recorders.ts`: `plaud.new_recording` (`list_files`) and `neosapien.new_conversation` (the server's read-only tool whose name lists conversations, memories or recordings), every 15 minutes, at least 5. MCP answers are text: the JSON inside is read (Plaud wraps it in an untrusted-data block) and the first list of objects is taken.
+
 ## 1.4.11 (2026-11-24)
 
 ### What's new
