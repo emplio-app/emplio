@@ -72,8 +72,8 @@ export const cases = (): Case[] => [
       emplio("Posted it: reddit.example/r/homedecor/comments/k2x9/comment/m81"),
       person("good. now find every comment we've posted on r/homedecor this month, only the ones about kaveri, and list them with links"),
     ],
-    // a new goal after a finished job: a fresh job (the rule), or that job by its id (it knows the thread): either
-    expect: { hand: true, agent: ["Community Manager"], say: ["kaveri"] },
+    // more on the same subreddit after a finished job: that job carries on (it knows the thread)
+    expect: { hand: true, agent: ["Community Manager"], cont: true, say: ["kaveri"] },
   },
   {
     name: "swipe: same entry for the next month (real)",
@@ -81,8 +81,8 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("do the same for november sales in swipe")],
-    // a new month after a finished job: the same job by id or a fresh one (cheaper: no old chat to carry)
-    expect: { hand: true, agent: ["Data Entry"], say: ["november"] },
+    // a new month after a finished job: the same job, which knows how it was done
+    expect: { hand: true, agent: ["Data Entry"], cont: true, say: ["november"] },
   },
   {
     name: "more from the suppliers just found",
@@ -114,8 +114,8 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("check homecraft's price for the 7ft grey blackout curtain too, like you did for bedsheets")],
-    // another product after a finished job: a fresh job (a new goal) or that job by id (the next of the same list)
-    expect: { hand: true, agent: ["Price Checker"], say: ["7 ?ft", "blackout"] },
+    // another product on the same site after a finished job: the same job, the next of the same list
+    expect: { hand: true, agent: ["Price Checker"], cont: true, say: ["7 ?ft", "blackout"] },
   },
   {
     name: "september invoices after october's",
@@ -124,6 +124,22 @@ export const cases = (): Case[] => [
     business: team,
     chat: [person("chase september's unpaid ones too, the same way")],
     expect: { hand: true, agent: ["Invoice Chaser"], say: ["september"] },
+  },
+  {
+    name: "reply to the email a finished job read (real: netra)",
+    category: "follow",
+    source: "real",
+    business: {
+      agents: [...AGENTS, "- Inbox Assistant (agents/inbox-assistant, light): Reads and answers the shop's email"],
+      threads: ["- 4e6a1d03 · Inbox Assistant · Read Netra's latest email · done, 10 Nov, 2:15 pm", ...THREADS],
+    },
+    chat: [
+      person("what did netra write?"),
+      emplio("Netra (Lotus Interiors) asked whether we can ship 40 ivory cushion covers by Friday, and for the invoice in her company's name."),
+      person("reply to her: yes, 40 by friday, invoice will be in lotus interiors' name"),
+    ],
+    // the job that read her email knows the thread: a fresh one would search for it again
+    expect: { hand: true, agent: ["Inbox Assistant"], cont: true, say: ["40", "friday", "lotus"] },
   },
   // fresh
   {

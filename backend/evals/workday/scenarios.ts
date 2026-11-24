@@ -145,7 +145,7 @@ export const scenarios = (): Scenario[] => [
       },
       {
         person: "now write a short intro about our new jute range and post it on the pune buy and sell facebook group",
-        expect: { hand: [{ agent: ["Community Manager"], cont: false, say: ["jute"] }] },
+        expect: { hand: [{ agent: ["Community Manager"], say: ["jute"] }] },
       },
     ],
   },

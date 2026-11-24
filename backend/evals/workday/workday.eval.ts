@@ -62,8 +62,8 @@ async function run({ scenario, carriesOn }: Input): Promise<Output> {
       agents.push(agent);
     }
     const current = latestOf(agent.name);
-    // the new hand-off: an agent's job still working or asking gets this added; a finished one, a fresh job
-    if (carriesOn && current && current.status !== "done" && !/--new\b/.test(flags)) return carry(current, brief);
+    // the new hand-off: an agent's job here, working or finished, gets this added; --new, a fresh job
+    if (carriesOn && current && !/--new\b/.test(flags)) return carry(current, brief);
     return start(agent.name, brief);
   };
   const business = (): Business => ({ agents: agents.map((a) => `- ${a.name} (agents/${a.slug}, light): ${AGENTS.find((l) => l.includes(`agents/${a.slug},`))?.split("): ")[1] ?? "made today"}`), threads: [...jobs].reverse().map(line) });
