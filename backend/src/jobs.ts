@@ -707,7 +707,7 @@ const notFound = (ref?: string) => `error: none of your threads starts with ${re
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
-export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, `--new` on each after the first, all in one command):";
+export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, all in one command, `--new` only on the same agent's second and later):";
 export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` adds to its job while it works, else starts a fresh one; `emplio hand <id>` carries on a finished one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   // each agent's latest job: the one `emplio hand <agent>` goes to
