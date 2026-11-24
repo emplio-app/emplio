@@ -63,6 +63,7 @@ import { FilePanel, OpenFileProvider, type Shown } from "@/components/files/file
 import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/assistant-reply";
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
+import { ReportButton } from "@/components/chat/report-reply";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { useMentionMenu } from "@/components/chat/mention-menu";
 import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
@@ -1055,6 +1056,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         {message.role === "assistant" && !(isLast && busy) && text && (
           <MessageActions className="-ml-1.5 gap-0.5 text-muted-foreground [&_button]:size-7 [&_svg]:size-3.5! opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
             <CopyButton text={text} />
+            <ReportButton messageId={message.id} />
             {isLast && (
               <MessageAction tooltip="Regenerate" onClick={() => handlers.current.regenerate()}>
                 <RefreshCcwIcon />

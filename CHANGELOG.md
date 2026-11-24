@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.5 (2026-11-24)
+
+### What's new
+
+- Every reply from Emplio now has a Report flag. Tap it, pick what's wrong (offensive, harmful, sexual, wrong or something else), add a note if you like, and it goes straight to the Emplio team to review.
+
+### For developers
+
+- `POST /messages/:id/report` (`chat.ts`): checks the reply is the person's, logs it, and emails `REPORTS_EMAIL` (new, optional) through Resend with the reply's text; 502 if the email fails so the person can try again. `report-reply.tsx`: flag under each reply next to Copy, a dialog with reasons and a note. Google Play requires in-app reporting for AI-generated content.
+- Android app 1.0.1 (versionCode 2) for the Play resubmission.
+
 ## 1.4.4 (2026-11-23)
 
 ### What's new
