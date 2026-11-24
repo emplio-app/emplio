@@ -20,4 +20,4 @@ No public REST API exists.
 
 ## Triggers
 
-None yet. The server has no webhooks; a polled "new recording" trigger is possible later through `polls/`.
+`neosapien.new_conversation`, polled every 15 minutes (at least 5) in `polls/recorders.ts`. The tool names aren't published, so it calls the server's read-only tool whose name says it lists conversations, memories or recordings, and reads the first list in its answer. The server has no webhooks.
