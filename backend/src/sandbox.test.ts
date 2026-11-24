@@ -436,7 +436,45 @@ test("a browser size Emplio set is put back before each later command, for that 
   await run("./emplio browser set viewport 390 844");
   await run("./emplio browser snapshot -i");
   await run("./emplio browser open https://a.example", "chat-2");
-  expect(await calls()).toEqual(["open https://a.example", "set viewport 390 844", "eval innerWidth", "set viewport 390 844", "snapshot -i", "open https://a.example"]);
+  // an open also keeps a look at the page, for the next step's "what changed"
+  const look = ["snapshot -c", "get url"];
+  expect(await calls()).toEqual(["open https://a.example", ...look, "set viewport 390 844", "eval innerWidth", "set viewport 390 844", "snapshot -i", "open https://a.example", ...look]);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("clicking a dropdown by position says to pick its option by name instead", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash\necho "$*" >> "$HOME/calls"\ncase "$*" in *eval*) echo '"SELECT|#status|Pending, Shipped"' ;; *) echo done ;; esac\n`, { mode: 0o755 });
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const p = Bun.spawn(["bash", "-c", "./emplio browser click 300 150"], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: "k", BROWSER_CDP_URL: "x", BROWSER_SESSION: "s-dd", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+  const [, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+  expect(err).toContain(`that's a dropdown (Pending, Shipped); clicking can't pick from it. Pick by name: emplio browser select '#status' "<option>"`);
+  expect(readFileSync(join(home, "calls"), "utf8")).not.toContain("mouse");
+  rmSync(home, { recursive: true, force: true });
+});
+
+test("a step that changes the page answers with what's new on it, and says so when nothing changed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "emplio-"));
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  // stands in for agent-browser: the page is a file; clicking Save adds a message, Cancel does nothing
+  writeFileSync(join(home, ".local/bin/agent-browser"), `#!/bin/bash
+case "$*" in
+  *"snapshot -c") cat "$HOME/page" ;;
+  *"get url") echo https://a.example/ ;;
+  *"click @e2") echo '- StaticText "Saved"' >> "$HOME/page"; echo done ;;
+  *) echo done ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(home, "page"), '- button "Save" [ref=e2]\n- button "Cancel" [ref=e3]\n');
+  writeFileSync(join(home, "emplio"), EZ, { mode: 0o755 });
+  const run = async (command: string) => {
+    const p = Bun.spawn(["bash", "-c", command], { env: { HOME: home, PATH: process.env.PATH!, EZ_KEY: "k", BROWSER_CDP_URL: "x", BROWSER_SESSION: "s-new", BROWSER_POINTER: "p" }, cwd: home, stdout: "pipe", stderr: "pipe" });
+    return new Response(p.stdout).text();
+  };
+  await run("./emplio browser open https://a.example/");
+  expect(await run("./emplio browser click @e2")).toBe('done\nNew on the page:\n- StaticText "Saved"\n');
+  expect(await run("./emplio browser click @e3")).toBe("done\nNothing changed on the page.\n");
   rmSync(home, { recursive: true, force: true });
 });
 

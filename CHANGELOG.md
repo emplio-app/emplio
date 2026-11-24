@@ -2,6 +2,20 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.14 (2026-11-25)
+
+### What's new
+
+- Emplio gets around websites in fewer steps: after each click or form fill it sees straight away what changed on the page (a "saved" message, a box that opened, a new page), so it doesn't stop to look again. In tests, editing records on a site took about a quarter fewer steps and was about 20% cheaper.
+- Emplio can now look at a page and click a spot it sees, in one step. It still reads pages as text when that's quicker, and switches to looking when a page has no labels, is a drawing or map, or a click keeps missing.
+
+### For developers
+
+- `emplio browser click <x> <y>`: a spot in the screenshot last seen (x y scaled back from the 1200px picture the model gets, `files.ts` `MAX_SIDE`, and devicePixelRatio), then a screenshot. A native dropdown under the spot isn't clicked: the answer names its options and the `select` command to use.
+- `emplio browser screenshot` is shown to the model by itself (no `emplio view` step); with no path it's kept in /work/tmp/.browser.
+- click, fill, type, select, check, press, find, upload, dialog and keyboard answer with the lines new on the page since the last look (compact snapshot diff, refs kept, 25 lines at most), or "Nothing changed on the page."; open, back and tab keep a look for the next diff.
+- `evals/browser/bench.ts`: `BENCH_MODE=vision|hybrid`, `BENCH_SHOT_SCALE`, `BENCH_SET=real` (five public sites), `BENCH_CHROME`; refused commands and site changes logged per run.
+
 ## 1.4.13 (2026-11-25)
 
 ### What's new
