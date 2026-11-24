@@ -49,6 +49,7 @@ import { describeMentions } from "./mentions";
 import { AGENTS_HEADING, EMPLIO, JOB_MAX_STEPS, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
+import { sendEmail } from "./mail";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
 import { NEXT_STEP_MODEL, writeNextStep } from "./next-step";
 import { holdRead, readLater, SILENT } from "./reader";
@@ -1527,6 +1528,46 @@ export async function chatRoutes(app: FastifyInstance) {
     if (!part) return reply.code(404).send({ error: "Not found" });
     return { command: part.input?.command ?? part.input?.code, output: part.output?.output };
   });
+
+  // Report a reply as offensive, harmful or wrong (the Report button under it; app stores require it for AI
+  // content). Goes to the people running this install (REPORTS_EMAIL) and the server log.
+  app.post<{ Params: { id: string }; Body: { reason: string; note?: string } }>(
+    "/messages/:id/report",
+    {
+      schema: {
+        // message ids are the AI SDK's short ids, not uuids
+        params: { type: "object", required: ["id"], properties: { id: { type: "string", maxLength: 100 } } },
+        body: {
+          type: "object",
+          required: ["reason"],
+          properties: { reason: { type: "string", minLength: 1, maxLength: 80 }, note: { type: "string", maxLength: 2000 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const ctx = await context(req, reply);
+      if (!ctx) return;
+      const message = await db.query.messages.findFirst({ where: eq(messages.id, req.params.id), columns: { conversationId: true, role: true, parts: true } });
+      if (!message || message.role !== "assistant" || !(await findConversation(message.conversationId, ctx))) return reply.code(404).send({ error: "Not found" });
+      const said = (message.parts as { type: string; text?: string }[]).flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("\n\n");
+      const text = [
+        `Reason: ${req.body.reason}`,
+        req.body.note?.trim() && `Note: ${req.body.note.trim()}`,
+        `By: ${ctx.userName} <${ctx.userEmail}> (${ctx.role}) in ${ctx.workspaceName}`,
+        `Workspace ${ctx.workspaceId}, chat ${message.conversationId}, message ${req.params.id}`,
+        "",
+        "The reply:",
+        said.slice(0, 20_000),
+      ]
+        .filter((l) => l !== undefined && l !== "")
+        .join("\n");
+      console.warn("reply reported", text);
+      const to = process.env.REPORTS_EMAIL;
+      if (to && !(await sendEmail(to, `Reply reported: ${req.body.reason}`, text, { replyTo: [ctx.userEmail] })))
+        return reply.code(502).send({ error: "Couldn't send the report. Try again in a moment." });
+      return { ok: true };
+    },
+  );
 
   app.patch<{ Params: { id: string }; Body: UpdateConversationRequest }>(
     "/conversations/:id",
