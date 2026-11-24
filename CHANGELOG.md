@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.9 (2026-11-24)
+
+### What's new
+
+- Fifteen more meeting notetakers: Fathom, Read AI, Otter.ai, tl;dv, Granola, Avoma, Fellow, MeetGeek, Circleback, Jamie, Leexi, Gong, Grain, Sybill and Supernormal. Connect one and Emplio can find a meeting, read its transcript, summary and action items, and start an automation when a new recording is ready. ![](frontend/public/whats-new/1.4.9-notetakers.webp)
+
+### For developers
+
+- New `own/` apps for the fifteen notetakers, each with COVERAGE notes and tests. Read AI signs in (OAuth); the rest take a pasted key (Fellow `<subdomain>:<key>`, MeetGeek `<region>:<key>`, Leexi and Gong `<id>:<secret>`).
+- New-recording triggers: webhooks where the app has them (Fathom, Granola, Avoma, Fellow, MeetGeek, Grain), polls elsewhere (`polls/<app>.ts`).
+
 ## 1.4.8 (2026-11-24)
 
 ### What's new
