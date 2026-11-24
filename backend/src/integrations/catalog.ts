@@ -41,6 +41,8 @@ export const CATALOG: CatalogApp[] = [
   own("calendly", "Calendly", "calendar", "Book and cancel meetings, share booking links, and start work the moment someone books, cancels or doesn't show up"),
   own("googlemeet", "Google Meet", "calendar", "Create meeting links, see who joined, read transcripts and meeting notes, and find where recordings are saved"),
   own("fireflies", "Fireflies.ai", "calendar", "Meeting recordings, transcripts, summaries and action items; ask questions across meetings"),
+  own("plaud", "Plaud", "calendar", "Recordings from your Plaud recorder: find a conversation, read its transcript and AI notes, and turn them into follow-ups"),
+  own("neosapien", "NeoSapien", "calendar", "Conversations your Neo 1 pendant and desktop app captured: search what was said, read transcripts and projects, and act on them"),
   own("zoom", "Zoom", "calendar", "Schedule meetings and webinars, get recordings and AI summaries, and start work the moment a meeting ends or a recording is ready"),
   own("googledocs", "Google Docs", "docs", "Create documents and edit any document you share the link of, including filling in templates"),
   composio("googledrive", "Google Drive", "docs", "Find, upload and share files"),
