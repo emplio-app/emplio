@@ -8,10 +8,11 @@ Google sign-in only (no key), shared with Calendar, Docs and Sheets: one OAuth c
 
 | Scope | Google's class | What it gives |
 | --- | --- | --- |
-| `meetings.space.created` | Sensitive | Make meeting rooms, and manage rooms Emplio made |
-| `meetings.space.readonly` | Sensitive | Read any of the person's meetings: records, participants, recordings' and transcripts' details |
+| `meetings.space.created` | Sensitive | Make meeting rooms, manage rooms Emplio made, and read their calls: records, participants, recordings' and transcripts' details |
 | `meetings.space.settings` | Non-sensitive | Change settings of the person's other rooms |
 | `openid`, `email` | Non-sensitive | The connection's label |
+
+`meetings.space.readonly` (any of the person's meetings) is not asked for: it was left out of Google's review (Nov 19, 2026), and the consent screen must ask only for what was reviewed.
 
 Only scopes Google classes as sensitive or non-sensitive are asked for. The test in `own/google-login.test.ts` fails if a restricted one appears (`drive`, `drive.readonly`, `drive.metadata`, `drive.meet.readonly`...). Tokens last an hour and renew with the refresh token (`offline`, `prompt=consent`).
 
@@ -23,7 +24,7 @@ Only scopes Google classes as sensitive or non-sensitive are asked for. The test
 | --- | --- |
 | Create a room, read it, change its settings | `create_meet`, `get_meet`, `update_space` (other rooms through `meetings.space.settings`) |
 | End a call, manage members | `end_active_conference`, member actions, only in rooms Emplio made (Google limits these to `meetings.space.created`) |
-| Past calls, participants, sessions | `list_conference_records`, `get_participant`..., any of the person's meetings |
+| Past calls, participants, sessions | `list_conference_records`, `get_participant`..., for calls in rooms Emplio made |
 | **Recording details** | State, times and the Drive link (`driveDestination.exportUri`) to open signed in, from `get_recording`, `list_recordings` |
 | **Transcript entries** | The full text, line by line with speaker and time, through `list_transcript_entries`, `get_transcript_entry` |
 | Smart notes | `list_smart_notes`, `get_smart_note`: details and the link to the notes in Docs |
