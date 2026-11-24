@@ -61,6 +61,30 @@ test("an ask is kept on the server from the moment it's shown to how the action 
   }
 });
 
+test("an ask that doesn't wait isn't held in code mode: the card goes up, and an Allow later runs it", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `approvals-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `approvals-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const chat = crypto.randomUUID();
+    await db.insert(conversations).values({ id: chat, ...who, title: "main", kind: "main" });
+    const shown: Approval[] = [];
+    let ran = 0;
+    const s = { conversationId: chat, workspaceId: ws!.id, user: { id: user!.id, name: "Asha" }, settings: { approvals: "ask" }, live: true, notify: (a: Approval) => shown.push(a) } as unknown as Session;
+    const own = { title: "Let the reminder send WhatsApp messages", readOnly: false, appName: "WhatsApp", alwaysAsk: true, run: async () => void ran++ };
+    // held, it would be redone whole after the command (Deferred), redoing what came before it
+    expect(await approve(s, "automation.allow", {}, { own, wait: false })).toContain("waiting for their OK");
+    expect(shown).toHaveLength(1);
+    expect(ran).toBe(0);
+    expect(await decide(shown[0]!.id, ws!.id, user!.id, "once")).toContain("Done");
+    expect(ran).toBe(1);
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
+});
+
 test("Emplio reads a command's result without its Allow cards", () => {
   expect(withoutCards({ exitCode: 0, output: "sent", approvals: [{ id: "1", decision: "once" }] })).toEqual({ exitCode: 0, output: "sent" });
   expect(withoutCards({ exitCode: 0, output: "sent" })).toEqual({ exitCode: 0, output: "sent" });
