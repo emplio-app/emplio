@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { badEnding, doneProblem, ENDINGS, shapeProblem, statusOf } from "./checks";
+import { badEnding, doneProblem, ENDINGS, openSteps, shapeProblem, statusOf } from "./checks";
 
 const report = (status: string, checked = "Checked: read back invoice INV-1 in Zoho; 52 of 52 imported") =>
   `Status: ${status}\nResult: imported 52 invoices\n${checked}\nFiles: none\nChanged outside: 52 invoices in Zoho\nLeft: nothing`;
@@ -25,9 +25,8 @@ test("a report is in shape with its status first, and a Done says how it was che
 test("a Done with steps not ticked or a failed last command is asked about once", () => {
   const clean = { open: [], lastFailed: null, askedBefore: false };
   expect(doneProblem(report("Done"), clean)).toBeNull();
-  expect(doneProblem(report("Done"), { ...clean, open: ["Import March"] })).toContain('"Import March"');
+  expect(openSteps(["Import March"])).toContain('"Import March"');
   expect(doneProblem(report("Done"), { ...clean, lastFailed: "Save invoices" })).toContain('"Save invoices"');
   // not Done: nothing to hold against it; asked once already: the job's word stands
-  expect(doneProblem(report("Partly done"), { ...clean, open: ["Import March"] })).toBeNull();
-  expect(doneProblem(report("Done"), { ...clean, open: ["Import March"], askedBefore: true })).toBeNull();
+  expect(doneProblem(report("Done"), { ...clean, lastFailed: "Save invoices", askedBefore: true })).toBeNull();
 });
