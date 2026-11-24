@@ -20,7 +20,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { FROM_EMPLIO, MODEL_SETS, modelFor, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
+import { type PlanStep, FROM_EMPLIO, MODEL_SETS, modelFor, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -916,7 +916,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   // a job's run gets more steps than a reply to a person: past them it carries on in a fresh run (jobs.ts CARRY_ON)
   const maxSteps = job ? JOB_MAX_STEPS : settings.maxSteps;
   // a job whose checklist doesn't move is reminded about it (stuck.ts)
-  const progress = progressGuard(!!chat.plan?.length);
+  const progress = progressGuard(chat.plan);
   // code mode: every command they mention, as the Python library spells it (sandbox.ts inPython)
   const python = (m: SystemModelMessage) => (codeMode() ? { ...m, content: inPython(m.content) } : m);
   const withNotes = (n: string | null) =>
@@ -1068,7 +1068,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
       if (reached?.open && !result.plan)
         result = { ...result, output: `${String(result.output ?? "")}\n\n[Checklist: ${reached.open} not ticked yet. If all the work is done, run \`${code !== undefined ? "emplio.plan.done()" : "emplio plan done"}\` before your answer. Stopping to ask them something: leave it open.]` };
       if (job) {
-        const note = progress.check(!!(result.plan || moved), !notCounted(command));
+        const note = progress.check((result.plan ?? moved) as PlanStep[] | undefined, !notCounted(command));
         if (note) result = { ...result, output: `${String(result.output ?? "")}\n\n${code !== undefined ? inPython(note) : note}` };
       }
       yield { ...result, ...(moved && !result.plan && { plan: moved }), ...(cards.size && { approvals: [...cards.values()] }), ms: Date.now() - began };

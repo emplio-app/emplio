@@ -5,6 +5,8 @@
 // Exit code 1 alone isn't counted towards the 8: it's grep, test or diff saying "no match", not an error.
 // One guard per run: a chat reply, or one job.
 
+import type { PlanStep } from "@emplio/shared";
+
 const SAME = 3;
 const IN_A_ROW = 8;
 // enough of the end of an output to tell one error from another, without a changing timestamp up top mattering
@@ -57,16 +59,20 @@ export type FailureGuard = ReturnType<typeof failureGuard>;
 // failure guard do that. Commands that only manage (emplio plan, hand, ask) aren't counted.
 const EVERY = 10;
 const WRITE_PLAN = "[Reminder: no checklist yet. If this takes more than a few steps, write one (emplio plan set ...), ticking what's done already.]";
-const TICK = "[Reminder: your checklist hasn't moved in a while. Tick what's done (emplio plan done <n>) and keep the rest up to date.]";
-export function progressGuard(planned: boolean) {
+// names the open step: a bare "tick what's done" was acted on about 1 time in 5 (live, Nov 24)
+const TICK = (n: number, text: string) =>
+  `[Checklist: step ${n} "${text}" is still open after ${EVERY} commands. If it's done, tick it now (emplio plan done ${n}). Give each command the step it works on (step: <n>): that ticks as you go.]`;
+export function progressGuard(plan: PlanStep[] | null | undefined) {
   let since = 0;
-  let has = planned;
+  let steps = plan ?? [];
   return {
-    // what to add to a command's output, if anything; moved: the checklist changed with it
-    check(moved: boolean, counted: boolean): string | null {
-      if (moved) return (since = 0), (has = true), null;
+    // what to add to a command's output, if anything; moved: the checklist as the command left it, when it changed
+    check(moved: PlanStep[] | null | undefined, counted: boolean): string | null {
+      if (moved) return (since = 0), (steps = moved), null;
       if (!counted || ++since % EVERY) return null;
-      return has ? TICK : WRITE_PLAN;
+      if (!steps.length) return WRITE_PLAN;
+      const open = steps.findIndex((s) => s.status !== "done");
+      return open < 0 ? null : TICK(open + 1, steps[open]!.text);
     },
   };
 }
