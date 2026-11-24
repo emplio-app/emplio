@@ -5,8 +5,8 @@ import type { Business, Said } from "../emplio";
 import type { Case } from "./cases";
 export { staysEmplio } from "../hand-off/scorers";
 
-// carriesOn: the app's `emplio hand <agent>` adds to that agent's job in this chat while it's working or asking, and
-// starts a fresh one once it's finished; `emplio hand <id>` carries on a finished one. false: `emplio hand <agent>`
+// carriesOn: the app's `emplio hand <agent>` adds to that agent's job in this chat, working or finished (`--new`: a
+// fresh one); `emplio hand <id>` carries on that job. false: `emplio hand <agent>`
 // always starts a new one and only a thread id carries on (the old hand-off)
 export type Input = { business: Business; chat: ModelMessage[]; world: [string, string][]; carriesOn: boolean; name?: string; category?: string; expect?: Case["expect"] };
 export type Output = Said & { byHand: number };
@@ -18,7 +18,7 @@ type Score = { name: string; score: number | null; metadata?: Record<string, unk
 export type Route = { agent: string; cont: boolean; brief: string };
 export function routesOf(commands: string[], input: Pick<Input, "business" | "carriesOn">): Route[] {
   const agents = (input.business.agents ?? []).map((line) => ({ name: /^- (.+?) \(agents\//.exec(line)?.[1] ?? "", slug: /\(agents\/([^,)]+)/.exec(line)?.[1] ?? "" }));
-  const threads = (input.business.threads ?? []).map((line) => ({ id: /^- (\w+)/.exec(line)?.[1] ?? "", agent: line.split(" · ")[1] ?? "", open: /· (working|asking)\b/.test(line) }));
+  const threads = (input.business.threads ?? []).map((line) => ({ id: /^- (\w+)/.exec(line)?.[1] ?? "", agent: line.split(" · ")[1] ?? "", }));
   return commands.flatMap((command) =>
     [...command.matchAll(/\bemplio hand\s+(?:"([^"]+)"|'([^']+)'|(\S+))([^\n]*)/g)].map((m): Route => {
       const pick = (m[1] ?? m[2] ?? m[3])!.trim();
@@ -26,7 +26,7 @@ export function routesOf(commands: string[], input: Pick<Input, "business" | "ca
       const thread = /^[0-9a-f]{4,}$/i.test(pick) ? threads.find((t) => t.id.startsWith(pick.toLowerCase())) : undefined;
       if (thread) return { agent: thread.agent, cont: true, brief: command };
       const agent = agents.find((a) => a.name.toLowerCase() === pick.toLowerCase() || a.slug === pick.toLowerCase());
-      if (agent) return { agent: agent.name, cont: input.carriesOn && !/--new\b/.test(flags) && threads.some((t) => t.agent === agent.name && t.open), brief: command };
+      if (agent) return { agent: agent.name, cont: input.carriesOn && !/--new\b/.test(flags) && threads.some((t) => t.agent === agent.name), brief: command };
       return { agent: pick.toLowerCase() === "myself" ? "myself" : "new", cont: false, brief: command };
     }),
   );

@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.10 (2026-11-24)
+
+### What's new
+
+- When you give an agent more of the same work, it carries on where it left off, with everything it already read, instead of starting over. It starts a separate job only for something unrelated.
+
+### For developers
+
+- `jobs.ts`: `emplio hand <agent>` adds to that agent's latest job in the chat whether it's working or finished; `--new` only for unrelated work (`MANAGER_PROMPT` hand-off rules, `AGENTS_HEADING`, `THREADS_HEADING`, usage). Manager eval: follow-ups after a finished job expect carry-on, new case for replying to an email a finished job read (Haiku: right_call 97.8%).
+
 ## 1.4.9 (2026-11-24)
 
 ### What's new
