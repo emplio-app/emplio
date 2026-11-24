@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.11 (2026-11-24)
+
+### What's new
+
+- On the free trial, you now get an email two days before it ends and another when it ends, so Emplio never pauses without warning. If the trial's usage runs out first, the email says to pick a plan.
+
+### For developers
+
+- Billing emails: free trial ending and ended reminders, and trial wording for the used-up email. The paused message no longer mentions the 7-day pass.
+
 ## 1.4.10 (2026-11-24)
 
 ### What's new
