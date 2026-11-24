@@ -2,6 +2,21 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.6 (2026-11-24)
+
+### What's new
+
+- An agent's checklist now fills in as it works, instead of all at once at the end, so you can follow along.
+- When an agent finishes but forgot to tick a step, its report reaches you straight away, and it tidies its checklist afterwards; you only hear again if a step really wasn't done.
+- Emplio starts a second job for the same agent only when the first is still working, not on every hand-off.
+
+### For developers
+
+- `jobs.ts` `RULES`: give every command the `step` it works on; `AGENTS_HEADING`: `--new` only for the same agent's second job at once.
+- `stuck.ts` `progressGuard` takes the checklist and names the open step and its `emplio plan done <n>` in the 10-command reminder.
+- `checks.ts`: unticked steps after a Done report no longer send the job back before its report; `openSteps` follows the report with the tool-saving nudge, and a new report from that run replaces the old one.
+- New `checklist` eval (ticks as it goes: 0% → 78% on Haiku).
+
 ## 1.4.5 (2026-11-24)
 
 ### What's new

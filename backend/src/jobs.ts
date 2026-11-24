@@ -25,7 +25,7 @@ import { timezoneOf, when } from "./time";
 import { isReplying } from "./live";
 import { cloud } from "./cloud";
 import { planText } from "./plan";
-import { badEnding, DONE_BUT, doneProblem, MAX_PUSHES, REPORT_SHAPE, SHAPE_NOTE, shapeProblem, type Ending } from "./checks";
+import { badEnding, DONE_BUT, doneProblem, MAX_PUSHES, openSteps, REPORT_SHAPE, SHAPE_NOTE, shapeProblem, statusOf, type Ending } from "./checks";
 
 type Action = JobInfo["actions"][number];
 
@@ -107,14 +107,12 @@ export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
 const toEmplio = async (w: Row) => !!w.chatId && textOf([...(await loadMessages(w.chatId))].reverse().find((m) => m.role === "user") ?? { parts: [] }).startsWith(FROM_EMPLIO);
 // the report's shape is asked for once: a job that still doesn't write it is let through, its report as it is
 const askedShape = async (w: Row) => (await loadMessages(w.chatId!)).some((m) => m.role === "user" && textOf(m).startsWith(FROM_EMPLIO + SHAPE_NOTE.slice(0, 30)));
-// a Done its checklist or last command says isn't (checks.ts doneProblem)
+// a Done its last command says isn't (checks.ts doneProblem)
 async function doneCheck(w: Row, report: string) {
   const msgs = await loadMessages(w.chatId!);
-  const plan = (await db.query.conversations.findFirst({ where: eq(conversations.id, w.chatId!), columns: { plan: true } }))?.plan ?? [];
   const last = actionsIn(msgs).at(-1);
   const lastSent = textOf([...msgs].reverse().find((m) => m.role === "user") ?? { parts: [] });
   return doneProblem(report, {
-    open: plan.filter((s) => s.status !== "done").map((s) => s.text),
     lastFailed: last && (last.error || (last.exitCode ?? 0) !== 0) ? last.description : null,
     askedBefore: lastSent.startsWith(FROM_EMPLIO + DONE_BUT),
   });
@@ -156,8 +154,8 @@ Your job card, at the end of these instructions, holds the work on hand: its bri
 added to it since. Do all of it and check the result: an addition adds to the work and changes it only where it \
 says so ("instead", "stop", "drop"), never replacing the rest. Your instructions and skills say how you work, never \
 what to do instead, so a brief unlike your usual work or your last one is still the job. Work of more than a few \
-steps: write its checklist first (\`emplio plan set\`, a step for each part of the brief and its additions) and tick \
-each step as you finish it (\`emplio plan done <n>\`); the person follows your work there, and it stays on your card. \
+steps: write its checklist first (\`emplio plan set\`, a step for each part of the brief and its additions) and give \
+every command the \`step\` it works on, which ticks the checklist as you go (\`emplio plan done <n>\` for the last one); the person follows your work there, and it stays on your card. \
 Work silently: no messages between commands. Write words once, at the end: your report. Long reading goes into files, not your chat: your chat gets folded into short \
 notes as it grows, and a run stops after a set number of steps (a fresh one carries on), so anything only in your \
 chat is lost and gets read again. Read a big document once, with a script that pulls out what the task needs into a \
@@ -369,11 +367,17 @@ async function began(w: Row, stop: () => void) {
   // it asked a question: whoever answers it here, Emplio is still waiting on the result
   // the tool-saving run after the report: the job stays done, with its report, and the run's end only ends it
   if (saving.has(w.id))
-    return async () => {
+    return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false) => {
       saving.delete(w.id);
       if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
       live.delete(w.id);
       e.end();
+      // told of unticked checklist steps (openSteps), it found one really undone and wrote a new report: that one goes
+      if (outcome !== "completed" || interrupted || !statusOf(answer)) return;
+      await db.update(jobs).set({ report: answer, finishedAt: new Date() }).where(eq(jobs.id, w.id));
+      if (w.depth !== 1) return;
+      unseen.add(w.id);
+      if (!waited.has(w.id)) void resume(w).catch((error) => console.error(`job ${w.id}: resuming the chat failed`, error));
     };
   if (w.depth === 1 && w.status === "asking") owed.add(w.id);
   await db.update(jobs).set({ status: "working", report: null, finishedAt: null }).where(eq(jobs.id, w.id));
@@ -430,10 +434,16 @@ async function began(w: Row, stop: () => void) {
       // Emplio's reply ended first: the chat that started it carries on once its jobs are all done
       if (!waited.has(w.id)) void resume(w).catch((error) => console.error(`job ${w.id}: resuming the chat failed`, error));
     }
-    if (nudge && status === "done") {
+    // after its report, like the tool-saving nudge: a Done with checklist steps unticked (usually only the ticking was
+    // missed), then the nudge, in one quiet run
+    const open =
+      status === "done" && statusOf(report) === "done" && w.chatId
+        ? ((await db.query.conversations.findFirst({ where: eq(conversations.id, w.chatId), columns: { plan: true } }))?.plan ?? []).filter((s) => s.status !== "done").map((s) => s.text)
+        : [];
+    if ((nudge || open.length) && status === "done") {
       saving.add(w.id);
       const told = owed.has(w.id);
-      void send(w, SAVE_TOOL, undefined, true);
+      void send(w, open.length ? openSteps(open) + (nudge ? `\n\nThen: ${SAVE_TOOL}` : "") : SAVE_TOOL, undefined, true);
       if (!told) owed.delete(w.id);
     }
   };
@@ -697,7 +707,7 @@ const notFound = (ref?: string) => `error: none of your threads starts with ${re
 // The threads Emplio can carry on, for the note on each message (chat.ts) and for a hand-off it got wrong. Dates, not
 // "2 hours ago": the note is only sent again when this changes.
 // The heading of that list (the evals build the same note: evals/emplio.ts)
-export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, `--new` on each after the first, all in one command):";
+export const AGENTS_HEADING = "Your agents (`emplio hand <name>`; work for several sites, clients or accounts: a job each, all in one command, `--new` only on the same agent's second and later):";
 export const THREADS_HEADING = "Your agents' jobs in this chat, latest first (`emplio hand <agent>` adds to its job while it works, else starts a fresh one; `emplio hand <id>` carries on a finished one):";
 export async function threadsNote(who: Who, conversationId: string, caller: Caller) {
   // each agent's latest job: the one `emplio hand <agent>` goes to

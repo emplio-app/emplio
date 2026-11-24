@@ -60,11 +60,15 @@ export function shapeProblem(report: string): string | null {
 // its last command failed. Asked once: the job may know better (a step dropped on the person's word, a search that
 // found nothing on purpose), and says so in its report. The rest is the manager's to judge (jobs.ts MANAGER_PROMPT).
 export const DONE_BUT = "Your report says Done, but ";
-export function doneProblem(report: string, o: { open: string[]; lastFailed: string | null; askedBefore: boolean }): string | null {
+export function doneProblem(report: string, o: { lastFailed: string | null; askedBefore: boolean }): string | null {
   if (o.askedBefore || statusOf(report) !== "done") return null;
-  if (o.open.length)
-    return `${DONE_BUT}your checklist still has steps not ticked: ${o.open.map((s) => `"${s}"`).join(", ")}. Finish and check each one, or tick it if it's done (emplio plan done <n>) and say how you know under Checked. A step that can't be done: say so under Left and make the status Partly done.`;
   if (o.lastFailed)
     return `${DONE_BUT}your last command failed ("${o.lastFailed}"). Check that what it was for worked; if it did, say how under Checked; if not, fix it, or say so under Left and make the status Partly done.`;
   return null;
 }
+
+// A Done with checklist steps left unticked: usually the work is done and only the ticking was missed, so the report
+// goes as it is and this follows it, quietly (jobs.ts, with the tool-saving nudge). A new report only if it finds a
+// step really undone. Starts like SAVE_TOOL so the tool-saving check counts it as the nudge (jobs.ts NUDGED).
+export const openSteps = (open: string[]) =>
+  `Your report has gone to whoever asked; nobody is waiting on this. Your checklist still has steps not ticked: ${open.map((s) => `"${s}"`).join(", ")}. Tick each one that's done (emplio plan done <n>). Don't redo work or write the report again: if every step was done, reply with one line. Only if a step really isn't done: finish it now, then write a new full report.`;

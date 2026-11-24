@@ -119,7 +119,8 @@ export const emplio = (text: string): ModelMessage => ({ role: "assistant", cont
 // What stand-in a command gets, or null to stop there: the choice the eval is about has been made.
 // step: which tool call it's part of. In code mode one step (a run of Python) can make many commands; a step counts
 // once toward how many Emplio did by hand, as the server counts it (counted, below).
-export type StandIn = (command: string, step: number) => string | null;
+// tick: the checklist step the call said it works on (the tools' step field), when it said one
+export type StandIn = (command: string, step: number, tick?: number) => string | null;
 // The by-hand count after this command: one more for the first counted command of a step, as the server counts steps.
 export const counted = () => {
   let n = 0;
@@ -216,9 +217,9 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const bash = tool({
     description: BASH_DESCRIPTION,
     inputSchema: bashInput,
-    execute: async ({ command }) => {
+    execute: async ({ command, step: tick }) => {
       commands.push(command);
-      const out = standIn(command, ++steps_);
+      const out = standIn(command, ++steps_, tick);
       if (out === null) stop = true;
       return { exitCode: 0, output: out ?? "(stopped here)" };
     },
@@ -226,14 +227,14 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   const python = tool({
     description: PYTHON_DESCRIPTION,
     inputSchema: pythonInput,
-    execute: async ({ code, restart }) => {
+    execute: async ({ code, restart, step: tick }) => {
       // the server's notes ([...] after a result) go under the run's own output, as the app adds them, once each
       const notes = new Set<string>();
       const step = ++steps_;
       let first = true;
       const answer = (command: string) => {
         commands.push(command);
-        const out = standIn(command, step);
+        const out = standIn(command, step, tick);
         first = false;
         if (out === null) {
           stop = true;
@@ -246,7 +247,7 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
       const ran = await runPython(session ?? key, code, !!restart, answer);
       // a run that called nothing still counts as a step done by hand
       if (first && !stop) {
-        const out = standIn(`python3 <<'EOF'\n${code}\nEOF`, step);
+        const out = standIn(`python3 <<'EOF'\n${code}\nEOF`, step, tick);
         if (out === null) stop = true;
         for (const n of (out ?? "").split(/\n\n(?=\[)/).slice(1)) notes.add(n);
       }

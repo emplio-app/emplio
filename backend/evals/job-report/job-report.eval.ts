@@ -14,7 +14,7 @@ async function task(input: Input): Promise<Output> {
   const { reply, pretend, person } = await app();
   const { FROM_EMPLIO } = await import("@emplio/shared");
   const { jobCard } = await import("../../src/jobs");
-  const { badEnding, shapeProblem, doneProblem } = await import("../../src/checks");
+  const { badEnding, shapeProblem, doneProblem, openSteps, statusOf } = await import("../../src/checks");
   const { chatOf, JOB_WORLD } = await import("./cases");
   const plan = (input.plan ?? []).map(([text, done]) => ({ text, status: done ? ("done" as const) : ("todo" as const) }));
   const card = jobCard([{ role: "user", parts: [{ type: "text", text: FROM_EMPLIO + input.brief }] }], plan);
@@ -37,11 +37,18 @@ async function task(input: Input): Promise<Output> {
   const asked = statusIn(firstReport, first.commands) === "question";
   const note =
     badEnding({ text: firstReport, reasoned: false }) ??
-    (asked ? null : shapeProblem(firstReport) ?? doneProblem(firstReport, { open: plan.filter((s) => s.status !== "done").map((s) => s.text), lastFailed: null, askedBefore: false }));
+    (asked ? null : shapeProblem(firstReport) ?? doneProblem(firstReport, { lastFailed: null, askedBefore: false }));
   let said = first;
   if (note) {
     const again = await reply({}, [...chat, ...(first.messages ?? []), person(FROM_EMPLIO + note)], standIn, 16, false, undefined, job);
     said = { ...again, commands: [...first.commands, ...again.commands] };
+  }
+  // after a Done report with checklist steps unticked, the quiet follow-up (src/jobs.ts): a new report only if it writes one
+  const open = plan.filter((s) => s.status !== "done").map((s) => s.text);
+  if (!note && !asked && statusOf(firstReport) === "done" && open.length) {
+    const after = await reply({}, [...chat, ...(first.messages ?? []), person(FROM_EMPLIO + openSteps(open))], standIn, 16, false, undefined, job);
+    if (statusOf(after.last ?? "")) said = { ...after, commands: [...first.commands, ...after.commands] };
+    else said = { ...first, commands: [...first.commands, ...after.commands] };
   }
   const output = { ...said, report: said.last ?? "", first: firstReport, sentBack: note };
   if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: input.name, category: input.category, output })}\n`);
