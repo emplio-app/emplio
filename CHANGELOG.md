@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.7 (2026-11-24)
+
+### What's new
+
+- Connecting Google Meet now asks only to manage the meetings Emplio sets up, not to read all of your past meetings. Emplio can still look up the calls, people and transcripts of meetings it set up.
+
+### For developers
+
+- `google-login.ts`: Google Meet no longer requests `meetings.space.readonly`, which was left out of Google's sensitive-scope review; the requested scopes must match the reviewed ones. Conference records, participants and transcripts still work for spaces the app created (`meetings.space.created`). Privacy page wording matches (cloud).
+
 ## 1.4.6 (2026-11-24)
 
 ### What's new
