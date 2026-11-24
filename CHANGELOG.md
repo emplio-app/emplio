@@ -2,6 +2,17 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.13 (2026-11-25)
+
+### What's new
+
+- Setting up a repeating reminder that needs your OK no longer makes duplicates: Emplio saves it once and shows the card asking you to allow it.
+
+### For developers
+
+- `approvals.ts`: `approve(..., { wait: false })` puts the card up and returns at once; an Allow later runs it (as after a timeout). `askToAllow` uses it in code mode: a held ask was redone whole after the command (`Deferred`), saving the automation a second time ("already exists"), so one run saved the same reminder three times, none allowed.
+- `tasks list` shows repeating tasks with `--all` too; the already-exists error names `emplio automations update`.
+
 ## 1.4.12 (2026-11-24)
 
 ### What's new
