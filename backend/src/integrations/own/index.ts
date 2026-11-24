@@ -96,6 +96,21 @@ import { karbon } from "./karbon";
 import { lemlist } from "./lemlist";
 import { plaud } from "./plaud";
 import { neosapien } from "./neosapien";
+import { fathom } from "./fathom";
+import { readai } from "./readai";
+import { otter } from "./otter";
+import { tldv } from "./tldv";
+import { granola } from "./granola";
+import { avoma } from "./avoma";
+import { fellow } from "./fellow";
+import { meetgeek } from "./meetgeek";
+import { circleback } from "./circleback";
+import { jamie } from "./jamie";
+import { leexi } from "./leexi";
+import { gong } from "./gong";
+import { grain } from "./grain";
+import { sybill } from "./sybill";
+import { supernormal } from "./supernormal";
 import type { McpTool } from "./mcp-app";
 
 export type OwnAction = {
@@ -169,7 +184,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello, klaviyo, activecampaign, webflow, figma, typeform, close, apollo, wrike, smartsheet, teamwork, everhour, chargebee, calcom, karbon, lemlist, plaud, neosapien };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello, klaviyo, activecampaign, webflow, figma, typeform, close, apollo, wrike, smartsheet, teamwork, everhour, chargebee, calcom, karbon, lemlist, plaud, neosapien, fathom, readai, otter, tldv, granola, avoma, fellow, meetgeek, circleback, jamie, leexi, gong, grain, sybill, supernormal };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
