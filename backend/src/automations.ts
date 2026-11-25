@@ -21,7 +21,7 @@ import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
 import { activity, automationRuns, automations, clients as clientsTable, connections, conversations, jobs, tasks, users, workspaceMembers, workspaces } from "./db/schema";
-import { slugOf } from "./clients";
+import { pickClients } from "./clients";
 import { startDueTasks } from "./tasks";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
@@ -80,7 +80,7 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
   // clients: all (every active client) or a list of them; due: days after each run
   const clients = s.clients === undefined || s.clients === null ? null : s.clients === "all" ? ["*"] : s.clients;
   if (clients !== null && (!Array.isArray(clients) || !clients.length || clients.some((c) => typeof c !== "string" || !c.trim())))
-    return { error: 'clients: must be all, or a list of clients, like [Northwind Traders, Contoso]' } as const;
+    return { error: 'clients: must be all, or a list of clients, like [Northwind Traders, Contoso], or of details, like [Files=monthly]' } as const;
   if (clients && when !== "schedule") return { error: "clients: only goes with when: schedule" } as const;
   const due = s.due === undefined ? null : s.due;
   if (s.process !== undefined && (typeof s.process !== "string" || !clients)) return { error: "process: goes with clients: (start that process for each of them)" } as const;
@@ -132,10 +132,7 @@ async function fanOut(row: Row) {
     return;
   }
   const all = await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, row.workspaceId));
-  const wanted = (row.clients ?? []).map((c) => c.toLowerCase());
-  const chosen = wanted.includes("*")
-    ? all.filter((c) => c.stage === "active")
-    : all.filter((c) => c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name))));
+  const chosen = pickClients(all, row.clients ?? []);
   const period = periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE);
   // a process: one go of it per client and period
   if (row.process) {

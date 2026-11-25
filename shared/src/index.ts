@@ -670,12 +670,17 @@ export type Client = {
   name: string;
   stage: ClientStage;
   handlers: { id: string; name: string }[];
+  // what's known about them, in their own words: Contact email, Tax number, Files: monthly. Processes fill inputs of the
+  // same name from these; a schedule's clients: [Files=monthly] picks the clients with that one.
+  details: ClientDetail[];
   // tasks not done or cancelled, and how many of them wait on someone
   openTasks: number;
   waitingTasks: number;
   updatedAt: string;
 };
-export type ClientInput = { name?: string; stage?: ClientStage; handlerIds?: string[] };
+export type ClientDetail = { name: string; value: string };
+// details: only the ones changing; "" or null removes one
+export type ClientInput = { name?: string; stage?: ClientStage; handlerIds?: string[]; details?: Record<string, string | null> };
 
 // A file the AI employee made (backend made.ts): the Files page and the previews in the chat.
 export type MadeFile = {

@@ -37,6 +37,7 @@ import {
 import { StartForm } from "@/components/processes/processes-page";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -444,6 +445,65 @@ function dueText(iso: string) {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+// Short facts kept on a client (Contact email, Tax number, Files: monthly): anyone may fill them in. Processes fill an
+// input of the same name from them; Emplio adds them as it learns them.
+function ClientFacts({ c, onChange }: { c: Client; onChange: (details: Record<string, string | null>) => void }) {
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  const add = () => {
+    if (!name.trim() || !value.trim()) return;
+    onChange({ [name.trim()]: value.trim() });
+    setName("");
+    setValue("");
+  };
+  return (
+    <section className="grid gap-2">
+      <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Details</h2>
+      {c.details.length > 0 && (
+        <div className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-x-3 gap-y-1.5">
+          {c.details.map((d) => (
+            <Fact key={`${d.name}:${d.value}`} name={d.name} value={d.value} onChange={(v) => onChange({ [d.name]: v })} />
+          ))}
+        </div>
+      )}
+      <form
+        className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-x-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+      >
+        <Input aria-label="Detail" placeholder="Email" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input aria-label="Value" placeholder="sarah@northwind.com" value={value} onChange={(e) => setValue(e.target.value)} />
+        <Button type="submit" variant="ghost" size="icon-sm" aria-label="Add detail" disabled={!name.trim() || !value.trim()}>
+          <PlusIcon />
+        </Button>
+      </form>
+    </section>
+  );
+}
+
+function Fact({ name, value, onChange }: { name: string; value: string; onChange: (v: string | null) => void }) {
+  const [v, setV] = useState(value);
+  return (
+    <>
+      <Label className="truncate text-muted-foreground" title={name}>
+        {name}
+      </Label>
+      <Input
+        aria-label={name}
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={() => (v.trim() ? v.trim() !== value && onChange(v.trim()) : setV(value))}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      />
+      <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => onChange(null)}>
+        <XIcon />
+      </Button>
+    </>
+  );
+}
+
 function ClientDetails({
   c,
   admin,
@@ -510,6 +570,8 @@ function ClientDetails({
           <Label className="text-muted-foreground">Handled by</Label>
           <HandlerPicker clientName={c.name} team={team} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlerIds: ids })} />
         </div>
+
+        <ClientFacts key={c.id} c={c} onChange={(details) => onChange({ details })} />
 
         <ClientProcesses clientId={c.id} onOpenTask={onOpenTask} />
 

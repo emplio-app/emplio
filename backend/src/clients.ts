@@ -4,7 +4,7 @@
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins.
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { CLIENT_STAGES, type Client, type ClientInput, type ClientStage, type Role } from "@emplio/shared";
+import { CLIENT_STAGES, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role } from "@emplio/shared";
 import { record } from "./activity";
 import { context } from "./auth";
 import { db } from "./db";
@@ -22,6 +22,46 @@ export const notesPath = (c: Pick<Row, "slug">) => `company/${FOLDER}/${c.slug}.
 // "Acme Foods Pvt. Ltd." -> "acme-foods-pvt-ltd": the notes file's name
 export const slugOf = (name: string) =>
   name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+
+// "Contact email" → contact-email: how a detail matches a process input of the same name (processes.ts inputKey)
+export const detailKey = (name: string) =>
+  name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+export const detailOf = (c: { details: ClientDetail[] }, name: string) => c.details.find((d) => detailKey(d.name) === detailKey(name))?.value;
+
+// The changes laid over what's there: a new name added at the end, a known one (any case) given its new value, "" or
+// null removing it. A string is what's wrong.
+export function mergeDetails(old: ClientDetail[], given: Record<string, string | null>): ClientDetail[] | string {
+  const out = [...old];
+  for (const [raw, v] of Object.entries(given)) {
+    const name = raw.trim();
+    if (!detailKey(name)) return `"${raw}" isn't a name for a detail`;
+    if (name.length > 60) return `a detail's name is at most 60 characters (${name.slice(0, 20)}…)`;
+    const value = (v ?? "").trim();
+    if (value.length > 500) return `${name} is at most 500 characters`;
+    const i = out.findIndex((d) => detailKey(d.name) === detailKey(name));
+    if (!value) {
+      if (i >= 0) out.splice(i, 1);
+    } else if (i >= 0) out[i] = { name, value };
+    else out.push({ name, value });
+  }
+  return out.length > 50 ? "a client has at most 50 details" : out;
+}
+
+// A schedule's clients: list: all (*), names, and Detail=value (every active client with that detail, any case)
+export function pickClients<T extends { slug: string; name: string; stage: string; details: ClientDetail[] }>(all: T[], list: string[]): T[] {
+  const wanted = list.map((c) => c.trim().toLowerCase());
+  if (wanted.includes("*")) return all.filter((c) => c.stage === "active");
+  const byDetail = wanted.flatMap((w) => (w.includes("=") ? [w.split("=").map((s) => s.trim()) as [string, string]] : []));
+  return all.filter(
+    (c) =>
+      (c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name)))) ||
+      (c.stage === "active" && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
+  );
+}
 
 async function toClients(rows: Row[], workspaceId: string): Promise<Client[]> {
   if (!rows.length) return [];
@@ -43,6 +83,7 @@ async function toClients(rows: Row[], workspaceId: string): Promise<Client[]> {
     stage: r.stage,
     // someone who left the team is no longer handling anything
     handlers: r.handlerIds.flatMap((id) => (names.has(id) ? [{ id, name: names.get(id)! }] : [])),
+    details: r.details,
     openTasks: by.get(r.id)?.open ?? 0,
     waitingTasks: by.get(r.id)?.waiting ?? 0,
     updatedAt: r.updatedAt.toISOString(),
@@ -89,9 +130,11 @@ export async function addClient(w: Who, input: ClientInput, conversationId?: str
   if (error) return { ok: false, error };
   const name = input.name!.trim();
   const slug = slugOf(name);
+  const details = mergeDetails([], input.details ?? {});
+  if (typeof details === "string") return { ok: false, error: details };
   const [row] = await db
     .insert(clients)
-    .values({ workspaceId: w.workspaceId, slug, name, stage: input.stage ?? "active", handlerIds: [...new Set(input.handlerIds ?? [])] })
+    .values({ workspaceId: w.workspaceId, slug, name, stage: input.stage ?? "active", handlerIds: [...new Set(input.handlerIds ?? [])], details })
     .onConflictDoNothing()
     .returning();
   if (!row) return { ok: false, error: `already a client: emplio clients show ${slug}` };
@@ -101,7 +144,8 @@ export async function addClient(w: Who, input: ClientInput, conversationId?: str
 }
 
 export async function updateClient(w: Who, q: string, input: ClientInput, conversationId?: string): Promise<Result> {
-  if (!isAdmin(w)) return { ok: false, error: "only the owner or an admin can change a client" };
+  // details (a contact's email, a tax number) anyone may fill in; the rest is for the owner and admins
+  if (!isAdmin(w) && Object.keys(input).some((k) => k !== "details")) return { ok: false, error: "only the owner or an admin can change a client (anyone can add their details)" };
   const c = await findClient(w.workspaceId, q);
   if (typeof c === "string") return { ok: false, error: c };
   const error = await check(w, input);
@@ -111,6 +155,11 @@ export async function updateClient(w: Who, q: string, input: ClientInput, conver
   if (input.name !== undefined) set.name = input.name.trim();
   if (input.stage !== undefined) set.stage = input.stage;
   if (input.handlerIds !== undefined) set.handlerIds = [...new Set(input.handlerIds)];
+  if (input.details !== undefined) {
+    const d = mergeDetails(c.details, input.details);
+    if (typeof d === "string") return { ok: false, error: d };
+    set.details = d;
+  }
   const [row] = await db.update(clients).set(set).where(eq(clients.id, c.id)).returning();
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${row!.name}` });
   if (c.stage === "prospect" && row!.stage === "active") await won(w, row!.id);
@@ -153,33 +202,39 @@ export async function clientNote(workspaceId: string, clientId: string) {
   const row = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, workspaceId), eq(clients.id, clientId)) });
   if (!row) return "";
   const [c] = await toClients([row], workspaceId);
-  return `This chat is about the client ${c!.name} (${c!.stage}; handled by ${c!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c!.openTasks} open task${c!.openTasks === 1 ? "" : "s"}${c!.waitingTasks ? `, ${c!.waitingTasks} waiting` : ""}). Their notes: /work/${notesPath(c!)}; their open work: emplio clients show ${c!.slug}. Tasks you add here are for them (--client ${c!.slug}) unless plainly not.`;
+  return `This chat is about the client ${c!.name} (${c!.stage}; handled by ${c!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c!.openTasks} open task${c!.openTasks === 1 ? "" : "s"}${c!.waitingTasks ? `, ${c!.waitingTasks} waiting` : ""})${c!.details.length ? `; ${c!.details.map((d) => `${d.name}: ${d.value}`).join("; ")}` : ""}. Their notes: /work/${notesPath(c!)}; their open work: emplio clients show ${c!.slug}. Tasks you add here are for them (--client ${c!.slug}) unless plainly not.`;
 }
 
 // --- `emplio clients` ---
 
 const USAGE = `usage: emplio clients list [--stage prospect|active|past]   every client: stage, who handles them, open tasks
        emplio clients show <name>                         one client: who handles them, their open tasks, their notes file
-       emplio clients add <name> [options]                a new client (anyone); their notes go in company/${FOLDER}/<slug>.md
-       emplio clients update <name> [options]             change one (owner and admins)
+       emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone); their notes go in company/${FOLDER}/<slug>.md
+       emplio clients update <name> [options] ["Detail=value"]...   change one (owner and admins; details: anyone)
        emplio clients remove <name>                       delete one added by mistake (owner and admins); otherwise --stage past
 options: --stage prospect|active|past   prospect: not won yet; past: no longer working with them (default: active)
          --handler <names or emails>    who on the team looks after them, comma-separated; "none" clears it
          --name <new name>              update only; the notes file keeps its name
+         "Detail=value"                 a short fact kept on them: "Contact email=sarah@northwind.com" "Tax number=27AAACN1234F1Z5"
+                                        "Files=monthly"; "Detail=" removes one. A process input of the same name is filled in
+                                        from it, and a schedule can pick clients by one (clients: [Files=monthly]). The rest of
+                                        what's known goes in their notes file.
 A task for a client: emplio tasks add ... --client <name>; theirs: emplio tasks list --client <name>.`;
 
 const line = (c: Client) =>
   [c.slug, c.stage, c.handlers.length ? c.handlers.map((h) => h.name).join(", ") : "nobody named", `${c.openTasks} open${c.waitingTasks ? ` (${c.waitingTasks} waiting)` : ""}`, c.name].join("\t");
 
-const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: notesPath(c) });
+const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: notesPath(c) });
 
 export async function clientsCommand(w: Who, conversationId: string, args: string[], data = false) {
   const [sub, ...rest] = args;
   const words: string[] = [];
   const opts: Record<string, string> = {};
+  const detailArgs: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
     if (a.startsWith("--")) opts[a.slice(2)] = rest[++i] ?? "";
+    else if (a.includes("=")) detailArgs.push(a);
     else words.push(a);
   }
   const team = await listTeam(w.workspaceId);
@@ -208,6 +263,7 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
       if (typeof h === "string") return h;
       i.handlerIds = h;
     }
+    if (detailArgs.length) i.details = Object.fromEntries(detailArgs.map((a) => [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)]));
     return i;
   };
 
@@ -232,6 +288,7 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
     return [
       `${client!.name} (${client!.stage})`,
       `handled by: ${client!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}`,
+      ...client!.details.map((d) => `${d.name}: ${d.value}`),
       `notes: /work/${notesPath(c)}`,
       ...(open.length
         ? ["open tasks:", ...open.map((t) => `- ${t.id.slice(0, 8)} ${t.status} ${t.dueAt ? t.dueAt.toISOString().slice(0, 10) : "no due date"} ${t.title}${t.waitingOn ? ` (waiting on ${t.waitingOn})` : ""}`)]
@@ -264,6 +321,7 @@ const BODY = {
     name: { type: "string", maxLength: 200 },
     stage: { type: "string", enum: [...CLIENT_STAGES] },
     handlerIds: { type: "array", items: { type: "string", format: "uuid" }, maxItems: 20 },
+    details: { type: "object", maxProperties: 50, additionalProperties: { type: ["string", "null"], maxLength: 500 } },
   },
 };
 
@@ -300,5 +358,15 @@ if (import.meta.main) {
   console.assert(slugOf("Acme Foods Pvt. Ltd.") === "acme-foods-pvt-ltd");
   console.assert(slugOf("  Café Noir ") === "cafe-noir");
   console.assert(slugOf("!!!") === "");
+  const d = mergeDetails([{ name: "Email", value: "a@x.com" }], { email: "b@x.com", "Files ": "monthly", Gone: "" }) as ClientDetail[];
+  console.assert(d.length === 2 && d[0]!.value === "b@x.com" && d[1]!.name === "Files", "merge", d);
+  console.assert((mergeDetails(d, { Files: null }) as ClientDetail[]).length === 1, "remove");
+  const cs = [
+    { slug: "a", name: "A", stage: "active", details: [{ name: "Files", value: "Monthly" }] },
+    { slug: "b", name: "B", stage: "active", details: [] },
+    { slug: "c", name: "C", stage: "prospect", details: [{ name: "Files", value: "monthly" }] },
+  ];
+  console.assert(pickClients(cs, ["files=monthly"]).map((c) => c.slug).join() === "a", "by detail");
+  console.assert(pickClients(cs, ["B", "Files = Monthly"]).map((c) => c.slug).join() === "a,b", "mixed");
   console.log("ok");
 }

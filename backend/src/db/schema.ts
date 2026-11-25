@@ -1,4 +1,4 @@
-import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo } from "@emplio/shared";
+import type { ClientDetail, ProcessInput, RunInput, Approval, PlanStep, JobInfo } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { type AnyPgColumn, bigint, boolean, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -625,6 +625,8 @@ export const clients = pgTable(
     stage: text({ enum: ["prospect", "active", "past"] }).notNull().default("active"),
     // the teammates who look after them (user ids); empty: nobody named yet
     handlerIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    // what's known about them, name and value, in the order added (Contact email, Tax number, Files)
+    details: jsonb().$type<ClientDetail[]>().notNull().default([]),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

@@ -18,7 +18,7 @@ import { context, type Ctx } from "./auth";
 import { db } from "./db";
 import { clients, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
 import { findAgent } from "./agents";
-import { findClient } from "./clients";
+import { detailOf, findClient } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { listTeam } from "./team";
 import { DEFAULT_ZONE } from "./time";
@@ -71,7 +71,7 @@ export function parseProcess(text: string): Parsed | { error: string } {
   const rawClients = s.clients ?? (every ? "all" : null);
   const clientsList = rawClients === null ? null : rawClients === "all" ? ["*"] : rawClients;
   if (clientsList !== null && (!Array.isArray(clientsList) || !clientsList.length || clientsList.some((c) => typeof c !== "string" || !c.trim())))
-    return { error: "clients: is all, or a list like [Northwind Traders, Contoso]" };
+    return { error: "clients: is all, or a list like [Northwind Traders, Contoso], or of details, like [Files=monthly]" };
 
   const inputs = parseInputs(s.inputs);
   if ("error" in inputs) return inputs;
@@ -354,13 +354,26 @@ export async function startRun(
   o: { clientId?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
 ): Promise<Run | null> {
   const p = await getProcess(w.workspaceId, name);
-  const given = checkInputs(p.inputs, o.inputs ?? {}, true);
+  const c =
+    p.for === "client" && o.clientId ? await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, o.clientId)) }) : null;
+  // an input not given, filled in from the client's detail of the same name (their Tax number), when it fits its type
+  const fromClient = Object.fromEntries(
+    p.inputs.flatMap((x) => {
+      const v = c && !Object.keys(o.inputs ?? {}).some((k) => inputKey(k) === x.key) ? detailOf(c, x.name) : undefined;
+      if (!v) return [];
+      try {
+        return Object.entries(checkInputs([x], { [x.key]: v }, false));
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const given = { ...fromClient, ...checkInputs(p.inputs, { ...fromClient, ...(o.inputs ?? {}) }, true) };
   const inputs: RunInput[] = p.inputs.map((x) => ({ ...x, value: given[x.key] ?? null }));
   let subject = o.subject?.trim() || (p.for === "other" ? (inputs[0]?.value ?? "") : "");
   let clientId: string | null = null;
   if (p.for === "client") {
     if (!o.clientId) throw new ProcessError(`"${p.title}" is done for a client: say which (--client <name>)`);
-    const c = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, o.clientId)) });
     if (!c) throw new ProcessError("no such client (emplio clients list)");
     subject = c.name;
     clientId = c.id;
@@ -648,9 +661,11 @@ A process file:
   title: Annual filing
   for: client              # client (default), or other: anything else with a name (a candidate, an opening)
   starts: manual           # manual (default), or new client: for each client won
-  every: "0 9 1 4 *"       # instead: on a schedule, for each client (clients: all, or [a, b])
+  every: "0 9 1 4 *"       # instead: on a schedule, for each client (clients: all, [a, b], or [Files=monthly]: the
+                           #   active clients with that detail, emplio clients help)
   inputs:                  # what's filled in when it starts (none: nothing asked)
-    - name: Financial year #   text unless type: says otherwise
+    - name: Financial year #   text unless type: says otherwise; one the client has a detail for (Tax number) is
+                           #   filled in from it
     - name: AGM date
       type: date           # text, number, date (2026-12-01), or choice with options: [Bank, Card]
       required: false      # needed unless false; one that starts by itself has only required: false ones
