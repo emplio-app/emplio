@@ -663,7 +663,7 @@ export type ProcessRun = {
 };
 
 // A client of the business (backend clients.ts): the Clients page and `emplio clients`. Their notes are the file
-// company/knowledge/clients/<slug>.md.
+// company/clients/<slug>.md.
 export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
 export type ClientStage = (typeof CLIENT_STAGES)[number];
 export type Client = {
@@ -681,6 +681,19 @@ export type Client = {
   updatedAt: string;
 };
 export type ClientDetail = { name: string; value: string };
+
+// Things kept as files in company/<kind>/<name>.md (backend things.ts). path is "clients/northwind", which is also how
+// other files link to it: [[clients/northwind]]. field is the key: line the link is on, or "text" in the words.
+export const THING_KINDS = ["clients", "contacts", "team", "services", "projects"] as const;
+export type ThingKind = (typeof THING_KINDS)[number];
+export type Thing = { path: string; kind: ThingKind; title: string; fields: Record<string, string>; body: string; links: { field: string; to: string }[]; error: string | null };
+// one thing (null: no file yet), what it links to (title null: nothing there) and what links to it
+export type ThingPage = {
+  path: string;
+  thing: Thing | null;
+  links: { field: string; to: string; title: string | null }[];
+  linkedFrom: { field: string; from: string; kind: ThingKind; title: string; fields: Record<string, string> }[];
+};
 // details: only the ones changing; "" or null removes one
 export type ClientInput = { name?: string; stage?: ClientStage; handlerIds?: string[]; details?: Record<string, string | null> };
 

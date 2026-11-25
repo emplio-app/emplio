@@ -28,8 +28,9 @@ export function writesOf(commands: string[]): Write[] {
       const { words: w, body } = words(part.trim());
       const i = w.indexOf("emplio");
       // a file written straight into the company's processes or automations folder is the same as adding it
-      const file = /company\/(processes|automations)\/([\w-]+)\.md/.exec(part);
-      if (i < 0) return file && /<</.test(part) && /^\s*(cat|tee)\b/.test(part) ? [{ kind: file[1] === "processes" ? "write-process" : automationKind(body), flags: {}, args: [file[2]!], body, command: part }] : [];
+      const file = /company\/(processes|automations|contacts)\/([\w-]+)\.md/.exec(part);
+      const fileKind = (): Kind => (file![1] === "processes" ? "write-process" : file![1] === "contacts" ? "contact" : automationKind(body));
+      if (i < 0) return file && /<</.test(part) && /^\s*(cat|tee)\b/.test(part) ? [{ kind: fileKind(), flags: {}, args: [file[2]!], body, command: part }] : [];
       const [area, sub, ...rest] = w.slice(i + 1);
       const flags: Record<string, string> = {};
       const args: string[] = [];

@@ -613,14 +613,14 @@ export const paidSites = pgTable(
 );
 
 // Clients (clients.ts): who the business works for, and who on the team handles each. Their story (what happened,
-// who's who there) stays in their notes file, company/knowledge/clients/<slug>.md; this row is what tasks and chats
+// who's who there) stays in their notes file, company/clients/<slug>.md; this row is what tasks and chats
 // point at.
 export const clients = pgTable(
   "clients",
   {
     id: uuid().primaryKey().defaultRandom(),
     workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    // the notes file's name: knowledge/clients/<slug>.md
+    // the notes file's name: clients/<slug>.md
     slug: text().notNull(),
     name: text().notNull(),
     stage: text({ enum: ["prospect", "active", "past"] }).notNull().default("active"),

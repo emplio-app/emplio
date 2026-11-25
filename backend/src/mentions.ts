@@ -22,8 +22,9 @@ const PER_KIND = 4;
 const FUZZY_CHATS = 200;
 // git's own files, and the pointers to big files kept in storage; everything else the Knowledge page shows can be @mentioned
 const HIDDEN = /(^|\/)\.|\.media$/;
-const RECORDS = /^knowledge\/(clients|suppliers|people)\/([^/]+)\.md$/;
-const RECORD_KIND = { clients: "Client", suppliers: "Supplier", people: "Contact" } as const;
+// the things (things.ts) and the older knowledge/ ones
+const RECORDS = /^(?:knowledge\/)?(clients|contacts|team|services|projects|suppliers|people)\/([^/]+)\.md$/;
+const RECORD_KIND = { clients: "Client", contacts: "Contact", team: "Team", services: "Service", projects: "Project", suppliers: "Supplier", people: "Contact" } as const;
 
 const pretty = (slug: string) => slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const repos = (who: Who) => [
@@ -45,7 +46,7 @@ async function fileMentions(who: Who): Promise<Mention[]> {
   });
 }
 
-// clients from the Clients list, plus any notes file under knowledge/clients/ not on it yet; id is the notes path
+// clients from the Clients list, plus any notes file under clients/ not on it yet; id is the notes path
 async function clientMentions(who: Who, files: Mention[]): Promise<Mention[]> {
   const listed = (await listClients(who).catch(() => [])).map((c): Mention => ({ kind: "record", id: notesPath(c), label: c.name, detail: `Client · ${c.stage}` }));
   const ids = new Set(listed.map((m) => m.id));

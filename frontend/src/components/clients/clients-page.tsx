@@ -43,7 +43,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks } from "@/lib/api";
+import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks, useThingPage } from "@/lib/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
@@ -77,7 +77,7 @@ const TINTS = [
 ];
 const tint = (slug: string) => TINTS[[...slug].reduce((n, c) => n + c.charCodeAt(0), 0) % TINTS.length]!;
 
-const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/knowledge/clients/${c.slug}.md`)}`;
+const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/clients/${c.slug}.md`)}`;
 
 function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">; size?: "md" | "lg" }) {
   return (
@@ -584,6 +584,8 @@ function ClientDetails({
 
         <ClientFacts key={c.id} c={c} known={known} onChange={(details) => onChange({ details })} />
 
+        <ClientLinked slug={c.slug} />
+
         <ClientProcesses clientId={c.id} onOpenTask={onOpenTask} />
 
         <section className="grid gap-2">
@@ -692,6 +694,37 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
 }
 
 // The processes going for this client, the step each is on, and starting another.
+// The files that name this client (company/contacts/, projects/): their people and their projects, each opening its file.
+const LINKED = [
+  { kind: "contacts", label: "Contacts", sub: (f: Record<string, string>) => [f.role, f.email] },
+  { kind: "projects", label: "Projects", sub: (f: Record<string, string>) => [f.due ? `due ${f.due}` : f.start ? "ongoing" : "", f.fee] },
+] as const;
+const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, "$1");
+
+function ClientLinked({ slug }: { slug: string }) {
+  const page = useThingPage(`clients/${slug}`);
+  const from = page.data?.linkedFrom ?? [];
+  return LINKED.map(({ kind, label, sub }) => {
+    const items = from.filter((l) => l.kind === kind);
+    if (!items.length) return null;
+    return (
+      <section key={kind} className="grid gap-2">
+        <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{label}</h2>
+        <ul className="grid gap-1">
+          {items.map((l) => (
+            <li key={l.from}>
+              <Link href={`/knowledge?file=${encodeURIComponent(`company/${l.from}.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
+                <span className="text-sm">{l.title}</span>
+                <span className="text-xs text-muted-foreground">{sub(l.fields).map(plain).filter(Boolean).join(" · ")}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  });
+}
+
 function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTask: (id: string) => void }) {
   const runs = useProcessRuns({ client: clientId });
   const processes = useProcesses();

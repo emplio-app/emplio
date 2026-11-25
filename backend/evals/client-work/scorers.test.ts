@@ -18,6 +18,7 @@ test("each write is read off its command", () => {
   expect(kinds(["emplio automations add onboard - <<'EOF'\n---\nwhen: new client\nprocess: client-onboarding\n---\nX\nEOF"])).toEqual(["new-client"]);
   expect(kinds(["emplio clients update northwind 'Files=quarterly'"])).toEqual(["detail"]);
   expect(kinds(["emplio clients update northwind --handler priya"])).toEqual(["client"]);
+  expect(kinds(["cat > /work/company/contacts/anna.md <<'EOF'\n---\nclient: [[clients/fabrikam]]\n---\nEOF"])).toEqual(["contact"]);
   expect(kinds(["emplio clients list; emplio processes runs --client northwind"])).toEqual([]);
   expect(kinds(["cat > /work/company/processes/closure.md <<'EOF'\n---\ntitle: X\n---\nEOF"])).toEqual(["write-process"]);
 });

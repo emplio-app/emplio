@@ -27,7 +27,7 @@ const LIST = Object.values(CLIENTS)
   .map((c) => [c.slug, c.stage, c.handlers.map((h) => h.name).join(", ") || "nobody named", `${c.openTasks} open${c.waitingTasks ? ` (${c.waitingTasks} waiting)` : ""}`, c.name].join("\t"))
   .join("\n");
 const SHOW = (c: Client) =>
-  [`${c.name} (${c.stage}), handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named"}`, ...c.details.map((d) => `${d.name}: ${d.value}`), `Notes: company/knowledge/clients/${c.slug}.md`].join("\n");
+  [`${c.name} (${c.stage}), handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named"}`, ...c.details.map((d) => `${d.name}: ${d.value}`), `Notes: company/clients/${c.slug}.md`].join("\n");
 
 const PROCESSES = [
   "payment-chase\t3 steps\tby hand\t2 going\tPayment chase",
@@ -145,7 +145,7 @@ export async function checker() {
 
 // The same, as data: what code gets back in code mode (the app answers code with rows, src/sandbox.ts)
 const CODE = process.env.EVAL_CODE_MODE !== "0";
-const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: `company/knowledge/clients/${c.slug}.md` });
+const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: `company/clients/${c.slug}.md` });
 const listOf = (text: string, data: unknown) => (CODE ? JSON.stringify(data, null, 1) : text);
 const RUN_ROWS = RUNS.split("\n").filter((l) => !l.startsWith("\t")).map((l, i) => {
   const [id, title, subject, at] = l.split("\t") as [string, string, string, string];
@@ -176,7 +176,7 @@ export const world = async (): Promise<World> => [
   // by name or slug, any case (Northwind, northwind-traders)
   ...Object.values(CLIENTS).map((c): [string, string] => [`clients show .*${c.slug.split("-")[0]!.replace(/./g, (x) => `[${x}${x.toUpperCase()}]`)}`, listOf(SHOW(c), asData(c))]),
   ["clients show", "error: no such client (emplio clients list)"],
-  ["clients add", "added: the client is on the list; their notes file is company/knowledge/clients/<slug>.md"],
+  ["clients add", "added: the client is on the list; their notes file is company/clients/<slug>.md"],
   ["clients update", "updated"],
   ["processes show .*payment", PAYMENT_CHASE],
   ["processes show .*annual", ANNUAL],
@@ -205,7 +205,7 @@ export const world = async (): Promise<World> => [
   ["tasks add", "added f00dbeef\ttodo"],
   ["tasks (update|done)", "updated"],
   ["apps run gmail\\.send", '{"id":"msg_8f2","sent":true}'],
-  ["knowledge/clients", "# Notes\n\n## Now\nBooks up to date to October. Waiting on November bank statements."],
+  ["company/clients/", "# Notes\n\n## Now\nBooks up to date to October. Waiting on November bank statements."],
 ];
 
 // the chat is about this client: the note the app adds to each message

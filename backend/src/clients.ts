@@ -1,5 +1,5 @@
 // Clients: who the business works for, at what stage (prospect, active, past) and who on the team handles each.
-// Their story stays in their notes file, company/knowledge/clients/<slug>.md (the slug is this row's, kept when they're
+// Their story stays in their notes file, company/clients/<slug>.md (the slug is this row's, kept when they're
 // renamed); the row is what tasks and chats point at. The web app's Clients page and `emplio clients` share these.
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins.
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -10,13 +10,14 @@ import { context } from "./auth";
 import { db } from "./db";
 import { clients, conversations, tasks } from "./db/schema";
 import { listTeam } from "./team";
+import { thingPage } from "./things";
 
 type Who = { workspaceId: string; userId: string; role: Role };
 type Row = typeof clients.$inferSelect;
 type Result = { ok: true; client: Client } | { ok: false; error: string };
 
 const isAdmin = (w: Who) => w.role !== "member";
-export const FOLDER = "knowledge/clients";
+export const FOLDER = "clients";
 export const notesPath = (c: Pick<Row, "slug">) => `company/${FOLDER}/${c.slug}.md`;
 
 // "Acme Foods Pvt. Ltd." -> "acme-foods-pvt-ltd": the notes file's name
@@ -290,11 +291,14 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
       .where(and(eq(tasks.clientId, c.id), inArray(tasks.status, ["todo", "doing", "waiting"])))
       .orderBy(sql`${tasks.dueAt} asc nulls last`)
       .limit(30);
+    // the files that link to them: their contacts, projects
+    const linked = (await thingPage(w.workspaceId, `${FOLDER}/${c.slug}`).catch(() => null))?.linkedFrom ?? [];
     return [
       `${client!.name} (${client!.stage})`,
       `handled by: ${client!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}`,
       ...client!.details.map((d) => `${d.name}: ${d.value}`),
       `notes: /work/${notesPath(c)}`,
+      ...linked.map((l) => `${l.kind === "contacts" ? "contact" : l.kind === "projects" ? "project" : l.kind}: ${l.title} (/work/company/${l.from}.md, as ${l.field})`),
       ...(open.length
         ? ["open tasks:", ...open.map((t) => `- ${t.id.slice(0, 8)} ${t.status} ${t.dueAt ? t.dueAt.toISOString().slice(0, 10) : "no due date"} ${t.title}${t.waitingOn ? ` (waiting on ${t.waitingOn})` : ""}`)]
         : ["no open tasks"]),

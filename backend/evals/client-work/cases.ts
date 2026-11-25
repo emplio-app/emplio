@@ -18,7 +18,8 @@ import { about, CLIENTS, FIRM } from "./firm";
 // - read: a question: look it up, answer, change nothing (an existing schedule is a near miss: don't make it again).
 export type Category = "task" | "process" | "ask" | "repeat" | "new-client" | "client" | "detail" | "write-process" | "read";
 // the doors a reply can go through (scorers.ts reads them off its commands)
-export type Kind = "task" | "process" | "repeat" | "new-client" | "client" | "detail" | "write-process" | "change" | "ask";
+// contact: a file in company/contacts/ (src/things.ts)
+export type Kind = "task" | "process" | "repeat" | "new-client" | "client" | "detail" | "write-process" | "contact" | "change" | "ask";
 
 export type Case = {
   name: string;
@@ -87,7 +88,7 @@ export async function cases(): Promise<Case[]> {
     c("client lost", "client", "we stopped working with fabrikam last month", { kinds: ["client"], allow: ["change", "detail"] }),
     // held out: written after the rules settled
     c("audit letter for priya", "task", "remind priya to send contoso their audit letter on friday", { kinds: ["task"], client: "contoso", to: "priya" }),
-    c("new contact", "detail", "fabrikam's new contact is anna@fabrikam.example", { kinds: ["detail"] }),
+    c("new contact", "detail", "fabrikam's new contact is anna@fabrikam.example", { kinds: ["contact"], allow: ["detail"] }),
     c("welcome call each new client", "new-client", "every new client should get a welcome call from whoever handles them, within 3 days", { kinds: ["new-client"], allow: ["write-process"], file: { when: "new client", due: 3 } }),
     c("who handles contoso", "read", "who handles contoso?", { kinds: [] }),
     c("books for wingtip now", "process", "start wingtip's november books now", { kinds: ["process"], process: "monthly-books", client: "wingtip" }),
