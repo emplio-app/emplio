@@ -2,15 +2,17 @@
 
 import type { KnowledgeFolder } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon, PencilIcon, SearchIcon } from "lucide-react";
+import { BriefcaseIcon, Building2Icon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon, FolderKanbanIcon, PencilIcon, SearchIcon, UserIcon, UsersIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, useThingPage } from "@/lib/api";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 
 const KEY = ["knowledge"];
@@ -67,6 +69,9 @@ export function KnowledgePage() {
   const hits = [...named, ...(found.data ?? []).filter((h) => !named.some((n) => n.repo === h.repo && n.path === h.path))];
   const folder = folders.data?.find((f) => f.repo === open?.repo);
   const note = file.data && splitNote(file.data.text);
+  // a client, contact, project… file: its [[folder/name]] links get their titles
+  const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\.md$/.test(open.path) ? open.path.slice(0, -3) : "";
+  const titles = useThingPage(thing, !!thing).data?.links;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -156,7 +161,9 @@ export function KnowledgePage() {
                   {note!.fields.map(([k, v]) => (
                     <div key={k} className="contents">
                       <dt className="text-muted-foreground">{k}</dt>
-                      <dd className="whitespace-pre-line">{v}</dd>
+                      <dd className="whitespace-pre-line">
+                        <Linked text={v} prefix={agentPath({ repo: open.repo, path: "" })} titles={titles} />
+                      </dd>
                     </div>
                   ))}
                 </dl>
@@ -168,6 +175,28 @@ export function KnowledgePage() {
         </main>
       </div>
     </div>
+  );
+}
+
+const KIND_ICON: Record<string, typeof UserIcon> = { clients: Building2Icon, contacts: UserIcon, team: UsersIcon, services: BriefcaseIcon, projects: FolderKanbanIcon };
+// A field's [[folder/name]] links as chips that open that note; other text as it is.
+function Linked({ text, prefix, titles }: { text: string; prefix: string; titles?: { to: string; title: string | null }[] }) {
+  const parts = text.split(/\[\[([a-z]+\/[a-z0-9][a-z0-9-]*)\]\]/);
+  if (parts.length === 1) return text;
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {parts.map((p, i) => {
+        if (i % 2 === 0) return p.replace(/^[\s,]+|[\s,]+$/g, "") ? <span key={i}>{p}</span> : null;
+        const Icon = KIND_ICON[p.split("/")[0]!] ?? FileTextIcon;
+        const name = titles?.find((l) => l.to === p)?.title ?? p.split("/")[1]!.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        return (
+          <Badge key={i} variant="secondary" render={<Link href={`/knowledge?file=${prefix}${p}.md`} />}>
+            <Icon data-icon="inline-start" />
+            {name}
+          </Badge>
+        );
+      })}
+    </span>
   );
 }
 

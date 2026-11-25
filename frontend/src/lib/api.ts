@@ -51,8 +51,8 @@ export function useProcesses() {
   return useQuery({ queryKey: processesQueryKey, queryFn: () => api<Process[]>("/processes") });
 }
 // A thing (clients/northwind) with what links to it: a client's contacts and projects
-export function useThingPage(path: string) {
-  return useQuery({ queryKey: ["things", path], queryFn: () => api<ThingPage>(`/things/page?path=${encodeURIComponent(path)}`) });
+export function useThingPage(path: string, enabled = true) {
+  return useQuery({ queryKey: ["things", path], queryFn: () => api<ThingPage>(`/things/page?path=${encodeURIComponent(path)}`), enabled });
 }
 export function useProcessRuns(f: { process?: string; client?: string; all?: boolean } = {}) {
   const q = new URLSearchParams({ ...(f.process && { process: f.process }), ...(f.client && { client: f.client }), ...(f.all && { all: "1" }) });
