@@ -11,6 +11,11 @@ evals/
   emplio.ts                 Emplio as the evals run it: the app's own instructions for a made-up business, and a
                             stand-in computer that answers commands without running them
   next-step-card/           the card under a reply (src/next-step.ts)
+  client-work/              a firm's client work through the right door: a task, a process started with its inputs,
+                            an automation (schedule or each new client), a client or its details, a process written
+                            (src/sandbox.ts clients and processes rules; firm.ts is the made-up firm both use)
+  process-steps/            work inside a process already going: set, send back, stop, finish a step, Emplio's own
+                            steps (src/tasks.ts taskMessage, src/processes.ts stepNotes)
   hand-off/                 does it do the work itself or hand it off, and to whom (src/jobs.ts MANAGER_PROMPT)
   job-report/               a job at the end of its work: checks before calling it done, reports what's true in the
                             shape the manager reads, asks when only the person can decide (src/jobs.ts RULES,

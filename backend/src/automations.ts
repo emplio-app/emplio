@@ -90,7 +90,8 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
   if (s.who !== undefined && (typeof s.who !== "string" || !s.who.trim())) return { error: "who: is handler, owner, a person's name or email, or an agent's name" } as const;
   if (s.who !== undefined && s.process !== undefined) return { error: "who: goes with a task; a process's steps say who does each" } as const;
   if (due !== null && (!Number.isInteger(due) || (due as number) < 0 || (due as number) > 400)) return { error: "due: must be a number of days, like 30" } as const;
-  const who = typeof s.who === "string" && s.who.trim().toLowerCase() !== "emplio" ? s.who.trim() : null;
+  // who: emplio for clients makes Emplio's own task per client; alone it's the same as leaving it out (a chat)
+  const who = typeof s.who === "string" && !(s.who.trim().toLowerCase() === "emplio" && !perClient) ? s.who.trim() : null;
   // each run makes tasks (for clients, for each new one, or for who:), not a chat
   const makesTasks = perClient || !!who;
   if (when === "schedule") {
@@ -912,7 +913,7 @@ export async function automationRoutes(app: FastifyInstance) {
 
 // --- `emplio automations ...` from a chat ---
 
-const USAGE = `usage: emplio automations list                    all of this business's automations, with status
+export const USAGE = `usage: emplio automations list                    all of this business's automations, with status
        emplio automations show <name>             its file
        emplio automations add <name> - <<'MD'     create one (the file: settings, then the prompt; see below)
        emplio automations update <name> - <<'MD'  replace its file

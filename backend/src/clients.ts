@@ -202,12 +202,15 @@ export async function clientNote(workspaceId: string, clientId: string) {
   const row = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, workspaceId), eq(clients.id, clientId)) });
   if (!row) return "";
   const [c] = await toClients([row], workspaceId);
-  return `This chat is about the client ${c!.name} (${c!.stage}; handled by ${c!.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c!.openTasks} open task${c!.openTasks === 1 ? "" : "s"}${c!.waitingTasks ? `, ${c!.waitingTasks} waiting` : ""})${c!.details.length ? `; ${c!.details.map((d) => `${d.name}: ${d.value}`).join("; ")}` : ""}. Their notes: /work/${notesPath(c!)}; their open work: emplio clients show ${c!.slug}. Tasks you add here are for them (--client ${c!.slug}) unless plainly not.`;
+  return clientNoteText(c!);
 }
+// the words of it, for a client as the app lists them (the evals use these too)
+export const clientNoteText = (c: Client) =>
+  `This chat is about the client ${c.name} (${c.stage}; handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c.openTasks} open task${c.openTasks === 1 ? "" : "s"}${c.waitingTasks ? `, ${c.waitingTasks} waiting` : ""})${c.details.length ? `; ${c.details.map((d) => `${d.name}: ${d.value}`).join("; ")}` : ""}. Their notes: /work/${notesPath(c)}; their open work: emplio clients show ${c.slug}. Tasks you add here are for them (--client ${c.slug}) unless plainly not.`;
 
 // --- `emplio clients` ---
 
-const USAGE = `usage: emplio clients list [--stage prospect|active|past]   every client: stage, who handles them, open tasks
+export const USAGE = `usage: emplio clients list [--stage prospect|active|past]   every client: stage, who handles them, open tasks
        emplio clients show <name>                         one client: who handles them, their open tasks, their notes file
        emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone); their notes go in company/${FOLDER}/<slug>.md
        emplio clients update <name> [options] ["Detail=value"]...   change one (owner and admins; details: anyone)
@@ -234,6 +237,8 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
     if (a.startsWith("--")) opts[a.slice(2)] = rest[++i] ?? "";
+    // Stage=active, Handler=Raj, Name=X are the options, not details
+    else if (["stage", "handler", "name"].includes(a.slice(0, a.indexOf("=")).trim().toLowerCase())) opts[a.slice(0, a.indexOf("=")).trim().toLowerCase()] = a.slice(a.indexOf("=") + 1).trim();
     else if (a.includes("=")) detailArgs.push(a);
     else words.push(a);
   }

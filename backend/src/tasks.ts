@@ -22,7 +22,7 @@ import { chatLink, heldBack, mainChat, post, sendTo } from "./channels";
 import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
 import { clients, conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
-import { findClient, labelChat } from "./clients";
+import { findClient, labelChat, listClients } from "./clients";
 import { stepFinished, stepInfo } from "./processes";
 import { listTeam } from "./team";
 
@@ -350,24 +350,18 @@ async function work(t: Row, asked = false) {
     t.agent && !(source?.kind === "job" && (await db.query.jobs.findFirst({ where: eq(jobs.chatId, source.id), columns: { agent: true } }))?.agent === t.agent)
       ? (await one(t)).agentName
       : null;
-  const text = [
-    `${TASK_PREFIX}Task ${id} from the Tasks list, for you, asked by ${person.userName}: ${t.title}`,
-    ...(t.dueAt ? [`Due: ${when(t.dueAt, await timezoneOf(person.userId))}`] : []),
-    ...(t.chases > 1 ? [`This is run ${t.chases} of this task.`] : []),
-    ...(t.notes ? ["", "How to do it:", t.notes] : []),
-    ...(source ? ["", "You set it up earlier in this chat: what was said above is its background."] : []),
-    ...(from && !source ? ["", `You set it up in your main chat with ${person.userName}; for what was said there: \`emplio history search <words> --chat ${from.id.slice(0, 8)}\`.`] : []),
-    "",
-    `First check it's still needed: ${person.userName} may have answered it or done it since (\`emplio history search <words>\`, recent messages first). If so, mark it done and say so in one line.`,
-    ...(t.chases > 2 ? [`It has run ${t.chases - 1} times already: if nothing has changed, don't push it again; set it waiting on ${person.userName} instead of rescheduling.`] : []),
-    handTo
-      ? `Hand it to your ${handTo} agent now: \`emplio hand ${JSON.stringify(t.agent)}\`, with the task and how to do it as its brief. Wait for its report and check it, then update the task:`
-      : "Do it now. Then update the task:",
-    `- finished: \`emplio tasks done ${id}\``,
-    `- needs a person (a decision, an OK, a reply): \`emplio tasks update ${id} --status waiting --waiting "<who and what>"\``,
-    `- can't be done yet: \`emplio tasks update ${id} --status todo --due <when to try again>\` (it starts again then)`,
-    `End with a line or two for ${person.userName}: what you did, the result, anything they must decide.`,
-  ].join("\n");
+  const text = taskMessage({
+    id,
+    title: t.title,
+    asker: person.userName,
+    due: t.dueAt ? when(t.dueAt, await timezoneOf(person.userId)) : null,
+    run: t.chases,
+    notes: t.notes,
+    here: !!source,
+    mainChat: from && !source ? from.id.slice(0, 8) : null,
+    handTo,
+    agent: t.agent,
+  });
   const message: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text }] };
   const log = { error: (obj: unknown, msg: string) => console.error(`task ${id}: ${msg}`, obj) };
   let error: string | null = null;
@@ -403,6 +397,28 @@ async function work(t: Row, asked = false) {
   const inMain = chatId === (await mainChat(t.workspaceId, person.userId));
   if (inMain) return void (await post(t.workspaceId, person.userId, error ? note : last!, { inChat: true, from: chatId }).catch((e) => console.error("task report failed", t.id, e)));
   report(t.workspaceId, person.userId, `${note} [Open](${chatLink(chatId)})`);
+}
+
+// What the AI is told when one of its tasks starts (work, above); the evals send the same words.
+export function taskMessage(o: { id: string; title: string; asker: string; due: string | null; run: number; notes: string | null; here: boolean; mainChat: string | null; handTo: string | null; agent: string | null }) {
+  return [
+    `${TASK_PREFIX}Task ${o.id} from the Tasks list, for you, asked by ${o.asker}: ${o.title}`,
+    ...(o.due ? [`Due: ${o.due}`] : []),
+    ...(o.run > 1 ? [`This is run ${o.run} of this task.`] : []),
+    ...(o.notes ? ["", "How to do it:", o.notes] : []),
+    ...(o.here ? ["", "You set it up earlier in this chat: what was said above is its background."] : []),
+    ...(o.mainChat ? ["", `You set it up in your main chat with ${o.asker}; for what was said there: \`emplio history search <words> --chat ${o.mainChat}\`.`] : []),
+    "",
+    `First check it's still needed: ${o.asker} may have answered it or done it since (\`emplio history search <words>\`, recent messages first). If so, mark it done and say so in one line.`,
+    ...(o.run > 2 ? [`It has run ${o.run - 1} times already: if nothing has changed, don't push it again; set it waiting on ${o.asker} instead of rescheduling.`] : []),
+    o.handTo
+      ? `Hand it to your ${o.handTo} agent now: \`emplio hand ${JSON.stringify(o.agent)}\`, with the task and how to do it as its brief. Wait for its report and check it, then update the task:`
+      : "Do it now. Then update the task:",
+    `- finished: \`emplio tasks done ${o.id}\``,
+    `- needs a person (a decision, an OK, a reply): \`emplio tasks update ${o.id} --status waiting --waiting "<who and what>"\``,
+    `- can't be done yet: \`emplio tasks update ${o.id} --status todo --due <when to try again>\` (it starts again then)`,
+    `End with a line or two for ${o.asker}: what you did, the result, anything they must decide.`,
+  ].join("\n");
 }
 
 export function startTasks() {
@@ -490,7 +506,7 @@ export async function chase() {
 
 // --- `emplio tasks` ---
 
-const USAGE = `usage: emplio tasks list [--all] [--ai] [--who <name or email>] [--client <name>] [--due] [--done]
+export const USAGE = `usage: emplio tasks list [--all] [--ai] [--who <name or email>] [--client <name>] [--due] [--done]
                                         open tasks, soonest due first (staff: theirs only; --all: everyone's,
                                         owner and admins; --ai: yours; --client: one client's, everyone's you
                                         may see; --due: due by now; --done: finished too)
@@ -517,7 +533,8 @@ options: --to <email, name, me or ai>  who does it (default: ai)
                                        each time (due --due-days later, default 1), else you do it. Repeating ones show in tasks list;
                                        change, pause or remove them with emplio automations. For "when something
                                        happens" (a new email), use emplio automations add.
-         --clients all|<a,b>           with --every: the same job for each client (all: every active one): each
+         --clients all|<a,b>|<Detail=value>   with --every: the same job for each client (all: every active one;
+                                       Files=quarterly: those whose Files detail is quarterly): each
                                        time it comes round, one task per client, titled with the client and the
                                        period ("Monthly report · Northwind · Nov 2026"), for who handles them
                                        (or the AI with --agent), never twice for one client and period
@@ -628,7 +645,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     // a person each time it comes round (a task for them); none or ai: Emplio does it
     const to = person(opts.to);
     if (typeof to === "string" && to.startsWith("error:")) return to;
-    const who = to ? team.find((m) => m.id === to)!.email : null;
+    const who = to ? team.find((m) => m.id === to)!.email : to === null && opts.clients ? "emplio" : null;
     const title = words.join(" ");
     const name = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task";
     const file = [
@@ -650,6 +667,13 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   if (sub === "add" && words.length) {
     const i = await input();
     if (typeof i === "string") return i;
+    // no --client: a title naming one client (its name or first word) is theirs
+    // ponytail: word match on names; a client called "Call" would catch every call, match on more if that bites
+    if (i.clientId === undefined) {
+      const t = words.join(" ").toLowerCase();
+      const hits = (await listClients(w)).filter((c) => c.stage !== "past" && [c.name, c.name.split(/\s+/)[0]!].some((n) => n.length >= 4 && new RegExp(`(^|[^a-z0-9])${n.toLowerCase().replace(/[^a-z0-9 ]/g, "")}([^a-z0-9]|$)`).test(t)));
+      if (hits.length === 1) i.clientId = hits[0]!.id;
+    }
     const r = await addTask(w, { assigneeId: null, ...i, title: words.join(" ") }, conversationId);
     return r.ok ? `added ${show(r.task)}` : `error: ${r.error}`;
   }

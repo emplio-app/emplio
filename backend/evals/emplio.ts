@@ -24,6 +24,10 @@ export type Business = {
   agents?: string[];
   // "- <id> · <agent or myself> · <name> · <status>, <when>"
   threads?: string[];
+  // another made-up business than the shop (the clients evals: a firm that works for clients)
+  firm?: { name: string; about: string };
+  // the chat is about this client: the note the app adds (src/clients.ts clientNoteText)
+  client?: string;
 };
 
 export const CHAT_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.chatModel;
@@ -37,15 +41,15 @@ export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgr
 // automation whose run this is (nobody watches it either, and it hands off like Emplio in a chat)
 export const system = (b: Business, round: boolean | string) => [
   emplioPrompt({
-    rules: agentRules(ctx, typeof round === "string" ? round : round ? HEARTBEAT : undefined),
+    rules: agentRules(b.firm ? { ...ctx, workspaceName: b.firm.name } : ctx, typeof round === "string" ? round : round ? HEARTBEAT : undefined),
     computer: sandboxPrompt(
       typeof round === "string" ? { ...session, automation: true, watched: false } : round ? { ...session, automation: true, thinker: true, background: true, watched: false } : session,
     ),
     team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
     connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
-    business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
+    business: b.firm?.about ?? "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
     userName: ctx.userName,
-    personal: "Runs the shop. Prefers short answers. Hindi or English.",
+    personal: b.firm ? "Runs the firm. Prefers short answers." : "Runs the shop. Prefers short answers. Hindi or English.",
     skills: b.skills?.length ? b.skills : ["(none yet)"],
     // a background round hands nothing off (chat.ts)
     agent: round === true,
@@ -81,6 +85,7 @@ const note = (b: Business) =>
     {
       channel: "They're in the web app.",
       date: "Today is Tuesday, 10 November 2026 (Asia/Kolkata time).",
+      client: b.client ?? "",
       chats: "",
       agents: [AGENTS_HEADING, ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
       threads: b.threads?.length ? [THREADS_HEADING, ...b.threads].join("\n") : "",

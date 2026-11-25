@@ -26,6 +26,7 @@ test("a schedule can be done for each client", () => {
   expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nprocess: books\n---\nX\n`)).toHaveProperty("error");
   expect(parseAutomation(`---\nwhen: new client\nprocess: onboarding\nwho: Sarah\n---\nX\n`)).toHaveProperty("error");
   expect(parseAutomation(`---\nwhen: new client\nclients: all\n---\nX\n`)).toHaveProperty("error");
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 25 * *"\nclients: all\nwho: emplio\n---\nX\n`)).toMatchObject({ who: "emplio" });
 });
 
 test("names the period a run is for", () => {

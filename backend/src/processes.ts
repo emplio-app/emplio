@@ -380,17 +380,7 @@ async function makeStep(run: Run, i: number, note?: string) {
   const { assigneeId, agent, missing } = await assign(run.workspaceId, step.who, client?.handlerIds[0], run.startedBy);
   const dueAt = dueOf(run, step);
   const waiting = step.who.toLowerCase() === "client";
-  const details = inputsLine(run.inputs);
-  const notes = [
-    step.how,
-    note && `Sent back: ${note}`,
-    missing,
-    details && `${DETAILS}${details}`,
-    `Step ${i + 1} of ${run.steps.length} of "${run.processTitle}" for ${run.subject}${run.period ? ` (${run.period})` : ""}; how this process goes: company/processes/${run.process}.md.`,
-    step.back ? `An OK step: if it isn't right, send it back to step ${step.back} (emplio processes back ${run.id.slice(0, 8)} --note "<what to fix>").` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const notes = stepNotes(run, i, note, missing);
   const { makeTask } = await import("./tasks");
   return (await makeTask({
     workspaceId: run.workspaceId,
@@ -406,6 +396,22 @@ async function makeStep(run: Run, i: number, note?: string) {
     runId: run.id,
     stepIndex: i,
   }))!;
+}
+
+// A step's task's notes: how to do it, what was filled in, where it sits in the process (the evals use these too)
+export function stepNotes(run: Pick<Run, "id" | "steps" | "inputs" | "processTitle" | "subject" | "period" | "process">, i: number, note?: string, missing = "") {
+  const step = run.steps[i]!;
+  const details = inputsLine(run.inputs);
+  return [
+    step.how,
+    note && `Sent back: ${note}`,
+    missing,
+    details && `${DETAILS}${details}`,
+    `Step ${i + 1} of ${run.steps.length} of "${run.processTitle}" for ${run.subject}${run.period ? ` (${run.period})` : ""}; how this process goes: company/processes/${run.process}.md.`,
+    step.back ? `An OK step: if it isn't right, send it back to step ${step.back} (emplio processes back ${run.id.slice(0, 8)} --note "<what to fix>").` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // What a step's task is called: the step, then what the go is for (a client's name shows beside the task anyway, so
@@ -585,7 +591,7 @@ export async function stepInfo(runIds: string[]) {
 
 // --- `emplio processes` ---
 
-const USAGE = `usage: emplio processes list                                   the processes (steps done the same way every time)
+export const USAGE = `usage: emplio processes list                                   the processes (steps done the same way every time)
        emplio processes show <name>                            one, with its file
        emplio processes add <name> - <<'MD' ... MD             a new one (owner or admin): company/processes/<name>.md, as below
        emplio processes update <name> - <<'MD' ... MD          change it (runs already going keep their steps and inputs)
@@ -695,7 +701,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         if (!runs.length) return opts.all ? "No runs." : "Nothing going. (--all for finished ones)";
         return runs
           .map((r) => {
-            const at = r.status === "active" ? `step ${r.step + 1}/${r.steps.length} ${r.steps[r.step]?.name}${r.current ? ` (${r.current.assigneeName}, ${r.current.status}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""})` : ""}` : r.status;
+            const at = r.status === "active" ? `step ${r.step + 1}/${r.steps.length} ${r.steps[r.step]?.name}${r.current ? ` (${r.current.assigneeName}, ${r.current.status}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}, task ${r.current.taskId.slice(0, 8)})` : ""}` : r.status;
             const details = inputsLine(r.inputs);
             return `${r.id.slice(0, 8)}\t${r.processTitle}\t${r.subject}${r.period ? ` · ${r.period}` : ""}\t${at}${details ? `\n\t${details}` : ""}`;
           })
