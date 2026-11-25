@@ -9,7 +9,7 @@
 // or in a new background chat when there's none (added on the Tasks page, or the chat was deleted). The background agent's hand-offs always get a new one.
 // Its last words reach that person in their main chat (and on their phone), with a link when it was done elsewhere.
 import { generateId, type UIMessage } from "ai";
-import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { TASK_PREFIX, TASK_STATUSES, type Role, type Task, type TaskInput, type TaskStatus } from "@emplio/shared";
 import { record } from "./activity";
@@ -107,7 +107,9 @@ const processOf = (t: Row, run: Awaited<ReturnType<typeof stepInfo>> extends Map
 const withName = (t: Task): Task => (t.agentName ? { ...t, assigneeName: `the ${t.agentName} agent` } : t);
 
 // assignee: a user id, null for the AI, undefined for anyone. open: not done or cancelled. due: due by now. client: theirs only.
-export async function listTasks(w: Who, f: { assignee?: string | null; open?: boolean; due?: boolean; mine?: boolean; client?: string } = {}) {
+// Finished ones only from the last 30 days unless old: a firm with 80 clients finishes hundreds of steps a month, and
+// those mustn't push open work off the list.
+export async function listTasks(w: Who, f: { assignee?: string | null; open?: boolean; due?: boolean; mine?: boolean; client?: string; old?: boolean } = {}) {
   const where: (SQL | undefined)[] = [eq(tasks.workspaceId, w.workspaceId)];
   // ponytail: direct reports only; walk the whole chain below them if teams get deep
   if (f.mine) where.push(or(eq(tasks.assigneeId, w.userId), eq(tasks.requesterId, w.userId)));
@@ -115,6 +117,7 @@ export async function listTasks(w: Who, f: { assignee?: string | null; open?: bo
   if (f.assignee === null) where.push(isNull(tasks.assigneeId));
   else if (f.assignee) where.push(eq(tasks.assigneeId, f.assignee));
   if (f.open) where.push(inArray(tasks.status, OPEN));
+  else if (!f.old) where.push(or(inArray(tasks.status, OPEN), gte(tasks.updatedAt, new Date(Date.now() - 30 * 86_400_000))));
   if (f.due) where.push(lte(tasks.dueAt, new Date()));
   if (f.client) where.push(eq(tasks.clientId, f.client));
   const rows = await db
@@ -122,7 +125,8 @@ export async function listTasks(w: Who, f: { assignee?: string | null; open?: bo
     .from(tasks)
     .where(and(...where))
     .orderBy(sql`${tasks.dueAt} asc nulls last`, asc(tasks.createdAt))
-    .limit(500);
+    // ponytail: no paging; a workspace with over 5000 open tasks needs it
+    .limit(5000);
   return toTask(rows, w.workspaceId);
 }
 
@@ -604,14 +608,14 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   }
   if (sub === "search" && words.length) {
     const terms = words.map((x) => x.toLowerCase());
-    const list = (await listTasks(w, {})).filter((t) => terms.every((x) => [t.title, t.notes, t.waitingOn].join(" ").toLowerCase().includes(x)));
+    const list = (await listTasks(w, { old: true })).filter((t) => terms.every((x) => [t.title, t.notes, t.waitingOn].join(" ").toLowerCase().includes(x)));
     if (data) return JSON.stringify(list.map(asData));
     if (!list.length) return "No tasks match.";
     const more = list.length - 30;
     return [...list.slice(0, 30).map((t) => line(t, tz)), "", ...(more > 0 ? [`${more} more not shown: add words.`] : []), "In full: emplio tasks show <id>."].join("\n");
   }
   if (sub === "show" && words[0]) {
-    const t = (await listTasks(w, {})).find((x) => x.id.startsWith(words[0]!));
+    const t = (await listTasks(w, { old: true })).find((x) => x.id.startsWith(words[0]!));
     return t ? show(t) : `error: no task ${words[0]}`;
   }
   if (sub === "add" && words.length && opts.every !== undefined) {

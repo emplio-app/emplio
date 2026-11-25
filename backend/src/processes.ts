@@ -593,7 +593,8 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       ),
     )
     .orderBy(desc(processRuns.startedAt))
-    .limit(300);
+    // every one going; with finished ones, the latest 1000
+    .limit(f.all ? 1000 : 100_000);
   if (!rows.length) return [];
   const open = await db
     .select()
