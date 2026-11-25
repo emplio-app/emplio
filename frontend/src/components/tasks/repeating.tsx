@@ -28,7 +28,11 @@ export function everyWords(cron: string) {
 }
 
 const whenWords = (a: Automation) =>
-  a.when === "schedule" ? everyWords(a.schedule ?? "") : `When ${(a.trigger ?? "").replace(/^([a-z]+)\./, "$1: ").replace(/_/g, " ")}`;
+  a.when === "schedule"
+    ? everyWords(a.schedule ?? "")
+    : a.when === "new client"
+      ? "For each new client"
+      : `When ${(a.trigger ?? "").replace(/^([a-z]+)\./, "$1: ").replace(/_/g, " ")}`;
 
 // The work that repeats or waits for an event (automations underneath), on the Work page under the tasks.
 export function Repeating() {
@@ -53,11 +57,11 @@ export function Repeating() {
             >
               {a.when === "schedule" ? <RepeatIcon className="size-4 shrink-0 text-muted-foreground" /> : <ZapIcon className="size-4 shrink-0 text-muted-foreground" />}
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{a.prompt.split("\n")[0]}</span>
+                <span className="block truncate text-sm">{a.process ? `Start ${a.process}` : a.prompt.split("\n")[0]}</span>
                 <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                   <span className="truncate">
                     {whenWords(a)}
-                    {a.agent ? ` · ${a.agent}` : ""}
+                    {a.agent ? ` · ${a.agent}` : a.who ? ` · ${a.who}` : ""}
                   </span>
                   {a.clients && (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.7rem] font-medium text-foreground/80">

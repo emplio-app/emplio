@@ -144,7 +144,7 @@ export type ActionRun = { id: string; action: string; ok: boolean; error: string
 export type AutomationRun = {
   id: string;
   name: string;
-  reason: "trigger" | "schedule" | "manual";
+  reason: "trigger" | "schedule" | "manual" | "new client";
   status: "running" | "done" | "failed";
   error: string | null;
   conversationId: string | null;
@@ -153,12 +153,16 @@ export type AutomationRun = {
 };
 export type Automation = {
   name: string;
-  when: "trigger" | "schedule" | "manual";
+  when: "trigger" | "schedule" | "manual" | "new client";
   trigger: string | null;
   schedule: string | null;
   timezone: string | null;
   enabled: boolean;
   prompt: string;
+  // each run starts this process (for each client, or the new one) instead of anything else
+  process: string | null;
+  // who does the task each run makes (handler, owner, a person, an agent); null: Emplio, in a chat of its own
+  who: string | null;
   // the agent its runs hand the work to
   agent: string | null;
   // the app actions its runs take that send or change something (gmail.send_email), and those of them allowed: runs do
@@ -624,10 +628,8 @@ export type Process = {
   for: "client" | "other";
   // what's filled in when one starts
   inputs: ProcessInput[];
-  // started by hand, for each new client, or on a schedule for clients (every: cron)
-  starts: "manual" | "new client" | "schedule";
-  every: string | null;
-  clients: string[] | null;
+  // the automations that start it (on a schedule, for each new client); none: started by hand
+  startedBy: Pick<Automation, "name" | "when" | "schedule" | "trigger" | "clients">[];
   steps: ProcessStep[];
   // how it's done, in the file's words
   about: string;

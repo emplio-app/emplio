@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Process, ProcessInput, ProcessRun, ProcessStep } from "@emplio/shared";
-import { ChevronRightIcon, CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
+import { ChevronRightIcon, CircleDotIcon, FileTextIcon, HourglassIcon, MoreHorizontalIcon, PencilIcon, PlayIcon, RepeatIcon, RouteIcon, SquareIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -25,11 +25,15 @@ import { cn } from "@/lib/utils";
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// How a process starts, in plain words.
-export function startsWords(p: Pick<Process, "starts" | "every" | "clients">) {
-  if (p.starts === "new client") return "For each new client";
-  if (p.starts === "manual") return "Started when needed";
-  const [, , dom, mon, dow] = (p.every ?? "").trim().split(/\s+/);
+// How a process starts, in plain words: the automations that start it, or by hand.
+export function startsWords(p: Pick<Process, "startedBy">) {
+  if (!p.startedBy.length) return "Started when needed";
+  return p.startedBy.map(oneStart).join("; ");
+}
+function oneStart(a: Process["startedBy"][number]) {
+  if (a.when === "new client") return "For each new client";
+  if (a.when !== "schedule") return a.when === "trigger" ? "When something happens in an app" : "When run by hand";
+  const [, , dom, mon, dow] = (a.schedule ?? "").trim().split(/\s+/);
   const when =
     /^\d+$/.test(dom ?? "") && /^\d+$/.test(mon ?? "")
       ? `Every year on ${dom} ${MONTHS[+mon! - 1]}`
@@ -38,7 +42,8 @@ export function startsWords(p: Pick<Process, "starts" | "every" | "clients">) {
         : /^[0-6]$/.test(dow ?? "") && dom === "*"
           ? `Every ${DAYS[+dow!]}`
           : "On a schedule";
-  const n = p.clients?.includes("*") ? "every active client" : `${p.clients?.length ?? 0} client${p.clients?.length === 1 ? "" : "s"}`;
+  const one = a.clients?.length === 1 && a.clients[0]!.includes("=") ? `clients with ${a.clients[0]}` : null;
+  const n = a.clients?.includes("*") ? "every active client" : (one ?? `${a.clients?.length ?? 0} client${a.clients?.length === 1 ? "" : "s"}`);
   return `${when}, for ${n}`;
 }
 
@@ -193,6 +198,25 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
             >
               <FileTextIcon />
               Edit steps
+            </Button>
+          )}
+          {admin && (
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link
+                  href={
+                    p.startedBy.length === 1
+                      ? `/chat?file=${encodeURIComponent(`company/automations/${p.startedBy[0]!.name}.md`)}`
+                      : `/chat?file=${encodeURIComponent(`company/processes/${p.name}.md`)}&do=repeat`
+                  }
+                />
+              }
+            >
+              <RepeatIcon />
+              {p.startedBy.length ? "Change when" : "Repeat"}
             </Button>
           )}
           {!p.error && <Start p={p} />}

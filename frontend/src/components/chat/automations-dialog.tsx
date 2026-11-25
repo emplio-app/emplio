@@ -38,7 +38,9 @@ const when = (a: Automation) =>
     ? `When ${a.trigger}`
     : a.when === "schedule"
       ? `Schedule ${a.schedule} (${a.timezone})`
-      : "Run by hand";
+      : a.when === "new client"
+        ? "For each new client"
+        : "Run by hand";
 
 const at = (iso: string) =>
   new Date(iso).toLocaleString(undefined, {
@@ -396,6 +398,8 @@ type Fields = {
   timezone: string;
   enabled: boolean;
   prompt: string;
+  // the file's other settings (clients:, process:, who:, actions:, ...), kept as written
+  rest: string[];
 };
 
 const BLANK: Fields = {
@@ -407,16 +411,29 @@ const BLANK: Fields = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   enabled: true,
   prompt: "",
+  rest: [],
+};
+
+// the header lines (and their indented ones) the form doesn't edit
+const FORM_KEYS = ["when", "trigger", "config", "schedule", "timezone", "enabled"];
+const restOf = (text: string) => {
+  const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
+  let keep = false;
+  return head.split(/\r?\n/).filter((l) => {
+    if (!/^\s/.test(l)) keep = !FORM_KEYS.includes(l.split(":")[0]!.trim());
+    return keep;
+  });
 };
 
 const WHEN_LABEL: Record<When, string> = {
   schedule: "On a schedule",
   trigger: "When something happens in an app",
   manual: "Only when run by hand",
+  "new client": "For each new client",
 };
 
 // Back to the file the server stores. JSON strings and objects are valid YAML, so no YAML library.
-// ponytail: comments and unknown keys in a hand-written file are dropped on save
+// ponytail: comments in a hand-written file are dropped on save
 const toFile = (f: Fields) => {
   const q = JSON.stringify;
   const lines = ["---", `when: ${f.when}`];
@@ -428,7 +445,7 @@ const toFile = (f: Fields) => {
   }
   if (f.when === "schedule")
     lines.push(`schedule: ${q(f.schedule)}`, `timezone: ${q(f.timezone)}`);
-  lines.push(`enabled: ${f.enabled}`, "---", f.prompt.trim(), "");
+  lines.push(...f.rest, `enabled: ${f.enabled}`, "---", f.prompt.trim(), "");
   return lines.join("\n");
 };
 
@@ -463,6 +480,7 @@ function Editor({ name, onDone }: { name: string; onDone: () => void }) {
           timezone: d.timezone ?? BLANK.timezone,
           enabled: d.enabled ?? true,
           prompt: d.prompt ?? "",
+          rest: restOf(d.text),
         }
       : BLANK;
   const f = { ...loaded, ...edits };

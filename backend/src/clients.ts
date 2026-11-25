@@ -166,9 +166,9 @@ export async function updateClient(w: Who, q: string, input: ClientInput, conver
   return { ok: true, client: await one(row!) };
 }
 
-// Won: the processes that start for each new client (processes.ts), once per client.
+// Won (or added as active): the automations for each new client (automations.ts), once per client.
 const won = (w: Who, clientId: string) =>
-  import("./processes").then((p) => p.startForNewClient(w, clientId)).catch((error) => console.error("starting new-client processes failed", error));
+  import("./automations").then((a) => a.forNewClient(w.workspaceId, clientId)).catch((error) => console.error("new-client automations failed", error));
 
 // Their tasks and chats stay, without the label; their notes file stays too.
 export async function removeClient(w: Who, q: string, conversationId?: string) {

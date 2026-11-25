@@ -288,9 +288,7 @@ export const processes = pgTable(
     for: text().notNull().default("client"),
     // what's filled in when one starts (an invoice number, an amount, a deadline)
     inputs: jsonb().$type<ProcessInput[]>().notNull().default([]),
-    starts: text({ enum: ["manual", "new client", "schedule"] }).notNull().default("manual"),
-    every: text(),
-    clients: text().array(),
+    // ponytail: what starts it on a schedule or for each new client is an automation (process: <name>), never this file
     steps: jsonb().$type<ProcessStepDef[]>().notNull().default([]),
     about: text().notNull().default(""),
     // what's wrong with the file (it can't start until fixed)
@@ -343,7 +341,7 @@ export const automations = pgTable(
     sha: text().notNull(),
     // whoever last saved the file: it runs as them, with their apps
     userId: uuid().references(() => users.id, { onDelete: "set null" }),
-    when: text({ enum: ["trigger", "schedule", "manual"] }).notNull(),
+    when: text({ enum: ["trigger", "schedule", "manual", "new client"] }).notNull(),
     // our trigger name, e.g. gmail.new_gmail_message
     trigger: text(),
     triggerConfig: jsonb(),
@@ -365,8 +363,11 @@ export const automations = pgTable(
     clients: text().array(),
     // those tasks are due this many days after the run
     dueDays: integer(),
-    // with clients: start this process (company/processes/<name>.md) for each of them instead of adding a task
+    // start this process (company/processes/<name>.md) for each client (or the new one) instead of adding a task
     process: text(),
+    // who does the task each run makes (the file's who:): handler, owner, a person, an agent; null: Emplio runs it in a chat
+    // (with clients or for each new client: whoever handles them)
+    who: text(),
     // what's wrong with the file (it doesn't run until fixed)
     error: text(),
     // the provider's id for the trigger it watches
@@ -473,7 +474,7 @@ export const automationRuns = pgTable(
     automationId: uuid().references(() => automations.id, { onDelete: "set null" }),
     // kept after the automation is removed
     name: text().notNull(),
-    reason: text({ enum: ["trigger", "schedule", "manual"] }).notNull(),
+    reason: text({ enum: ["trigger", "schedule", "manual", "new client"] }).notNull(),
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
     status: text({ enum: ["running", "done", "failed"] }).notNull().default("running"),
     error: text(),

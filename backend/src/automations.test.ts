@@ -19,6 +19,13 @@ test("a schedule can be done for each client", () => {
   expect(parseAutomation(`---\nwhen: manual\nclients: all\n---\nX\n`)).toHaveProperty("error");
   expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nclients: []\n---\nX\n`)).toHaveProperty("error");
   expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nclients: all\ndue: soon\n---\nX\n`)).toHaveProperty("error");
+  // one way to make work: a task for a person, a process per client or per new client
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 * * 1"\nwho: Sarah\n---\nCheck the bank feed\n`)).toMatchObject({ who: "Sarah", dueDays: 1, clients: null });
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 * * 1"\nwho: emplio\n---\nX\n`)).toMatchObject({ who: null, dueDays: null });
+  expect(parseAutomation(`---\nwhen: new client\nprocess: onboarding\n---\nOnboard them\n`)).toMatchObject({ when: "new client", process: "onboarding", dueDays: 7 });
+  expect(parseAutomation(`---\nwhen: schedule\nschedule: "0 9 1 * *"\nprocess: books\n---\nX\n`)).toHaveProperty("error");
+  expect(parseAutomation(`---\nwhen: new client\nprocess: onboarding\nwho: Sarah\n---\nX\n`)).toHaveProperty("error");
+  expect(parseAutomation(`---\nwhen: new client\nclients: all\n---\nX\n`)).toHaveProperty("error");
 });
 
 test("names the period a run is for", () => {

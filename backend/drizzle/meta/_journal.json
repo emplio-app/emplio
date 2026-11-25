@@ -106,6 +106,13 @@
       "when": 1795584847667,
       "tag": "20261125053407_client_details",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795598258153,
+      "tag": "20261125091738_one_way_to_make_work",
+      "breakpoints": true
     }
   ]
 }

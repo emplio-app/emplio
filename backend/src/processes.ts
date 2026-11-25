@@ -6,17 +6,16 @@
 // the steps and inputs it started with. Each step is a task, made when the one before it is
 // done: for whoever looks after the client, the owner, a named person, Emplio or one of its agents, or "client" (a
 // task waiting on them, with the handler). An OK step can be sent back to an earlier one.
-// Started by hand (`emplio processes start`, the app), for each client won ("starts: new client"), or on a schedule
-// for each client ("every:" with "clients:", as an automation that starts one per client and period).
-// The files are the truth; syncProcesses keeps one row per file in the processes table (like automations), and keeps
-// each scheduled one's automation in step with its file, however the file was changed.
+// Started by hand (`emplio processes start`, the app), or by an automation (process: <name>) on a schedule for each
+// client, or for each new client: the file says what's done, never when; that's the automation's.
+// The files are the truth; syncProcesses keeps one row per file in the processes table (like automations).
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { INPUT_TYPES, type Process, type ProcessInput, type ProcessRun, type ProcessStep, type Role, type RunInput } from "@emplio/shared";
 import { record } from "./activity";
 import { context, type Ctx } from "./auth";
 import { db } from "./db";
-import { clients, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
+import { automations, clients, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
 import { findAgent } from "./agents";
 import { detailOf, findClient } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
@@ -31,8 +30,6 @@ const FOLDER = "processes";
 const NAME = /^[a-z0-9][a-z0-9-]{0,50}$/;
 const DAY = 86_400_000;
 const isAdmin = (w: Pick<Who, "role">) => w.role !== "member";
-// the automation that starts a process on its schedule
-export const autoName = (name: string) => `process-${name}`;
 
 export class ProcessError extends Error {}
 
@@ -43,7 +40,7 @@ const pathOf = (name: string) => {
 
 // --- the file ---
 
-type Parsed = Omit<Process, "name" | "error" | "active">;
+type Parsed = Omit<Process, "name" | "error" | "active" | "startedBy">;
 
 // Its settings, inputs and steps, or what's wrong with it. Steps refer to each other by number (1 = the first) or
 // by name, and to a date input by its name.
@@ -62,21 +59,12 @@ export function parseProcess(text: string): Parsed | { error: string } {
   const forWhat = typeof s.for === "string" ? s.for.trim().toLowerCase() : s.for === undefined ? "client" : "";
   if (forWhat !== "client" && forWhat !== "other")
     return { error: "for: is client (each go is for a client) or other (for anything else with a name: a candidate, an opening); what each go needs goes in inputs:" };
-  const every = s.every ?? null;
-  if (every !== null && typeof every !== "string") return { error: 'every: is a schedule, like "0 9 1 4 *" (9 am on 1 April)' };
-  const starts = every ? "schedule" : (s.starts ?? "manual");
-  if (starts !== "manual" && starts !== "new client" && starts !== "schedule") return { error: "starts: is manual or new client (or give every: for a schedule)" };
-  if (starts === "schedule" && !every) return { error: "starts: schedule needs every:" };
-  if (forWhat !== "client" && starts !== "manual") return { error: "a process for other things (not clients) is started by hand" };
-  const rawClients = s.clients ?? (every ? "all" : null);
-  const clientsList = rawClients === null ? null : rawClients === "all" ? ["*"] : rawClients;
-  if (clientsList !== null && (!Array.isArray(clientsList) || !clientsList.length || clientsList.some((c) => typeof c !== "string" || !c.trim())))
-    return { error: "clients: is all, or a list like [Northwind Traders, Contoso], or of details, like [Files=monthly]" };
+  // starts: manual (the old default) is harmless; anything else is an automation's job now
+  if ("every" in s || "clients" in s || (s.starts !== undefined && s.starts !== "manual"))
+    return { error: "when it starts isn't set here: take out every:, starts: and clients:, and start it on a schedule or for each new client with an automation (process: <name>, emplio automations help)" };
 
   const inputs = parseInputs(s.inputs);
   if ("error" in inputs) return inputs;
-  if (starts !== "manual" && inputs.some((x) => x.required))
-    return { error: "a process that starts by itself (for each new client, or on a schedule) can only have inputs with required: false; they're filled in later" };
 
   if (!Array.isArray(s.steps) || !s.steps.length) return { error: "steps: is missing: a list of steps, each with a name: and who:" };
   if (s.steps.length > 40) return { error: "at most 40 steps" };
@@ -122,7 +110,7 @@ export function parseProcess(text: string): Parsed | { error: string } {
     }
     steps.push(step);
   }
-  return { title, for: forWhat, inputs, starts, every, clients: clientsList as string[] | null, steps, about: m[2]!.trim() };
+  return { title, for: forWhat, inputs, steps, about: m[2]!.trim() };
 }
 
 // "Due date" → due-date: what an input is passed as (--due-date; due_date= from Python, made --due-date)
@@ -207,18 +195,14 @@ export const inputsLine = (inputs: RunInput[]) =>
 
 type ProcessRow = typeof processes.$inferSelect;
 
-// Make the rows match the files in git: new and changed files read again, removed ones dropped. A schedule that
-// changed (or a process removed) has its automation rewritten, as whoever last saved the file.
+// Make the rows match the files in git: new and changed files read again, removed ones dropped.
 const syncing = new Map<string, Promise<unknown>>();
 export function syncProcesses(workspaceId: string): Promise<void> {
   const run = (syncing.get(workspaceId) ?? Promise.resolve()).then(async () => {
     const files = (await listFolder(workspaceId, REPO, FOLDER).catch(() => [])).filter((f) => f.name.endsWith(".md") && NAME.test(f.name.slice(0, -3)));
     const rows = await db.select().from(processes).where(eq(processes.workspaceId, workspaceId));
     for (const row of rows)
-      if (!files.some((f) => f.name === `${row.name}.md`)) {
-        await db.delete(processes).where(eq(processes.id, row.id));
-        if (row.every) await scheduleAs(workspaceId, null, row.name, null);
-      }
+      if (!files.some((f) => f.name === `${row.name}.md`)) await db.delete(processes).where(eq(processes.id, row.id));
     for (const f of files) {
       const name = f.name.slice(0, -3);
       const old = rows.find((r) => r.name === name);
@@ -227,28 +211,21 @@ export function syncProcesses(workspaceId: string): Promise<void> {
       const parsed = parseProcess(text);
       const values =
         "error" in parsed
-          ? { workspaceId, name, sha: f.sha, title: name, for: "client", inputs: [], starts: "manual" as const, every: null, clients: null, steps: [], about: "", error: parsed.error, updatedAt: new Date() }
+          ? { workspaceId, name, sha: f.sha, title: name, for: "client", inputs: [], steps: [], about: "", error: parsed.error, updatedAt: new Date() }
           : { workspaceId, name, sha: f.sha, ...parsed, steps: parsed.steps as ProcessStepDef[], error: null, updatedAt: new Date() };
       await db.insert(processes).values(values).onConflictDoUpdate({ target: [processes.workspaceId, processes.name], set: values });
-      const sameSchedule = (old?.every ?? null) === values.every && JSON.stringify(old?.clients ?? null) === JSON.stringify(values.clients) && old?.title === values.title;
-      if (!sameSchedule) {
-        const author = await lastAuthor(workspaceId, REPO, `${FOLDER}/${f.name}`).catch(() => null);
-        await scheduleAs(workspaceId, author?.email ?? null, name, "error" in parsed ? null : parsed);
-      }
     }
   });
   syncing.set(workspaceId, run.catch(() => {}));
   return run;
 }
 
-const toProcess = (r: ProcessRow, active: number): Process => ({
+const toProcess = (r: ProcessRow, active: number, startedBy: Process["startedBy"] = []): Process => ({
   name: r.name,
   title: r.title,
   for: r.for === "other" ? "other" : "client",
   inputs: r.inputs,
-  starts: r.starts,
-  every: r.every,
-  clients: r.clients,
+  startedBy,
   steps: r.steps,
   about: r.about,
   error: r.error,
@@ -257,16 +234,21 @@ const toProcess = (r: ProcessRow, active: number): Process => ({
 
 export async function listProcesses(workspaceId: string): Promise<Process[]> {
   await syncProcesses(workspaceId);
-  const [rows, counts] = await Promise.all([
+  const [rows, counts, starters] = await Promise.all([
     db.select().from(processes).where(eq(processes.workspaceId, workspaceId)).orderBy(processes.title),
     db
       .select({ process: processRuns.process, n: sql<number>`count(*)`.mapWith(Number) })
       .from(processRuns)
       .where(and(eq(processRuns.workspaceId, workspaceId), eq(processRuns.status, "active")))
       .groupBy(processRuns.process),
+    // what starts each: the automations naming it (synced when the app or Emplio lists them)
+    db
+      .select({ name: automations.name, when: automations.when, schedule: automations.schedule, trigger: automations.trigger, clients: automations.clients, process: automations.process })
+      .from(automations)
+      .where(and(eq(automations.workspaceId, workspaceId), eq(automations.enabled, true), sql`${automations.process} is not null`)),
   ]);
   const n = new Map(counts.map((c) => [c.process, c.n]));
-  return rows.map((r) => toProcess(r, n.get(r.name) ?? 0));
+  return rows.map((r) => toProcess(r, n.get(r.name) ?? 0, starters.filter((a) => a.process === r.name).map(({ process: _, ...a }) => a)));
 }
 
 async function getProcess(workspaceId: string, name: string) {
@@ -278,8 +260,7 @@ async function getProcess(workspaceId: string, name: string) {
   return toProcess(row, 0);
 }
 
-// Saved by the owner or an admin; one with every: gets its automation (company/automations/process-<name>.md) made,
-// changed or dropped with it.
+// Saved by the owner or an admin.
 export async function saveProcess(who: Ctx, name: string, text: string, mode: "add" | "update") {
   if (!isAdmin(who)) throw new ProcessError("only the owner or an admin can change processes");
   const path = pathOf(name);
@@ -300,32 +281,6 @@ export async function removeProcess(who: Ctx, name: string) {
   const author = { name: who.userName, email: who.userEmail };
   if (!(await writeFile(who.workspaceId, REPO, pathOf(name), null, `Removed process ${name}\n\nBy ${who.userName}`, author))) throw new ProcessError(`no process ${name}`);
   await syncProcesses(who.workspaceId);
-}
-
-// The schedule's automation, saved as the file's last author when they're an owner or admin, else as the owner.
-async function scheduleAs(workspaceId: string, email: string | null, name: string, p: Parsed | null) {
-  const { personFor } = await import("./automations");
-  const team = await db
-    .select({ id: workspaceMembers.userId, role: workspaceMembers.role })
-    .from(workspaceMembers)
-    .where(eq(workspaceMembers.workspaceId, workspaceId));
-  const people = await listTeam(workspaceId);
-  const authorId = email ? people.find((m) => m.email.toLowerCase() === email.toLowerCase())?.id : undefined;
-  const pick = team.find((m) => m.id === authorId && m.role !== "member") ?? team.find((m) => m.role === "owner");
-  const who = pick && (await personFor(workspaceId, pick.id));
-  if (!who) return console.error("no one to save a process's schedule as", workspaceId, name);
-  await schedule(who, name, p).catch((error) => console.error("scheduling a process failed", name, error));
-}
-
-async function schedule(who: Ctx, name: string, p: Parsed | null) {
-  const { readAutomation, removeAutomation, saveAutomation } = await import("./automations");
-  const auto = autoName(name);
-  const had = await readAutomation(who.workspaceId, auto).then(() => true, () => false);
-  if (p?.every) {
-    const list = p.clients!.includes("*") ? "all" : JSON.stringify(p.clients);
-    const text = ["---", "when: schedule", `schedule: ${JSON.stringify(p.every)}`, `clients: ${list}`, `process: ${name}`, "---", `Start "${p.title}" for each client (company/processes/${name}.md).`, ""].join("\n");
-    await saveAutomation(who, auto, text, "put");
-  } else if (had) await removeAutomation(who, auto);
 }
 
 // Every who: must be someone: a role word, a person on the team, or one of Emplio's agents.
@@ -401,31 +356,30 @@ export async function startRun(
   return run;
 }
 
+// Who does a step or an automation's task, from its who: (handler and client: whoever looks after the client; owner;
+// emplio; a person by name or email; one of Emplio's agents). Someone no longer there: fallback, with a line saying so.
+export async function assign(workspaceId: string, who: string, handlerId: string | null | undefined, fallback: string | null) {
+  const w = who.trim().toLowerCase();
+  if (w === "emplio") return { assigneeId: null, agent: null, missing: "" };
+  if (w === "handler" || w === "client") return { assigneeId: handlerId ?? fallback, agent: null, missing: "" };
+  if (w === "owner") {
+    const [o] = await db.select({ id: workspaceMembers.userId }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, "owner")));
+    return { assigneeId: o?.id ?? fallback, agent: null, missing: "" };
+  }
+  const m = person(await listTeam(workspaceId), who);
+  if (m) return { assigneeId: m.id, agent: null, missing: "" };
+  const a = await findAgent(workspaceId, who, { admin: true });
+  if (a) return { assigneeId: null, agent: a.slug, missing: "" };
+  return { assigneeId: fallback, agent: null, missing: `(${who} was to do this, but nobody by that name is on the team now.)` };
+}
+
 // The task for step i of a run: who does it, when it's due, and what it's part of.
 async function makeStep(run: Run, i: number, note?: string) {
   const step = run.steps[i]!;
-  const who = step.who.toLowerCase();
   const client = run.clientId ? await db.query.clients.findFirst({ where: eq(clients.id, run.clientId) }) : null;
-  const fallback = run.startedBy;
-  let assigneeId: string | null = null;
-  let agent: string | null = null;
-  let missing = "";
-  if (who === "handler" || who === "client") assigneeId = client?.handlerIds[0] ?? fallback;
-  else if (who === "owner") {
-    const [o] = await db.select({ id: workspaceMembers.userId }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, run.workspaceId), eq(workspaceMembers.role, "owner")));
-    assigneeId = o?.id ?? fallback;
-  } else if (who !== "emplio") {
-    const m = person(await listTeam(run.workspaceId), step.who);
-    const a = m ? null : await findAgent(run.workspaceId, step.who, { admin: true });
-    if (m) assigneeId = m.id;
-    else if (a) agent = a.slug;
-    else {
-      assigneeId = fallback;
-      missing = `(The process says ${step.who} does this, but nobody by that name is on the team now.)`;
-    }
-  }
+  const { assigneeId, agent, missing } = await assign(run.workspaceId, step.who, client?.handlerIds[0], run.startedBy);
   const dueAt = dueOf(run, step);
-  const waiting = who === "client";
+  const waiting = step.who.toLowerCase() === "client";
   const details = inputsLine(run.inputs);
   const notes = [
     step.how,
@@ -437,28 +391,21 @@ async function makeStep(run: Run, i: number, note?: string) {
   ]
     .filter(Boolean)
     .join("\n\n");
-  const [t] = await db
-    .insert(tasks)
-    .values({
-      workspaceId: run.workspaceId,
-      title: taskTitle(run, i),
-      notes,
-      status: waiting ? "waiting" : "todo",
-      waitingOn: waiting ? `${run.subject}: ${step.name}` : null,
-      assigneeId,
-      agent,
-      requesterId: run.startedBy,
-      clientId: run.clientId,
-      dueAt,
-      runId: run.id,
-      stepIndex: i,
-    })
-    .returning();
-  if (!assigneeId) {
-    const { startDueTasks } = await import("./tasks");
-    void startDueTasks().catch((error) => console.error("starting tasks failed", error));
-  }
-  return t!;
+  const { makeTask } = await import("./tasks");
+  return (await makeTask({
+    workspaceId: run.workspaceId,
+    title: taskTitle(run, i),
+    notes,
+    status: waiting ? "waiting" : "todo",
+    waitingOn: waiting ? `${run.subject}: ${step.name}` : null,
+    assigneeId,
+    agent,
+    requesterId: run.startedBy,
+    clientId: run.clientId,
+    dueAt,
+    runId: run.id,
+    stepIndex: i,
+  }))!;
 }
 
 // What a step's task is called: the step, then what the go is for (a client's name shows beside the task anyway, so
@@ -587,12 +534,6 @@ export async function stopRun(w: Who, id: string) {
   return run;
 }
 
-// A client just won: every process that starts for new clients, for them.
-export async function startForNewClient(w: { workspaceId: string; userId: string }, clientId: string) {
-  for (const p of await listProcesses(w.workspaceId))
-    if (!p.error && p.starts === "new client") await startRun(w, p.name, { clientId, repeatKey: `${p.name}/new/${clientId}` }).catch((error) => console.error("starting a process failed", p.name, error));
-}
-
 export async function listRuns(workspaceId: string, f: { process?: string; clientId?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
   const rows = await db
     .select()
@@ -660,15 +601,12 @@ A process file:
   ---
   title: Annual filing
   for: client              # client (default), or other: anything else with a name (a candidate, an opening)
-  starts: manual           # manual (default), or new client: for each client won
-  every: "0 9 1 4 *"       # instead: on a schedule, for each client (clients: all, [a, b], or [Files=monthly]: the
-                           #   active clients with that detail, emplio clients help)
   inputs:                  # what's filled in when it starts (none: nothing asked)
     - name: Financial year #   text unless type: says otherwise; one the client has a detail for (Tax number) is
                            #   filled in from it
     - name: AGM date
       type: date           # text, number, date (2026-12-01), or choice with options: [Bank, Card]
-      required: false      # needed unless false; one that starts by itself has only required: false ones
+      required: false      # needed unless false (one an automation starts: false, or a client detail fills it)
   steps:
     - name: Get the audited accounts
       who: client          # handler (default: who looks after the client), owner, emplio, client (waiting on
@@ -684,7 +622,9 @@ A process file:
       after: AGM date      # due 30 days after that date (or after: an earlier step, or start); days: -7 with a
       how: Attach the signed accounts and the AGM minutes.   #   date: a week before it
   ---
-  How it's done, in words: what good looks like, the usual snags.`;
+  How it's done, in words: what good looks like, the usual snags.
+The file never says when it starts. On a schedule for each client, or for each new client: an automation with
+process: <name> (emplio automations help); a process page shows the automations that start it.`;
 
 export async function processesCommand(who: Ctx, args: string[], caughtUp: () => Promise<unknown>, data = false) {
   const [sub, ...rest] = args;
@@ -714,7 +654,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         if (data) return JSON.stringify(list);
         if (!list.length) return "No processes yet. Write one with emplio processes add (emplio processes help).";
         return list
-          .map((p) => `${p.name}\t${p.error ? `BROKEN: ${p.error}` : `${p.steps.length} steps`}\t${p.starts === "schedule" ? `every "${p.every}" for ${p.clients?.includes("*") ? "every active client" : p.clients?.join(", ")}` : p.starts === "new client" ? "for each new client" : "by hand"}\t${p.active} going\t${p.title}`)
+          .map((p) => `${p.name}\t${p.error ? `BROKEN: ${p.error}` : `${p.steps.length} steps`}\t${p.startedBy.length ? `started by automation ${p.startedBy.map((a) => a.name).join(", ")}` : "by hand"}\t${p.active} going\t${p.title}`)
           .join("\n");
       }
       case "show": {
@@ -730,7 +670,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         if (!text?.trim()) return `error: ${name} needs its file: emplio processes ${sub} ${name} - <<'MD' ... MD (emplio processes help)`;
         const p = await saveProcess(who, name, text, sub);
         await caughtUp();
-        return `Saved: company/processes/${name}.md, ${p.steps.length} steps${p.starts === "schedule" ? `; starts on its schedule for each client (automation ${autoName(name)})` : p.starts === "new client" ? "; starts for each client won" : "; start it with emplio processes start"}.`;
+        return `Saved: company/processes/${name}.md, ${p.steps.length} steps; start it with emplio processes start, or on a schedule or for each new client with an automation (process: ${name})`;
       }
       case "remove":
         if (!words[0]) break;
@@ -860,8 +800,7 @@ if (import.meta.main) {
   }
   console.assert("error" in parseProcess(`---\ntitle: X\nsteps:\n  - name: A\n    days: -2\n---\n`), "negative days need a date");
   console.assert("error" in parseProcess(`---\ntitle: X\ninputs: [Invoice]\nsteps:\n  - name: A\n    days: 2\n    after: Invoice\n---\n`), "after a text input");
-  console.assert("error" in parseProcess(`---\ntitle: X\nstarts: new client\ninputs: [Invoice]\nsteps: [A]\n---\n`), "auto start, required input");
-  console.assert(!("error" in parseProcess(`---\ntitle: X\nstarts: new client\ninputs:\n  - name: Invoice\n    required: false\nsteps: [A]\n---\n`)));
+  console.assert("error" in parseProcess(`---\ntitle: X\nevery: "0 9 1 * *"\nsteps: [A]\n---\n`), "when it starts is an automation's");
   console.assert("error" in parseProcess(`---\ntitle: X\ninputs: [Client]\nsteps: [A]\n---\n`), "taken name");
   console.assert("error" in parseProcess(`---\ntitle: X\nfor: invoice\nsteps: [A]\n---\n`), "for: is client or other");
   console.assert("error" in parseProcess(`---\ntitle: X\ninputs:\n  - name: P\n    type: choice\nsteps: [A]\n---\n`), "choice needs options");

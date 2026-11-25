@@ -199,11 +199,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   const mentionMenu = useMentionMenu(input, setInput);
   // /chat?file=company/x.md: the new chat with that file already @mentioned, cursor after it (Knowledge's
   // "Suggest a change"). On the URL, not once on open: the new-chat screen stays mounted between visits.
-  const aboutFile = useSearchParams().get("file");
+  const params = useSearchParams();
+  const aboutFile = params.get("file");
+  // &do=repeat: a process to start on a schedule (its automation is written from the chat)
+  const verb = params.get("do") === "repeat" ? "Repeat" : "Change";
   useEffect(() => {
     if (!isNew || !aboutFile) return;
     const label = aboutFile.split("/").pop()!;
-    const text = `Change @${label} `;
+    const text = `${verb} @${label} `;
     mentionMenu.link({ kind: "file", id: aboutFile, label, detail: aboutFile.split("/").slice(0, -1).join("/") });
     setInput(text);
     requestAnimationFrame(() => {

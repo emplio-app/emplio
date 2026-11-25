@@ -159,13 +159,19 @@ async function check(w: Who, input: TaskInput) {
 type Result = { ok: true; task: Task } | { ok: false; error: string };
 const one = async (row: Row) => (await toTask([row], row.workspaceId))[0]!;
 
+// The one way a task is made: requests (addTask), automations and process steps all come here, so every task is the
+// same however it came. One of Emplio's own starts at once (when due). null: one with that repeatKey is there already.
+export async function makeTask(values: typeof tasks.$inferInsert) {
+  const [row] = await db.insert(tasks).values(values).onConflictDoNothing().returning();
+  if (row && !row.assigneeId) void startDueTasks().catch((error) => console.error("starting tasks failed", error));
+  return row ?? null;
+}
+
 export async function addTask(w: Who, input: TaskInput, conversationId?: string): Promise<Result> {
   const error = (await check(w, input)) ?? (input.title === undefined ? "a task needs a title" : null);
   if (error) return { ok: false, error };
   const status = input.status ?? "todo";
-  const [row] = await db
-    .insert(tasks)
-    .values({
+  const row = await makeTask({
       workspaceId: w.workspaceId,
       title: input.title!.trim(),
       notes: input.notes?.trim() || null,
@@ -178,12 +184,10 @@ export async function addTask(w: Who, input: TaskInput, conversationId?: string)
       conversationId: conversationId || null,
       clientId: input.clientId ?? null,
       doneAt: status === "done" ? new Date() : null,
-    })
-    .returning();
+  });
   const task = await one(row!);
   await labelChat(conversationId, task.clientId);
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "task", summary: `Added task "${task.title}" for ${task.assigneeName}` });
-  if (!task.assigneeId) void startDueTasks().catch((error) => console.error("starting tasks failed", error));
   return { ok: true, task };
 }
 
@@ -509,7 +513,8 @@ options: --to <email, name, me or ai>  who does it (default: ai)
                                        only those
          --every "<cron>"              repeats (add only; owner and admins): minute hour day month weekday, on this
                                        chat's person's clock, e.g. "0 9 * * 1" every Monday 9 am. Its title and
-                                       --notes are what to do each time. Repeating ones show in tasks list;
+                                       --notes are what to do each time; with --to a person, it's a task for them
+                                       each time (due --due-days later, default 1), else you do it. Repeating ones show in tasks list;
                                        change, pause or remove them with emplio automations. For "when something
                                        happens" (a new email), use emplio automations add.
          --clients all|<a,b>           with --every: the same job for each client (all: every active one): each
@@ -601,8 +606,8 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     // run once couldn't find the reminder it had just set up with --all, and set it up twice more)
     const plain = !["done", "due", "who"].some((k) => k in opts);
     const repeating = plain ? (await listAutomations(w.workspaceId).catch(() => [])).filter((a) => a.enabled && !a.error && a.when !== "manual") : [];
-    if (data) return JSON.stringify([...list.map(asData), ...repeating.map((a) => ({ repeats: a.when === "schedule" ? a.schedule : `on ${a.trigger}`, agent: a.agent ?? null, name: a.name }))]);
-    const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : `on ${a.trigger}`}\t${a.agent ?? "you"}\t${a.name}${a.clients ? ` (for ${a.clients.includes("*") ? "every active client" : a.clients.join(", ")})` : ""}`);
+    if (data) return JSON.stringify([...list.map(asData), ...repeating.map((a) => ({ repeats: a.when === "schedule" ? a.schedule : a.when === "new client" ? "for each new client" : `on ${a.trigger}`, agent: a.agent ?? null, who: a.who, process: a.process, name: a.name }))]);
+    const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : a.when === "new client" ? "for each new client" : `on ${a.trigger}`}\t${a.process ? `process ${a.process}` : (a.agent ?? a.who ?? "you")}\t${a.name}${a.clients ? ` (for ${a.clients.includes("*") ? "every active client" : a.clients.join(", ")})` : ""}`);
     if (!list.length && !rep.length) return "No tasks match.";
     return [...list.map((t) => line(t, tz)), ...rep, "", "In full: emplio tasks show <id>; repeating ones: emplio automations show <name>."].join("\n");
   }
@@ -620,6 +625,10 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
   }
   if (sub === "add" && words.length && opts.every !== undefined) {
     if (!repeat || w.role === "member") return "error: only the owner or an admin can set up repeating tasks";
+    // a person each time it comes round (a task for them); none or ai: Emplio does it
+    const to = person(opts.to);
+    if (typeof to === "string" && to.startsWith("error:")) return to;
+    const who = to ? team.find((m) => m.id === to)!.email : null;
     const title = words.join(" ");
     const name = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task";
     const file = [
@@ -627,6 +636,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
       "when: schedule",
       `schedule: ${JSON.stringify(opts.every)}`,
       ...(opts.agent ? [`agent: ${JSON.stringify(opts.agent)}`] : []),
+      ...(who ? [`who: ${JSON.stringify(who)}`] : []),
       ...(opts.clients ? [`clients: ${opts.clients.trim().toLowerCase() === "all" ? "all" : JSON.stringify(opts.clients.split(",").map((c) => c.trim()).filter(Boolean))}`] : []),
       ...(opts["due-days"] ? [`due: ${Number.parseInt(opts["due-days"], 10) || 7}`] : []),
       ...(opts.actions ? [`actions: [${opts.actions.split(",").map((a) => a.trim()).filter(Boolean).join(", ")}]`] : []),
