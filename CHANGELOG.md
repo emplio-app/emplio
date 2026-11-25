@@ -2,6 +2,181 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.14 (2026-11-25)
+
+### What's new
+
+- Emplio gets around websites in fewer steps: after each click or form fill it sees straight away what changed on the page (a "saved" message, a box that opened, a new page), so it doesn't stop to look again. In tests, editing records on a site took about a quarter fewer steps and was about 20% cheaper.
+- Emplio can now look at a page and click a spot it sees, in one step. It still reads pages as text when that's quicker, and switches to looking when a page has no labels, is a drawing or map, or a click keeps missing.
+
+### For developers
+
+- `emplio browser click <x> <y>`: a spot in the screenshot last seen (x y scaled back from the 1200px picture the model gets, `files.ts` `MAX_SIDE`, and devicePixelRatio), then a screenshot. A native dropdown under the spot isn't clicked: the answer names its options and the `select` command to use.
+- `emplio browser screenshot` is shown to the model by itself (no `emplio view` step); with no path it's kept in /work/tmp/.browser.
+- click, fill, type, select, check, press, find, upload, dialog and keyboard answer with the lines new on the page since the last look (compact snapshot diff, refs kept, 25 lines at most), or "Nothing changed on the page."; open, back and tab keep a look for the next diff.
+- `evals/browser/bench.ts`: `BENCH_MODE=vision|hybrid`, `BENCH_SHOT_SCALE`, `BENCH_SET=real` (five public sites), `BENCH_CHROME`; refused commands and site changes logged per run.
+
+## 1.4.13 (2026-11-25)
+
+### What's new
+
+- Setting up a repeating reminder that needs your OK no longer makes duplicates: Emplio saves it once and shows the card asking you to allow it.
+
+### For developers
+
+- `approvals.ts`: `approve(..., { wait: false })` puts the card up and returns at once; an Allow later runs it (as after a timeout). `askToAllow` uses it in code mode: a held ask was redone whole after the command (`Deferred`), saving the automation a second time ("already exists"), so one run saved the same reminder three times, none allowed.
+- `tasks list` shows repeating tasks with `--all` too; the already-exists error names `emplio automations update`.
+
+## 1.4.12 (2026-11-24)
+
+### What's new
+
+- Plaud and NeoSapien can now start an automation: Emplio checks for a new recording every 15 minutes, so you can have it send notes, update a task list or draft a follow-up after every conversation.
+
+### For developers
+
+- `polls/recorders.ts`: `plaud.new_recording` (`list_files`) and `neosapien.new_conversation` (the server's read-only tool whose name lists conversations, memories or recordings), every 15 minutes, at least 5. MCP answers are text: the JSON inside is read (Plaud wraps it in an untrusted-data block) and the first list of objects is taken.
+
+## 1.4.11 (2026-11-24)
+
+### What's new
+
+- On the free trial, you now get an email two days before it ends and another when it ends, so Emplio never pauses without warning. If the trial's usage runs out first, the email says to pick a plan.
+
+### For developers
+
+- Billing emails: free trial ending and ended reminders, and trial wording for the used-up email. The paused message no longer mentions the 7-day pass.
+
+## 1.4.10 (2026-11-24)
+
+### What's new
+
+- When you give an agent more of the same work, it carries on where it left off, with everything it already read, instead of starting over. It starts a separate job only for something unrelated.
+
+### For developers
+
+- `jobs.ts`: `emplio hand <agent>` adds to that agent's latest job in the chat whether it's working or finished; `--new` only for unrelated work (`MANAGER_PROMPT` hand-off rules, `AGENTS_HEADING`, `THREADS_HEADING`, usage). Manager eval: follow-ups after a finished job expect carry-on, new case for replying to an email a finished job read (Haiku: right_call 97.8%).
+
+## 1.4.9 (2026-11-24)
+
+### What's new
+
+- Fifteen more meeting notetakers: Fathom, Read AI, Otter.ai, tl;dv, Granola, Avoma, Fellow, MeetGeek, Circleback, Jamie, Leexi, Gong, Grain, Sybill and Supernormal. Connect one and Emplio can find a meeting, read its transcript, summary and action items, and start an automation when a new recording is ready. ![](frontend/public/whats-new/1.4.9-notetakers.webp)
+
+### For developers
+
+- New `own/` apps for the fifteen notetakers, each with COVERAGE notes and tests. Read AI signs in (OAuth); the rest take a pasted key (Fellow `<subdomain>:<key>`, MeetGeek `<region>:<key>`, Leexi and Gong `<id>:<secret>`).
+- New-recording triggers: webhooks where the app has them (Fathom, Granola, Avoma, Fellow, MeetGeek, Grain), polls elsewhere (`polls/<app>.ts`).
+
+## 1.4.8 (2026-11-24)
+
+### What's new
+
+- Connect your Plaud or NeoSapien recorder: sign in once, and Emplio can find a recorded conversation, read its transcript and notes, and turn them into follow-ups. ![](frontend/public/whats-new/1.4.8-recorders.webp)
+
+### For developers
+
+- `own/mcp-app.ts`: apps whose maker offers only a hosted MCP server with its own sign-in. They connect like our other OAuth apps (Connect card, connection, refresh), but sign themselves up with the server (dynamic client registration, PKCE, no client id to configure, so self-hosting works), keep the client id with the refresh token, and list the server's tools live as actions (read-only ones run unasked). `OwnApp.oauth.authorizeUrl` may now be async.
+- Plaud (`https://mcp.plaud.ai/mcp`) and NeoSapien (`https://api.neosapien.ai/mcp`), with COVERAGE notes; neither has a public API for customer accounts.
+
+## 1.4.7 (2026-11-24)
+
+### What's new
+
+- Connecting Google Meet now asks only to manage the meetings Emplio sets up, not to read all of your past meetings. Emplio can still look up the calls, people and transcripts of meetings it set up.
+
+### For developers
+
+- `google-login.ts`: Google Meet no longer requests `meetings.space.readonly`, which was left out of Google's sensitive-scope review; the requested scopes must match the reviewed ones. Conference records, participants and transcripts still work for spaces the app created (`meetings.space.created`). Privacy page wording matches (cloud).
+
+## 1.4.6 (2026-11-24)
+
+### What's new
+
+- An agent's checklist now fills in as it works, instead of all at once at the end, so you can follow along.
+- When an agent finishes but forgot to tick a step, its report reaches you straight away, and it tidies its checklist afterwards; you only hear again if a step really wasn't done.
+- Emplio starts a second job for the same agent only when the first is still working, not on every hand-off.
+
+### For developers
+
+- `jobs.ts` `RULES`: give every command the `step` it works on; `AGENTS_HEADING`: `--new` only for the same agent's second job at once.
+- `stuck.ts` `progressGuard` takes the checklist and names the open step and its `emplio plan done <n>` in the 10-command reminder.
+- `checks.ts`: unticked steps after a Done report no longer send the job back before its report; `openSteps` follows the report with the tool-saving nudge, and a new report from that run replaces the old one.
+- New `checklist` eval (ticks as it goes: 0% → 78% on Haiku).
+
+## 1.4.5 (2026-11-24)
+
+### What's new
+
+- Every reply from Emplio now has a Report flag. Tap it, pick what's wrong (offensive, harmful, sexual, wrong or something else), add a note if you like, and it goes straight to the Emplio team to review.
+
+### For developers
+
+- `POST /messages/:id/report` (`chat.ts`): checks the reply is the person's, logs it, and emails `REPORTS_EMAIL` (new, optional) through Resend with the reply's text; 502 if the email fails so the person can try again. `report-reply.tsx`: flag under each reply next to Copy, a dialog with reasons and a note. Google Play requires in-app reporting for AI-generated content.
+- Android app 1.0.1 (versionCode 2) for the Play resubmission.
+
+## 1.4.4 (2026-11-23)
+
+### What's new
+
+- Long jobs stay on track. An agent keeps a job card with its task word for word and everything added to it since, plus a checklist you can watch fill in, so it no longer forgets what it was asked halfway through or takes your latest note for the whole job. Sending it more while it works adds to its job instead of replacing it.
+- Agents work quietly and finish with one clear report in a fixed shape: whether it's done, what it did, how it checked, files, what changed outside, what's left. If an agent says it's done while checklist steps are still open or its last step failed, it's sent back to finish or explain.
+- Emplio checks the proof in every report before telling you something is done, and sends back work that only says "all good".
+- Emplio splits big work into parts that run at the same time, one job per site or client, and puts their reports together.
+- Once an agent's job is finished, new work starts a fresh job; fixes and retries of the same work still go back to it.
+- Long jobs cost less and lose less: an agent is told to save what it found to a file before its chat is summed up, the summary keeps what's done, the facts found and the next step, and summaries reuse what was already sent so they cost less.
+- A job's run gets 250 steps, and agents are reminded to keep their checklist up to date when it stops moving.
+- Emplio only puts a file in the chat when it's what you asked for or you ask to see it; an agent's working files stay out of the way.
+- Emplio answers "has someone replied" or "did the payment come in" by having an agent look, never from memory.
+- New agents are named for a role, not a single task, and money, tax, legal and compliance work goes to the stronger model.
+- The sign-in box accepts a phone number as well as an email.
+
+### For developers
+
+- `jobs.ts`: `jobCard` (the latest work word for word, additions marked by `carryOn` while busy, the job chat's checklist) after the job's rules, read again after each fold. `RULES`: work silently, checklist for multi-step work, "Getting it right" block, reports in English in `REPORT_SHAPE`. `JOB_MAX_STEPS` 250 per run, then `CARRY_ON`; `stuck.ts progressGuard` reminds every 10 counted commands the checklist doesn't move.
+- `checks.ts` (new, no model calls): after a job's run, bad endings (empty, only thinking, cut off, code pasted, "next I'll"), report shape and `doneProblem` (open checklist steps, failed last command) send it back, at most `MAX_PUSHES` (3) per piece of work.
+- `emplio hand <agent>` adds to the agent's job only while it works or asks; a finished job carries on only by id. `MANAGER_PROMPT`: split independent parts into jobs side by side (worked example), check each report's proof, a send-back goes once.
+- `compact.ts`: `forkNotes` takes notes on the chat's own request (same system, tool definitions, messages) so the cache is read, on the summary model (Haiku); transcript notes as fallback. `JOB_SYSTEM` notes template for jobs. `SAVE_FIRST`: a job past 80% of `compactAt` is told once to save to a file before it's folded. `trimSteps` cuts old outputs inside a run.
+- `sandbox.ts`: `web answer` / `web read` described; files shown only when asked for or the deliverable. `SILENT` moved to `@emplio/shared` (an import cycle left it unset in jobs.ts).
+- Evals: `bun run evals` runs every eval in parallel (~2 min), on this machine by default (`EVAL_SEND=1` sends to Braintrust); new `job-report` eval; Haiku 90%+ across them. PR 362, PR 365.
+
+## 1.4.3 (2026-11-23)
+
+### What's new
+
+- Emplio can tag people in your WhatsApp groups. Ask it to mention someone and they get a real @ tag and a notification, not just their name in the text.
+
+### For developers
+
+- `whatsapp_linked.send_message` takes `mention` (phone numbers, up to 50). The worker's `/send` lists them in `ContextInfo.MentionedJID` and makes sure the text has `@<number>` for each (added at the start if missing). In groups that hide numbers (`AddressingModeLID`) the tag uses the person's hidden id. `Mentions` in `text.go`, tested in `TestMentions`.
+- Going live needs the Go worker redeployed on the WhatsApp box.
+
+## 1.4.2 (2026-11-23)
+
+### What's new
+
+- Commands run faster: the checks around each step take one trip to Emplio's computer instead of three or four, about 0.3 seconds less per step.
+- See how long work takes: a group of steps shows its total time ("Ran 3 actions · 14s"), and an agent's card counts up while it works and keeps its time once done.
+
+### For developers
+
+- `sandbox.ts`: the out/ listing and a member's file check are printed at the end of the command itself (`afterTrailer`, `splitAfter`); asked for separately only when the command didn't reach its end. The keep-awake call runs alongside a command when the computer answered one in the last minute. Timezone and GitHub address are looked up once per reply.
+- Command outputs carry `ms` (kept from the model in `toModelOutput`); `JobInfo.ms` is a run's time so far, or in all once finished.
+- `jobs.ts`: a restart's or the step limit's "carry on" no longer ends a run's card (`runSpan`); an earlier run's end is the tool-saving nudge's time, or its last reply's start plus its steps (`runEnd`).
+
+## 1.4.1 (2026-11-22)
+
+### What's new
+
+- Fifteen more apps for client businesses, each connected by pasting a key: Klaviyo and ActiveCampaign for email marketing; Close, Apollo.io and lemlist for sales and outreach; Wrike, Teamwork.com and Smartsheet for projects; Karbon for accounting and bookkeeping firms; Everhour for time tracking; Cal.com for bookings; Typeform for forms; Figma for design; Webflow for websites; and Chargebee for subscriptions. Emplio can follow up with leads, run campaigns and outreach, move client work along, log hours, book meetings and keep sites up to date, and start work by itself when a form is filled in, a client comments on a design, a meeting is booked or a payment fails. ![](frontend/public/whats-new/1.4.1-more-client-apps.webp)
+
+### For developers
+
+- New own apps under `backend/src/integrations/own/`: `klaviyo`, `activecampaign`, `close`, `apollo`, `lemlist`, `wrike`, `teamwork`, `smartsheet`, `karbon`, `everhour`, `calcom`, `typeform`, `figma`, `webflow`, `chargebee`. Key sign-in only; each has `COVERAGE.md`, tests, and webhook triggers where the app allows them by API, polled ones otherwise.
+- Karbon needs Emplio's application key from Karbon's developer program in `KARBON_APP_KEY`; each firm pastes its own Access Key.
+- `automations.ts`: an event on the shared app webhook route that names no automation id also matches automations saved under `<app>:<connection>`. Zendesk (and any app whose webhook address carries only a token) didn't start its automations before.
+- `own/openapi.ts`: error messages also read `errorDescription` (Wrike).
+
 ## 1.4.0 (2026-11-22)
 
 ### What's new

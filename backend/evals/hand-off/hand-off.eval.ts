@@ -44,6 +44,6 @@ Eval<Input, Output, Case["expect"]>("Emplio", {
   task: decide,
   scores: scorers,
   trialCount: 3,
-  maxConcurrency: 6,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "hand-off", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });

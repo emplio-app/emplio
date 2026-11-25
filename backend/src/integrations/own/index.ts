@@ -79,6 +79,39 @@ import { zendesk } from "./zendesk";
 import { freshdesk } from "./freshdesk";
 import { dropbox_sign } from "./dropbox_sign";
 import { trello } from "./trello";
+import { klaviyo } from "./klaviyo";
+import { activecampaign } from "./activecampaign";
+import { webflow } from "./webflow";
+import { figma } from "./figma";
+import { typeform } from "./typeform";
+import { close } from "./close";
+import { apollo } from "./apollo";
+import { wrike } from "./wrike";
+import { smartsheet } from "./smartsheet";
+import { teamwork } from "./teamwork";
+import { everhour } from "./everhour";
+import { chargebee } from "./chargebee";
+import { calcom } from "./calcom";
+import { karbon } from "./karbon";
+import { lemlist } from "./lemlist";
+import { plaud } from "./plaud";
+import { neosapien } from "./neosapien";
+import { fathom } from "./fathom";
+import { readai } from "./readai";
+import { otter } from "./otter";
+import { tldv } from "./tldv";
+import { granola } from "./granola";
+import { avoma } from "./avoma";
+import { fellow } from "./fellow";
+import { meetgeek } from "./meetgeek";
+import { circleback } from "./circleback";
+import { jamie } from "./jamie";
+import { leexi } from "./leexi";
+import { gong } from "./gong";
+import { grain } from "./grain";
+import { sybill } from "./sybill";
+import { supernormal } from "./supernormal";
+import type { McpTool } from "./mcp-app";
 
 export type OwnAction = {
   description: string;
@@ -113,7 +146,7 @@ export type OwnApp = {
   // can also be signed in to on the app's own page (OAuth), where the server has our client id and secret
   oauth?: {
     ready(): boolean;
-    authorizeUrl(redirect: string, state: string): string;
+    authorizeUrl(redirect: string, state: string): string | Promise<string>;
     // the login a finished sign-in's code is worth; a plain string never runs out. `callback`: all the app's page sent back (Zoho's data centre)
     exchange(code: string, redirect: string, callback: Record<string, unknown>): Promise<string | OAuthTokens>;
     // the app can't be told to always show its consent screen, so a sign-in only finishes in the browser that started it
@@ -124,6 +157,8 @@ export type OwnApp = {
     revoke?(token: string): Promise<void>;
   };
   actions: Record<string, OwnAction>;
+  // the actions are a hosted MCP server's tools, read live (mcp-app.ts)
+  mcp?: { tools(): Promise<McpTool[]>; call(tool: string, input: unknown, token: string): Promise<string> };
   // Which plans its triggers are for (Emplio Cloud; where nothing is sold, everyone gets everything). Left out, the
   // usual: every plan, told the moment it happens where the app can. `triggers`: plans that may set one up at all;
   // `instant`: plans told the moment it happens (push), the rest polled.
@@ -149,7 +184,7 @@ export type OwnApp = {
   };
 };
 
-export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello };
+export const APPS: Record<string, OwnApp> = { asana, clickup, indiamart, exa, fly, vercel, hostinger, fireflies, anthropic, openai, google, openrouter, sarvam, livekit, mailchimp, msg91, plivo, swipe, neon, razorpay, payu, cashfree, shopify, github, stripe, todoist, hubspot, calendly, brevo, notion, airtable, googlebusiness, googlecalendar, googledocs, googlesheets, googlemeet, googlesearchconsole, googleanalytics, slack, bing_webmaster, zoho_billing, zoho_books, zoho_campaigns, zoho_desk, zoho_invoice, zoho_inventory, zoho_mail, zoho, zoom, onepassword, cloudflare, godaddy, namecheap, wix, wordpress, postgresql, mysql, whatsapp_linked, harvest, toggl, clockify, jira, linear, monday, pandadoc, shiprocket, gohighlevel, productive, pipedrive, zendesk, freshdesk, dropbox_sign, trello, klaviyo, activecampaign, webflow, figma, typeform, close, apollo, wrike, smartsheet, teamwork, everhour, chargebee, calcom, karbon, lemlist, plaud, neosapien, fathom, readai, otter, tldv, granola, avoma, fellow, meetgeek, circleback, jamie, leexi, gong, grain, sybill, supernormal };
 
 // An OAuth sign-in on its way: the connection waits under this id, so a sign-in can finish only once
 const PENDING = "oauth-pending:";
@@ -226,13 +261,22 @@ export const own: Provider = {
 
   async listActions(app, words) {
     const terms = (words ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    const mcp = APPS[app]?.mcp;
+    if (mcp)
+      return (await mcp.tools())
+        .map((t) => ({ action: `${app}.${t.name}`, description: t.description }))
+        .filter((a) => terms.every((t) => `${a.action} ${a.description}`.toLowerCase().includes(t)));
     return Object.entries(APPS[app]?.actions ?? {})
       .map(([name, a]) => ({ action: `${app}.${name}`, description: a.description }))
       .filter((a) => terms.every((t) => `${a.action} ${a.description}`.toLowerCase().includes(t)));
   },
 
   async getAction(name) {
-    const { action } = split(name);
+    const { def, action } = split(name);
+    if (def?.mcp) {
+      const tool = (await def.mcp.tools()).find((t) => t.name === name.split(".")[1]);
+      return tool ? { action: name, app: def.app, description: tool.description, title: actionTitle(name), readOnly: tool.readOnly, input: tool.input } : null;
+    }
     if (!action) return null;
     const schema = z.toJSONSchema(action.input, { io: "input" }) as { properties?: Record<string, any>; required?: string[] };
     return {
@@ -257,7 +301,7 @@ export const own: Provider = {
     const e = Date.now() + SIGN_IN_MS;
     const nonce = `${crypto.randomUUID()}_${e}`;
     const payload = Buffer.from(JSON.stringify({ app, n: nonce, back, e })).toString("base64url");
-    return { externalId: `${PENDING}${nonce}`, url: oauth.authorizeUrl(callbackUrl(app, back), `${payload}.${stateSig(payload)}`) };
+    return { externalId: `${PENDING}${nonce}`, url: await oauth.authorizeUrl(callbackUrl(app, back), `${payload}.${stateSig(payload)}`) };
   },
 
   readSignIn(app, state) {
@@ -295,7 +339,11 @@ export const own: Provider = {
   removeSignIn: async () => {},
 
   async run(name, input, login) {
-    const { action } = split(name);
+    const { def, action } = split(name);
+    if (def?.mcp) {
+      if (!login?.secret) throw new AppsError("not connected");
+      return def.mcp.call(name.split(".")[1]!, input, login.secret);
+    }
     // worded so a guessed name gets the closest real ones back (runAction)
     if (!action) throw new AppsError(`Tool ${name} not found`);
     if (!login?.secret) throw new AppsError("not connected");

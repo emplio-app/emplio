@@ -12,8 +12,8 @@ const SKILL = (name: string) => `---\nname: ${name}\ndescription: How we do this
 Eval<Input, Said, Case["expect"]>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "skills",
   // the app's files are loaded when first needed, not at the top (hand-off/hand-off.eval.ts says why)
-  data: async () => (await import("./cases")).cases().map((c) => ({ input: { chat: c.chat, world: c.world ?? [] }, expected: c.expect, metadata: { name: c.name, category: c.category, source: c.source, save: c.expect.save !== undefined }, tags: [c.category] })),
-  task: async ({ chat, world }, { metadata }) => {
+  data: async () => (await import("./cases")).cases().map((c) => ({ input: { chat: c.chat, world: c.world ?? [], job: c.job }, expected: c.expect, metadata: { name: c.name, category: c.category, source: c.source, save: c.expect.save !== undefined }, tags: [c.category] })),
+  task: async ({ chat, world, job }, { metadata }) => {
     const { reply, pretend, counted } = await import("../emplio");
     const { SKILLS } = await import("./cases");
     // the server's reminder on the first command of a reply, as in the app (src/chat.ts)
@@ -31,17 +31,25 @@ Eval<Input, Said, Case["expect"]>("Emplio", {
         const read = readOf([command])[0];
         if (read) return noted(command, step, SKILL(read));
         // a checklist, or looking up what it already has (the manager's own quick look-up before a hand-off), isn't the job yet
-        if (/^\s*emplio (plan|search)\b/.test(command) || (metadata as { save: boolean }).save) return noted(command, step, pretend(command, world));
+        if (/^\s*(emplio (plan|search|history search|history show|files list|db tables)\b|ls\b|find\b)/.test(command) || (metadata as { save: boolean }).save) return noted(command, step, pretend(command, world));
         return null;
       },
       14,
+      false,
+      undefined,
+      // a job's chat: its own rules, agent and card (../emplio.ts jobSystem)
+      job ? { agent: job.agent, card: (await import("../../src/jobs")).jobCard([{ role: "user", parts: [{ type: "text", text: (await import("@emplio/shared")).FROM_EMPLIO + job.brief }] }], []) } : undefined,
     );
+    // a tool kept from Python (emplio.tools.save in a run whose code failed before the call, or a call the stand-in
+    // never saw) still counts: the code it ran is what it chose
+    const code = (said.messages ?? []).flatMap((m) => (Array.isArray(m.content) ? (m.content as { type: string; input?: { code?: unknown } }[]) : [])).flatMap((p) => (p.type === "tool-call" && typeof p.input?.code === "string" ? [p.input.code] : []));
+    said.commands.push(...code.filter((c) => /\btools\.save\(/.test(c) && !said.commands.some((x) => /\btools[ .]save\b/.test(x))));
     // EVAL_DUMP=<file>: each try's case, expectation and commands, one JSON line each
-    if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: (metadata as { name: string }).name, commands: said.commands })}\n`);
+    if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: (metadata as { name: string }).name, commands: said.commands, text: said.text })}\n`);
     return said;
   },
   scores: scorers,
   trialCount: 3,
-  maxConcurrency: 6,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "skills", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });

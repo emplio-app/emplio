@@ -401,3 +401,20 @@ func TestPacing(t *testing.T) {
 		t.Fatal("kept group details survived a change", err)
 	}
 }
+
+func TestMentions(t *testing.T) {
+	jid := func(s string) types.JID { j, _ := types.ParseJID(s); return j }
+	sarah, tom := jid("15551234567@s.whatsapp.net"), jid("15550000000@s.whatsapp.net")
+	text, ids := Mentions("@15551234567 can you send it?", []types.JID{sarah, tom}, nil)
+	eq(t, text, "@15550000000 @15551234567 can you send it?")
+	eq(t, strings.Join(ids, ","), "15551234567@s.whatsapp.net,15550000000@s.whatsapp.net")
+	lid := func(pn types.JID) types.JID {
+		if pn == sarah {
+			return jid("999@lid")
+		}
+		return types.EmptyJID
+	}
+	text, ids = Mentions("@15551234567 thanks", []types.JID{sarah, tom}, lid)
+	eq(t, text, "@15550000000 @999 thanks")
+	eq(t, strings.Join(ids, ","), "999@lid,15550000000@s.whatsapp.net")
+}

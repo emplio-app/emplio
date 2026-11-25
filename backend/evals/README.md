@@ -12,6 +12,9 @@ evals/
                             stand-in computer that answers commands without running them
   next-step-card/           the card under a reply (src/next-step.ts)
   hand-off/                 does it do the work itself or hand it off, and to whom (src/jobs.ts MANAGER_PROMPT)
+  job-report/               a job at the end of its work: checks before calling it done, reports what's true in the
+                            shape the manager reads, asks when only the person can decide (src/jobs.ts RULES,
+                            src/checks.ts, whose checks are replayed once)
   manager/                  Emplio as manager: every job to an agent, carry on its job or --new, no browser of its
                             own, the person's words kept, reports checked (src/jobs.ts MANAGER_PROMPT)
   workday/                  whole conversations: several pieces of work, jobs' reports coming back (half done, a
@@ -36,7 +39,12 @@ background agent files each note where it belongs (`background-round`).
 From `backend/`, with `OPENROUTER_API_KEY` set (in `.env`):
 
 ```bash
-bun run eval evals                             # every behaviour
+bun run evals                                  # every behaviour at once, each in its own process (~2 min), on this machine:
+                                               # scores printed, each answer in .evals/<name>.jsonl, logs in .evals/<name>.log
+bun run evals manager job-report               # some of them
+EVAL_SEND=1 bun run evals                      # send the runs to Braintrust too (the free plan stops taking them after a while)
+EVAL_CONCURRENCY=8 bun run evals               # fewer cases at a time per eval (default 24), if the provider throttles
+bun run eval evals/manager                     # one, the plain way
 bun run eval evals/next-step-card              # one
 EVAL_EXPERIMENT=card-shorter-rules bun run eval evals/next-step-card   # name the run, to compare later
 EVAL_MODEL=google/gemini-3.8-flash bun run eval evals/next-step-card   # try another model on the same cases
@@ -44,6 +52,7 @@ bun run eval evals --no-send-logs              # no Braintrust account: scores p
 bun run eval evals/reader                      # the cheapest one, to try things out
 bun evals/failures.ts <experiment name>        # what failed, and what the model wrote
 EVAL_DUMP=a.jsonl bun run eval evals/manager --no-send-logs   # keep each answer on disk
+bun evals/manager/report.ts .evals/manager.jsonl .evals/manager.jsonl   # by category, then what failed
 bun evals/manager/report.ts a.jsonl b.jsonl    # two runs side by side, by category, then what failed in b
 bun evals/workday/report.ts a.jsonl b.jsonl    # the same for workday (EVAL_TRIALS=1 for a quick try)
 ```

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { failureGuard, outOfUsage, unlessStuck } from "./stuck";
+import { failureGuard, outOfUsage, progressGuard, unlessStuck } from "./stuck";
 
 test("same failure: warned the second time, stopped the third", () => {
   const g = failureGuard();
@@ -9,6 +9,30 @@ test("same failure: warned the second time, stopped the third", () => {
   expect(g.stuck).toBe(false);
   expect(g.check("curl x.com", fail)).toContain("Stopped");
   expect(g.stuck).toBe(true);
+});
+
+test("the same read with the same result a third time gets a note, and never stops it", () => {
+  const g = failureGuard();
+  const read = { exitCode: 0, output: "65 rows" };
+  expect(g.check("cat a.csv", read)).toBeNull();
+  expect(g.check("cat a.csv", read)).toBeNull();
+  expect(g.check("cat a.csv", read)).toContain("got exactly this");
+  expect(g.check("cat a.csv", { exitCode: 0, output: "66 rows" })).toBeNull();
+  expect(g.stuck).toBe(false);
+});
+
+test("a job's checklist gets a reminder every 10 commands it doesn't move, and is never stopped", () => {
+  const g = progressGuard(null);
+  const notes = Array.from({ length: 30 }, () => g.check(null, true));
+  expect(notes[9]).toContain("no checklist");
+  expect(notes.filter(Boolean).length).toBe(3);
+  expect(g.check([{ text: "Read mail", status: "done" }, { text: "Draft reply", status: "todo" }], true)).toBeNull();
+  const after = Array.from({ length: 10 }, () => g.check(null, true));
+  // names the open step and how to tick it
+  expect(after[9]).toContain('step 2 "Draft reply"');
+  expect(after[9]).toContain("emplio plan done 2");
+  // managing commands (emplio plan, hand, ask) aren't counted
+  expect(Array.from({ length: 20 }, () => g.check(null, false)).filter(Boolean)).toEqual([]);
 });
 
 test("different searches finding nothing never stop it", () => {

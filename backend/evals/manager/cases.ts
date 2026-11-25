@@ -17,7 +17,12 @@ import { emplio, person, type Business } from "../emplio";
 // - relay: the person answers a job's question. Their words go to that job as they are (Reddit: "delete it" came out
 //   as an apology and "Ashish did not ask"; login codes expired in the relay).
 // - quick: a question Emplio can answer from what it knows. Handing it off makes the person wait for nothing.
-export type Category = "follow" | "fresh" | "agent" | "browser" | "review" | "relay" | "quick";
+// - split: big work with parts that don't depend on each other (each client, site, month or system). Each part is its
+//   own job, all started in the same reply, so they run at once (Nov 2026: 3 of 487 hand-offs split, a books
+//   migration read two systems one after the other in one job).
+// - proof: a report in the job's shape (Status, Result, Checked, ...). A part with no proof under Checked, or a
+//   count that disagrees with a total it states, goes back to that job; proven work is told to the person.
+export type Category = "follow" | "fresh" | "agent" | "browser" | "review" | "relay" | "quick" | "split" | "proof";
 
 export type Case = {
   name: string;
@@ -28,8 +33,9 @@ export type Case = {
   world?: [string, string][];
   // hand: it hands work off. agent: any of these agents is right ("new": an agent it makes); left out, any agent but
   // a plain copy. cont: true, the job of that agent on the list carries on; false, a fresh one; left out, either.
-  // say: words (regular expressions) the brief must carry, from what the person said.
-  expect: { hand: boolean; agent?: string[]; cont?: boolean; say?: string[] };
+  // say: words (regular expressions) the brief must carry, from what the person said. split: at least this many jobs
+  // handed off in this reply.
+  expect: { hand: boolean; agent?: string[]; cont?: boolean; say?: string[]; split?: number };
 };
 
 export const AGENTS = [
@@ -66,6 +72,7 @@ export const cases = (): Case[] => [
       emplio("Posted it: reddit.example/r/homedecor/comments/k2x9/comment/m81"),
       person("good. now find every comment we've posted on r/homedecor this month, only the ones about kaveri, and list them with links"),
     ],
+    // more on the same subreddit after a finished job: that job carries on (it knows the thread)
     expect: { hand: true, agent: ["Community Manager"], cont: true, say: ["kaveri"] },
   },
   {
@@ -74,6 +81,7 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("do the same for november sales in swipe")],
+    // a new month after a finished job: the same job, which knows how it was done
     expect: { hand: true, agent: ["Data Entry"], cont: true, say: ["november"] },
   },
   {
@@ -106,6 +114,7 @@ export const cases = (): Case[] => [
     source: "real",
     business: team,
     chat: [person("check homecraft's price for the 7ft grey blackout curtain too, like you did for bedsheets")],
+    // another product on the same site after a finished job: the same job, the next of the same list
     expect: { hand: true, agent: ["Price Checker"], cont: true, say: ["7 ?ft", "blackout"] },
   },
   {
@@ -115,6 +124,22 @@ export const cases = (): Case[] => [
     business: team,
     chat: [person("chase september's unpaid ones too, the same way")],
     expect: { hand: true, agent: ["Invoice Chaser"], say: ["september"] },
+  },
+  {
+    name: "reply to the email a finished job read (real: netra)",
+    category: "follow",
+    source: "real",
+    business: {
+      agents: [...AGENTS, "- Inbox Assistant (agents/inbox-assistant, light): Reads and answers the shop's email"],
+      threads: ["- 4e6a1d03 · Inbox Assistant · Read Netra's latest email · done, 10 Nov, 2:15 pm", ...THREADS],
+    },
+    chat: [
+      person("what did netra write?"),
+      emplio("Netra (Lotus Interiors) asked whether we can ship 40 ivory cushion covers by Friday, and for the invoice in her company's name."),
+      person("reply to her: yes, 40 by friday, invoice will be in lotus interiors' name"),
+    ],
+    // the job that read her email knows the thread: a fresh one would search for it again
+    expect: { hand: true, agent: ["Inbox Assistant"], cont: true, say: ["40", "friday", "lotus"] },
   },
   // fresh
   {
@@ -229,7 +254,7 @@ export const cases = (): Case[] => [
     name: "done, but no file (real: erik's checklist)",
     category: "review",
     source: "real",
-    business: { agents: AGENTS, threads: ["- e19a77d3 · Report Maker · Stock checklist workbook · done, 12 Nov, 1:15 pm", ...THREADS] },
+    business: { agents: AGENTS, threads: ["- e19a77d3 · Report Maker · Stock checklist workbook · done, 10 Nov, 1:15 pm", ...THREADS] },
     chat: [
       person("make an excel checklist of every item in the stock sheet with columns for photo proof and notes, so raj can fill it"),
       emplio("On it: building the checklist now."),
@@ -248,7 +273,7 @@ export const cases = (): Case[] => [
       emplio("On it."),
       report(
         'b81d04aa "October unpaid invoices" (invoice-chaser): done, 18 actions',
-        "Emailed all 3 unpaid customers (Anita Desai, Hotel Sai Residency, Blue Lotus Cafe) with their amount and due date.\nApps, as recorded: gmail.send_email ok, 12 Nov, 2:01 pm; gmail.send_email failed (invalid recipient), 12 Nov, 2:02 pm; gmail.send_email ok, 12 Nov, 2:02 pm",
+        "Emailed all 3 unpaid customers (Anita Desai, Hotel Sai Residency, Blue Lotus Cafe) with their amount and due date.\nApps, as recorded: gmail.send_email ok, 10 Nov, 2:01 pm; gmail.send_email failed (invalid recipient), 10 Nov, 2:02 pm; gmail.send_email ok, 10 Nov, 2:02 pm",
       ),
     ],
     expect: { hand: true, agent: ["Invoice Chaser"], cont: true },
@@ -279,7 +304,7 @@ export const cases = (): Case[] => [
       emplio("On it."),
       report(
         'b81d04aa "October unpaid invoices" (invoice-chaser): done, 15 actions',
-        "Emailed all 3 unpaid customers with their amount and due date: Anita Desai ₹6,400, Hotel Sai Residency ₹84,200, Blue Lotus Cafe ₹31,750.\nApps, as recorded: gmail.send_email ok, 12 Nov, 2:01 pm; gmail.send_email ok, 12 Nov, 2:02 pm; gmail.send_email ok, 12 Nov, 2:02 pm",
+        "Emailed all 3 unpaid customers with their amount and due date: Anita Desai ₹6,400, Hotel Sai Residency ₹84,200, Blue Lotus Cafe ₹31,750.\nApps, as recorded: gmail.send_email ok, 10 Nov, 2:01 pm; gmail.send_email ok, 10 Nov, 2:02 pm; gmail.send_email ok, 10 Nov, 2:02 pm",
       ),
     ],
     expect: { hand: false },
@@ -301,7 +326,7 @@ export const cases = (): Case[] => [
     name: "a sign-in code (real: government portal)",
     category: "relay",
     source: "real",
-    business: asking("- 3b7f00a1 · Data Entry · Enter October sales into Swipe · asking, 12 Nov, 3:05 pm"),
+    business: asking("- 3b7f00a1 · Data Entry · Enter October sales into Swipe · asking, 10 Nov, 3:05 pm"),
     chat: [person("enter october sales into swipe"), emplio("Swipe sent a sign-in code to your phone. What is it?"), person("482913")],
     expect: { hand: true, agent: ["Data Entry"], cont: true, say: ["482913"] },
   },
@@ -356,6 +381,124 @@ export const cases = (): Case[] => [
     source: "written",
     business: team,
     chat: [person("ok thanks, that's all for today")],
+    expect: { hand: false },
+  },
+  // split
+  {
+    name: "two systems side by side (real: swipe to zoho)",
+    category: "split",
+    source: "real",
+    business: team,
+    chat: [person("compare october sales in swipe with what's in zoho books and list every invoice that's missing or different")],
+    // a comparison needs both lists at once: one job is right, two (then a compare) is fine too
+    expect: { hand: true, say: ["october"] },
+  },
+  {
+    name: "one check per site",
+    category: "split",
+    source: "written",
+    business: team,
+    chat: [person("check the price of the king size ivory bedsheet at homecraft, fabindia and urban ladder")],
+    expect: { hand: true, split: 2, say: ["king", "ivory"] },
+  },
+  {
+    name: "each client on its own",
+    category: "split",
+    source: "written",
+    business: team,
+    chat: [person("send each of our 3 hotel clients (sai residency, blue lotus, green leaf) their statement of account for october from zoho")],
+    expect: { hand: true, split: 2, say: ["october"] },
+  },
+  {
+    name: "one small thing isn't split",
+    category: "split",
+    source: "written",
+    business: team,
+    chat: [person("find 3 suppliers of jute cushion covers in kolkata with prices")],
+    expect: { hand: true, agent: ["Supplier Finder"] },
+  },
+  {
+    name: "two dashboards (held out)",
+    category: "split",
+    source: "written",
+    business: team,
+    chat: [person("download october's shipping invoices from the delhivery and the bluedart dashboards")],
+    expect: { hand: true, split: 2, say: ["october"] },
+  },
+  // proof
+  {
+    name: "done, but 'all good' for a change in an app (held out)",
+    category: "proof",
+    source: "written",
+    business: { agents: AGENTS, threads: ["- 3b7f00a1 · Data Entry · Update cushion prices in Zoho · done, 10 Nov, 6:10 pm", ...THREADS.filter((t) => !t.startsWith("- 3b7f00a1"))] },
+    chat: [
+      person("raise all cushion cover prices in zoho by 10%"),
+      emplio("On it."),
+      report(
+        '3b7f00a1 "Update cushion prices in Zoho" (data-entry): done, 12 actions',
+        "Status: Done\nResult: Raised the price of every cushion cover item by 10%.\nChecked: all good.\nFiles: none\nChanged outside: cushion cover prices in Zoho Books\nLeft: nothing",
+      ),
+    ],
+    expect: { hand: true, agent: ["Data Entry"], cont: true },
+  },
+  {
+    name: "done, but sends with no read-back",
+    category: "proof",
+    source: "written",
+    business: team,
+    chat: [
+      person("chase october's unpaid invoices"),
+      emplio("On it."),
+      report(
+        'b81d04aa "October unpaid invoices" (invoice-chaser): done, 9 actions',
+        "Status: Done\nResult: Reminders sent to all 3 unpaid customers.\nChecked: all sent fine.\nFiles: none\nChanged outside: 3 reminder emails\nLeft: nothing",
+      ),
+    ],
+    expect: { hand: true, agent: ["Invoice Chaser"], cont: true },
+  },
+  {
+    name: "done, but the count is short",
+    category: "proof",
+    source: "written",
+    business: { agents: AGENTS, threads: ["- 3b7f00a1 · Data Entry · Copy October invoices from Swipe to Zoho · done, 10 Nov, 6:10 pm", ...THREADS.filter((t) => !t.startsWith("- 3b7f00a1"))] },
+    chat: [
+      person("copy all october invoices from swipe into zoho books"),
+      emplio("On it."),
+      report(
+        '3b7f00a1 "Copy October invoices from Swipe to Zoho" (data-entry): done, 40 actions',
+        "Status: Done\nResult: Created 50 drafts in Zoho, INV-001041 to INV-001090.\nChecked: Swipe shows 52 invoices for October; 50 drafts created with no errors.\nFiles: none\nChanged outside: 50 draft invoices in Zoho Books\nLeft: nothing",
+      ),
+    ],
+    expect: { hand: true, agent: ["Data Entry"], cont: true },
+  },
+  {
+    name: "done with proof",
+    category: "proof",
+    source: "written",
+    business: team,
+    chat: [
+      person("chase october's unpaid invoices"),
+      emplio("On it."),
+      report(
+        'b81d04aa "October unpaid invoices" (invoice-chaser): done, 14 actions',
+        "Status: Done\nResult: Reminders sent: Anita Desai INV-000981 ₹6,400; Hotel Sai Residency INV-000990 ₹84,200; Blue Lotus Cafe INV-001003 ₹31,750.\nChecked: read the sent folder back: the 3 reminders are there, each to the right address with its invoice number and amount.\nFiles: none\nChanged outside: 3 emails from meera@kaveri.example\nLeft: nothing\nApps, as recorded: gmail.send_email ok, 10 Nov, 2:01 pm; gmail.send_email ok, 10 Nov, 2:02 pm; gmail.send_email ok, 10 Nov, 2:02 pm",
+      ),
+    ],
+    expect: { hand: false },
+  },
+  {
+    name: "partly done, waiting on the person",
+    category: "proof",
+    source: "written",
+    business: team,
+    chat: [
+      person("pay the surat supplier's bill BL-2240 in zoho"),
+      emplio("On it."),
+      report(
+        '3b7f00a1 "Pay Shree Textiles bill BL-2240" (data-entry): done, 6 actions',
+        "Status: Partly done\nResult: BL-2240 is Shree Textiles, ₹1,42,000, open.\nChecked: read the bill from Zoho.\nFiles: none\nChanged outside: nothing\nLeft: HDFC Current has ₹96,300, too little; ICICI Current has ₹2,10,450. Meera must say which account to pay from, or move money first.",
+      ),
+    ],
     expect: { hand: false },
   },
   // work that looked small and stayed with Emplio (Nov 2026: 104 of 146 replies of 3+ commands never handed off)

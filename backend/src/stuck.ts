@@ -5,10 +5,16 @@
 // Exit code 1 alone isn't counted towards the 8: it's grep, test or diff saying "no match", not an error.
 // One guard per run: a chat reply, or one job.
 
+import type { PlanStep } from "@emplio/shared";
+
 const SAME = 3;
 const IN_A_ROW = 8;
 // enough of the end of an output to tell one error from another, without a changing timestamp up top mattering
 const TAIL = 500;
+
+// A command that worked, run again exactly and with exactly the same result: reading what it already has
+const SAME_RESULT =
+  "[You ran exactly this before and got exactly this. Work from what you already have instead of reading it again.]";
 
 const AGAIN =
   "[This command failed exactly the same way before. Don't run it again as it is: try a really different way.]";
@@ -36,17 +42,40 @@ export function failureGuard() {
     check(command: string, result: { exitCode?: unknown; output?: unknown; stopped?: unknown }): string | null {
       // stopped by the person, or started in the background: nothing to judge
       if (result.stopped || typeof result.exitCode !== "number") return null;
-      if (result.exitCode === 0) return (inARow = 0), null;
-      if (result.exitCode !== 1) inARow++;
       const key = `${command.trim().replace(/\s+/g, " ")}\0${String(result.output ?? "").slice(-TAIL)}`;
       const times = (seen.get(key) ?? 0) + 1;
       seen.set(key, times);
+      if (result.exitCode === 0) return (inARow = 0), times === 3 ? SAME_RESULT : null;
+      if (result.exitCode !== 1) inARow++;
       if (times >= SAME || inARow >= IN_A_ROW) return (stuck = true), STOP;
       return times === 2 ? AGAIN : null;
     },
   };
 }
 export type FailureGuard = ReturnType<typeof failureGuard>;
+
+// A job's checklist (emplio plan) going stale: every EVERY commands without it moving, a reminder to write one or
+// tick what's done (as Claude Code reminds about its to-do list). Never stops the job: its time limit and the
+// failure guard do that. Commands that only manage (emplio plan, hand, ask) aren't counted.
+const EVERY = 10;
+const WRITE_PLAN = "[Reminder: no checklist yet. If this takes more than a few steps, write one (emplio plan set ...), ticking what's done already.]";
+// names the open step: a bare "tick what's done" was acted on about 1 time in 5 (live, Nov 24)
+const TICK = (n: number, text: string) =>
+  `[Checklist: step ${n} "${text}" is still open after ${EVERY} commands. If it's done, tick it now (emplio plan done ${n}). Give each command the step it works on (step: <n>): that ticks as you go.]`;
+export function progressGuard(plan: PlanStep[] | null | undefined) {
+  let since = 0;
+  let steps = plan ?? [];
+  return {
+    // what to add to a command's output, if anything; moved: the checklist as the command left it, when it changed
+    check(moved: PlanStep[] | null | undefined, counted: boolean): string | null {
+      if (moved) return (since = 0), (steps = moved), null;
+      if (!counted || ++since % EVERY) return null;
+      if (!steps.length) return WRITE_PLAN;
+      const open = steps.findIndex((s) => s.status !== "done");
+      return open < 0 ? null : TICK(open + 1, steps[open]!.text);
+    },
+  };
+}
 
 // A run's prepareStep, with its commands taken away once the guard says it's stuck.
 export const unlessStuck =

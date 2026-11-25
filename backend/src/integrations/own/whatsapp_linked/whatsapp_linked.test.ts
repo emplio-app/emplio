@@ -91,6 +91,8 @@ test("reads and sends go to the account on the WhatsApp server", async () => {
   await own.run("whatsapp_linked.send_message", { to: "+1 555 000 1111", text: "On its way", reply_to: "ABC" }, login, "o");
   expect(calls[1]!.method).toBe("POST");
   expect(JSON.parse(calls[1]!.body)).toEqual({ to: "+1 555 000 1111", text: "On its way", reply_to: "ABC" });
+  await own.run("whatsapp_linked.send_message", { to: "Northwind team", text: "@15550001111 please check", mention: ["+1 555 000 1111"] }, login, "o");
+  expect(JSON.parse(calls[2]!.body)).toEqual({ to: "Northwind team", text: "@15550001111 please check", mention: ["+1 555 000 1111"] });
   stub(() => json({ error: "WhatsApp messages only go to people and groups this WhatsApp already chats with." }, 400));
   await expect(own.run("whatsapp_linked.send_message", { to: "x", text: "hi" }, login, "o")).rejects.toThrow(/already chats with/);
 });

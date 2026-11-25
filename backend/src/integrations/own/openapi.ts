@@ -131,7 +131,7 @@ export async function call(api: Api, key: string, send: Send, input: Record<stri
     const text = await res.text();
     const j = parseLine(text);
     // Twirp (LiveKit) says {"code", "msg"}; Plivo {"error": "..."}; Razorpay {"error": {"description"}}
-    const why = j?.error?.message ?? j?.error?.error_msg ?? j?.error?.description ?? j?.message ?? j?.Message ?? j?.msg ?? j?.description ?? (typeof j?.error === "string" ? j.error : undefined) ?? j?.detail ?? text;
+    const why = j?.error?.message ?? j?.error?.error_msg ?? j?.error?.description ?? j?.message ?? j?.Message ?? j?.msg ?? j?.description ?? j?.errorDescription ?? (typeof j?.error === "string" ? j.error : undefined) ?? j?.detail ?? text;
     // field-by-field validation errors: {"errors": {"name": ["is taken"]}} (Laravel-style), {"errors": [{"field", "message"}]}
     // (Freshdesk), {"details": {"email": [{"description"}]}} (Zendesk)
     const say = (x: any): string => (typeof x === "string" ? x : (x?.description ?? x?.message ?? JSON.stringify(x)));

@@ -213,8 +213,9 @@ export const whatsapp_linked: OwnApp = {
         to: chat.describe("Who to send it to: a chat id from list_chats, a phone number with country code, or the chat's exact name"),
         text: z.string().min(1).max(65_000).describe("The message"),
         reply_to: message.optional().describe("Reply to this message (it's quoted above yours)"),
+        mention: z.array(z.string()).max(50).optional().describe("People to tag (they get notified), by phone number with country code. Write @ and their number in the text where the tag goes, e.g. \"@15551234567 can you check?\"; anyone not written in is tagged at the start"),
       }),
-      run: async (i: { to: string; text: string; reply_to?: string }, key) => wa("POST", `/accounts/${account(key)}/send`, i),
+      run: async (i: { to: string; text: string; reply_to?: string; mention?: string[] }, key) => wa("POST", `/accounts/${account(key)}/send`, i),
     },
     send_file: {
       description: "Send a file from the computer on WhatsApp: photos and videos show as such, audio as audio (.ogg as a voice note), a .webp image as a sticker if asked, anything else as a document. Same rules as send_message.",

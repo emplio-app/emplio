@@ -43,7 +43,7 @@ test("a sign-in-only app is offered only where its OAuth app is set up, and take
 
 test("the code flow asks for the scopes and sends the client in the form", async () => {
   const o = demo();
-  const page = new URL(o.authorizeUrl("https://api.test/oauth/x/callback", "st"));
+  const page = new URL(await o.authorizeUrl("https://api.test/oauth/x/callback", "st"));
   expect(Object.fromEntries(page.searchParams)).toEqual({ response_type: "code", client_id: "did", redirect_uri: "https://api.test/oauth/x/callback", state: "st", scope: "a b", prompt: "consent" });
   const sent = stub({ access_token: "a", refresh_token: "r", expires_in: 3600 });
   expect(await o.exchange("c", "https://r", {})).toEqual({ token: "a", refreshToken: "r", expiresIn: 3600 });
@@ -52,7 +52,7 @@ test("the code flow asks for the scopes and sends the client in the form", async
 
 test("Basic auth keeps the secret out of the form, and scopes can stay on the app's site", async () => {
   const o = demo({ basic: true, scope: undefined });
-  expect(new URL(o.authorizeUrl("https://r", "s")).searchParams.has("scope")).toBe(false);
+  expect(new URL(await o.authorizeUrl("https://r", "s")).searchParams.has("scope")).toBe(false);
   const sent = stub({ access_token: "a", expires_in: 3600 });
   await o.refresh!("r1");
   expect(sent[0]!.headers.Authorization).toBe(`Basic ${Buffer.from("did:dsec").toString("base64")}`);
@@ -70,7 +70,7 @@ test("a revoked refresh token means signing in again; any other failure doesn't"
 
 test("Zoho: signs in at the client's data centre and carries on at the person's", async () => {
   const o = zohoOAuth("Zoho", "ZohoMail.messages.ALL");
-  const page = new URL(o.authorizeUrl("https://r", "s"));
+  const page = new URL(await o.authorizeUrl("https://r", "s"));
   expect(page.origin).toBe("https://accounts.zoho.in");
   expect(page.searchParams.get("access_type")).toBe("offline");
   expect(page.searchParams.get("prompt")).toBe("consent");

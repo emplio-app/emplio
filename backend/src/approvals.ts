@@ -96,7 +96,10 @@ type Own = { title: string; readOnly: boolean; appName: string; logo?: string; a
 export class Deferred extends Error {}
 
 // null: go ahead. A string: why not, for the agent. `account`: an app action's; `own`: an action that isn't an app's.
-export async function approve(s: Session, action: string, input: unknown, { account, own }: { account?: string; own?: Own } = {}): Promise<string | null> {
+// wait false: the card goes up and the command moves on at once; an Allow later runs it then (as after a timeout).
+// For asks that come after something was already done (an automation saved, then its runs allowed): a code-mode
+// ask that waits is redone whole after the command (Deferred), and the redo would do that something twice.
+export async function approve(s: Session, action: string, input: unknown, { account, own, wait = true }: { account?: string; own?: Own; wait?: boolean } = {}): Promise<string | null> {
   // "Just do it" counts only where someone is watching; background runs change things only when "Always allow"ed
   const asks = !!own?.alwaysAsk;
   if (s.settings.approvals === "auto" && !s.automation && !asks) return null;
@@ -115,7 +118,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     return `error: ${action} changes something, and a run nobody is watching may only do what its automation lists under actions: and ${s.user.name} allowed (or what they've said "Always allow" to). Don't do it another way: say in your last message exactly what you'd do, and that it needs adding to the automation's actions and allowing in Automations.`;
   if (s.task) return `error: ${action} needs ${s.user.name}'s OK first, and nobody can answer in a task's chat. Don't do it another way: set the task to waiting on ${s.user.name} (emplio tasks update <id> --status waiting --waiting "${s.user.name}'s OK to ...") and say exactly what you'd do, so they can say yes in their chat.`;
   // asked live, while code-mode code runs (sandbox.ts liveRoutes): asked after the command instead, as without code mode
-  if (s.live) throw new Deferred();
+  if (s.live && wait) throw new Deferred();
   if (!s.notify) return `error: ${action} needs ${s.user.name}'s OK first, which can't be asked from here. Leave it to the main chat.`;
 
   const app = own ? { name: own.appName, logo: own.logo } : await connectCard(action.split(".")[0]!).catch(() => null);
@@ -134,6 +137,15 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card });
   notify(s.user.id);
   s.notify(card);
+  const keepLater = () => {
+    const run = own?.run ?? (() => runAction({ workspaceId: s.workspaceId, userId: s.user.id }, action, input, { conversationId: s.conversationId, account }));
+    later.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card, run });
+    setTimeout(() => later.get(card.id) && (later.delete(card.id), void keep(card.id, s.user.id, { decision: "timeout" }).catch(() => {})), wait ? VALID_MS - WAIT_MS : VALID_MS);
+  };
+  if (!wait) {
+    keepLater();
+    return `Asked ${s.user.name} on a card to allow ${card.title}. If they tap Allow it's done then and you'll see it in this chat; the card stays up for ${VALID_MS / 3_600_000} hours. Say in a few words that it's waiting for their OK; don't ask it again.`;
+  }
   const decision = await new Promise<NonNullable<Approval["decision"]>>((resolve) => {
     const done = (d: NonNullable<Approval["decision"]>) => {
       clearTimeout(timer);
@@ -146,9 +158,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     waiting.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, decide: done });
   });
   if (decision === "timeout") {
-    const run = own?.run ?? (() => runAction({ workspaceId: s.workspaceId, userId: s.user.id }, action, input, { conversationId: s.conversationId, account }));
-    later.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card, run });
-    setTimeout(() => later.get(card.id) && (later.delete(card.id), void keep(card.id, s.user.id, { decision: "timeout" }).catch(() => {})), VALID_MS - WAIT_MS);
+    keepLater();
     return `error: no answer from ${s.user.name} yet, so ${action} wasn't run. Their card stays up for ${VALID_MS / 3_600_000} hours: if they tap Allow it's done then and you'll see it in this chat; after that it expires. Say in a few words that it's waiting for their OK; don't ask it again.`;
   }
   s.notify({ ...card, decision });

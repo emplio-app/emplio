@@ -48,7 +48,7 @@ Eval<Input, Output, Case["expect"]>("Emplio", {
   experimentName: process.env.EVAL_EXPERIMENT || "manager",
   data: async () => {
     const { THREADS_HEADING } = await import("../../src/jobs");
-    const carriesOn = THREADS_HEADING.includes("--new");
+    const carriesOn = THREADS_HEADING.includes("adds to its job");
     return (await import("./cases")).cases().map((c) => ({
       input: { business: c.business ?? {}, chat: c.chat, world: c.world ?? [], carriesOn, name: c.name, category: c.category, expect: c.expect },
       expected: c.expect,
@@ -59,6 +59,6 @@ Eval<Input, Output, Case["expect"]>("Emplio", {
   task,
   scores: [...scorers, staysEmplio],
   trialCount: 3,
-  maxConcurrency: 6,
+  maxConcurrency: Number(process.env.EVAL_CONCURRENCY) || 24,
   metadata: { behaviour: "manager", model: process.env.EVAL_MODEL || MODEL_SETS.save.chatModel },
 });

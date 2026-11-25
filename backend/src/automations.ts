@@ -486,6 +486,9 @@ export async function askToAllow(s: Session, a: Automation) {
   const allow = () => allowActions(s, a.name, [...a.actions.filter((x) => x.allowed), ...missing].map((x) => x.action));
   const refused = await approve(s, "automation.allow", { automation: a.name, "on every run": list }, {
     own: { title: `Let "${a.name}" do this on every run: ${list}`, readOnly: false, appName: missing[0]!.app, logo: missing[0]!.logo, alwaysAsk: true, run: allow },
+    // in code mode, not held: a held ask is redone whole after the command, saving the automation a second time
+    // ("already exists"), so a run once saved the same reminder three times
+    wait: !s.live,
   });
   if (refused) return `${refused}\n(Until it's allowed, runs can't do: ${list}. It can also be allowed in Automations.)`;
   await allow();
@@ -520,7 +523,7 @@ export async function saveAutomation(who: Ctx, name: string, text: string, mode:
   if (!canManage(who)) throw new AutomationError("only the owner or an admin can change automations");
   const path = checkName(name);
   const exists = (await readFile(who.workspaceId, REPO, path)) !== null;
-  if (mode === "add" && exists) throw new AutomationError(`${name} already exists; change it with update`);
+  if (mode === "add" && exists) throw new AutomationError(`${name} already exists (emplio automations show ${name}); change it with emplio automations update`);
   if (mode === "update" && !exists) throw new AutomationError(`no automation ${name}; create it with add`);
   const parsed = parseAutomation(text, await timezoneOf(who.userId));
   // refuse broken settings up front instead of committing them
@@ -719,7 +722,7 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
 }
 
 // Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
-async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]) {
+async function onAppEvents(app: string, fallback: string[], events: WebhookEvent[]) {
   const { push } = OWN_APPS[app]!;
   for (const event of events) {
     if (!event.triggers.length) continue;
@@ -729,11 +732,12 @@ async function onAppEvents(app: string, fallback: string, events: WebhookEvent[]
       if (seen.size > 10_000) seen.delete(seen.values().next().value!);
     }
     const names = event.triggers.map((t) => `${app}.${t}`);
-    const id = event.watch ?? fallback;
+    // no id from the app: the address it came to, or the connection itself (apps whose address carries only a token)
+    const ids = event.watch ? [event.watch] : fallback;
     const rows = await db
       .select()
       .from(automations)
-      .where(and(eq(automations.externalId, id), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
+      .where(and(inArray(automations.externalId, ids), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
     for (const row of rows) if (push?.wanted?.(row.triggerConfig, event.data) ?? true) await fire(row, "trigger", event.data);
   }
 }
@@ -870,7 +874,7 @@ export async function automationRoutes(app: FastifyInstance) {
       reply.headers(got.headers ?? {});
       void got
         .events()
-        .then((events) => onAppEvents(app, [app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), events))
+        .then((events) => onAppEvents(app, [...new Set([[app, connection, ...(rest ? [rest.split("/")[0]!] : [])].join(":"), `${app}:${connection}`])], events))
         .catch((error) => req.log.error(error, `handling a ${app} event failed`));
       return got.reply ?? { ok: true };
     };

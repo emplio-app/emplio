@@ -10,7 +10,8 @@ export const GOOGLE_SCOPES: Record<"googlecalendar" | "googledocs" | "googleshee
   googlecalendar: [`${AUTH}calendar.events`, `${AUTH}calendar.readonly`],
   googledocs: [`${AUTH}documents`, `${AUTH}drive.file`],
   googlesheets: [`${AUTH}spreadsheets`, `${AUTH}drive.file`],
-  googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.readonly`, `${AUTH}meetings.space.settings`],
+  // no meetings.space.readonly: left out of the Google review, so past calls are only ones in rooms Emplio made
+  googlemeet: [`${AUTH}meetings.space.created`, `${AUTH}meetings.space.settings`],
   // the one scope behind every Business Profile API; Google classes it sensitive, not restricted
   googlebusiness: [`${AUTH}business.manage`],
   googlesearchconsole: [`${AUTH}webmasters`],

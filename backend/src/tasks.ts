@@ -593,8 +593,9 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
       mine: !("all" in opts) && !("ai" in opts) && who === undefined && !c,
       client: c ?? undefined,
     });
-    // the repeating and event ones too, so the work list is one list (only in the plain list, not a filtered one)
-    const plain = !Object.keys(opts).length;
+    // the repeating and event ones too, so the work list is one list (not when filtered to done, due or someone's: a
+    // run once couldn't find the reminder it had just set up with --all, and set it up twice more)
+    const plain = !["done", "due", "who"].some((k) => k in opts);
     const repeating = plain ? (await listAutomations(w.workspaceId).catch(() => [])).filter((a) => a.enabled && !a.error && a.when !== "manual") : [];
     if (data) return JSON.stringify([...list.map(asData), ...repeating.map((a) => ({ repeats: a.when === "schedule" ? a.schedule : `on ${a.trigger}`, agent: a.agent ?? null, name: a.name }))]);
     const rep = repeating.map((a) => `repeats\t${a.when === "schedule" ? `"${a.schedule}"` : `on ${a.trigger}`}\t${a.agent ?? "you"}\t${a.name}${a.clients ? ` (for ${a.clients.includes("*") ? "every active client" : a.clients.join(", ")})` : ""}`);

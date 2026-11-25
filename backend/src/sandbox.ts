@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Box } from "./computer";
 import { cloud } from "./cloud";
 import { basename } from "node:path";
-import { MODEL_MAX, inName, readStored, storeFile } from "./files";
+import { MAX_SIDE as SHOT_SIDE, MODEL_MAX, inName, readStored, storeFile } from "./files";
 import { addMember, changeMember, listTeam, setManager } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, pushBundle, readFile } from "./gitea";
 import { activityCommand, record } from "./activity";
@@ -308,7 +308,7 @@ emplio browser fill @e5 "text"        # clears, then types; type @e5 "more" adds
 emplio browser select @e4 "Shipped"   # a dropdown, by its label
 emplio browser check @e6              # uncheck too
 emplio browser press Enter
-Refs change when the page does: after a click that opens something or goes somewhere, snapshot again.
+click, fill, select, press and find answer with what's new on the page (refs included): snapshot only for the rest.
 Long page: emplio browser snapshot -i | grep -i "save\|next" , or one part: snapshot -i -s "main"
 
 ## Without a ref
@@ -326,7 +326,8 @@ emplio browser read                    # the page's text
 emplio browser eval "document.title"   # a script; long ones: eval --stdin <<'EOF' ... EOF
 
 ## Seeing it
-emplio browser screenshot /work/tmp/x.png, then emplio view /work/tmp/x.png
+emplio browser screenshot             # you see the page (screenshot /work/tmp/x.png keeps a copy there)
+emplio browser click 640 320          # a spot in the screenshot you last saw; you see the page after it
 screenshot --annotate: numbered labels, number N is ref @eN
 
 ## Tabs and pop-ups
@@ -612,8 +613,8 @@ else: sys.exit(calls(args[1:]))
 // read (Nov 2026): sent with the first browser result and by emplio.browser.help(). ponytail: by hand from agent-browser
 // v0.41.2's commands; bump it with the version in EZ
 export const BROWSER_COMMANDS = String.raw`# emplio.browser.<command>(...): one step on this chat's browser, which stays open between runs. Inputs in order, flags as
-# keywords (snapshot("-i") works too). ref: "@e3" from the latest snapshot, or a CSS selector. Refs go stale when the page
-# changes: snapshot again. A failing step raises EmplioError.
+# keywords (snapshot("-i") works too). ref: "@e3" from the latest snapshot, or a CSS selector. click, fill, select, press
+# and find answer with what's new on the page (refs included): snapshot only for the rest. A failing step raises EmplioError.
 # Go
 open(url); back(); forward(); reload(); pushstate(url)   # pushstate: in-app navigation on single-page sites
 close()                                   # the next step starts a fresh browser (sign-ins are kept)
@@ -624,7 +625,7 @@ snapshot(interactive=True, urls=True, compact=True, depth=3, selector="#main")  
 read() -> str                             # the page as readable text; read(url): another page, without leaving this one
 get("text"|"html"|"value"|"box"|"styles", ref) -> str; get("attr", ref, name); get("title"|"url"); get("count", css)
 is_("visible"|"enabled"|"checked", ref) -> str
-screenshot(path, full=False, annotate=False)   # annotate: [N] labels are refs @eN; then emplio.view(path)
+screenshot([path], full=False, annotate=False)   # you see it; annotate: [N] labels are refs @eN
 pdf(path)                                 # the page as a PDF
 console(); errors()                       # the page's console messages and script errors
 # Act
@@ -638,7 +639,8 @@ upload(file_box_or_upload_button, *files) # files on this computer
 find(by, value, action, [text], name=None, exact=False)   # no ref needed
 #   by: role|text|label|placeholder|alt|title|testid, or first|last (css) and nth (n, css); action: click|fill|type|hover|focus|check|uncheck|text
 #   find("role", "button", "click", name="Save"); find("label", "Email", "fill", "a@b.com"); find("nth", 2, "a", "click")
-mouse("move", x, y); mouse("down"|"up", "left"); mouse("wheel", dy)   # no ref works: a spot from an annotated screenshot
+click(x, y)                               # a spot in the screenshot you last saw; you see the page after it
+mouse("move", x, y); mouse("down"|"up", "left"); mouse("wheel", dy)
 # Wait
 wait(ref); wait(ms); wait(text="Saved"); wait(url="**/done"); wait(load="load"|"domcontentloaded"|"networkidle"); wait(fn="window.ready")
 # Script
@@ -914,6 +916,35 @@ JS
       "set viewport"|"set device") ;;
       *) [ -f "$size" ] && { was=(); while IFS= read -r w; do was+=("$w"); done < "$size"; run "\${was[@]}" >/dev/null 2>&1; } ;;
     esac
+    # click <x> <y>: a spot in the last screenshot, then a look at the page. The model sees screenshots shrunk to
+    # ${SHOT_SIDE}px on their long side at most (files.ts forModel), so its x y are turned back into the page's own
+    if [ "$1" = click ] && [ $# = 3 ] && [ -n "$2$3" ] && [ -z "\${2//[0-9.]/}" ] && [ -z "\${3//[0-9.]/}" ]; then
+      # a native dropdown opens a list screenshots don't show (and on a Mac, keys can't pick from): it's named instead
+      at="$(run eval "(() => { const d = devicePixelRatio, s = d * Math.min(1, ${SHOT_SIDE} / (Math.max(innerWidth, innerHeight) * d)), x = Math.round($2 / s), y = Math.round($3 / s); const box = document.elementFromPoint(x, y)?.closest('select'); if (box) return 'SELECT|' + (box.id ? '#' + CSS.escape(box.id) : box.name ? 'select[name=' + box.name + ']' : '') + '|' + [...box.options].map((o) => o.text.trim()).join(', '); return x + ' ' + y })()" 2>/dev/null | tr -d '"')"
+      case "$at" in SELECT\|*)
+        q="$(printf '%s' "$at" | cut -d'|' -f2)"; [ -n "$q" ] || q="@<its ref from snapshot -i>"
+        echo "emplio browser click: that's a dropdown ($(printf '%s' "$at" | cut -d'|' -f3-)); clicking can't pick from it. Pick by name: emplio browser select '$q' \\"<option>\\"" >&2
+        exit 1 ;;
+      esac
+      # no page size read (a page still loading): no guessing where to click
+      case "$at" in [0-9]*" "[0-9]*) ;; *) echo "emplio browser click: the page isn't ready, try again in a moment" >&2; exit 1 ;; esac
+      run mouse move \${at% *} \${at#* } >/dev/null && run mouse down left >/dev/null && run mouse up left >/dev/null || { echo "emplio browser click: clicking at $2 $3 failed" >&2; exit 1; }
+      sleep 0.5
+      set -- screenshot
+    fi
+    # a screenshot is shown to you too (as emplio view would); with no file named it's kept in /work/tmp/.browser
+    shot=
+    if [ "$1" = screenshot ]; then
+      for a in "\${@:2}"; do case "$(lower "$a")" in *.png|*.jpg|*.jpeg) shot="$a" ;; esac; done
+      [ -n "$shot" ] || { mkdir -p "$W/tmp/.browser"; shot="$W/tmp/.browser/shot-$(date +%s)-$RANDOM.png"; set -- "$@" "$shot"; }
+    fi
+    # After a step that changes the page, its answer says what changed (a message, a box that opened, a new page), refs
+    # included, so no separate look is needed. A page's refs stay the same for what didn't change.
+    # ponytail: two extra page reads per step; skip on huge pages if that turns out slow
+    mkdir -p "$guides"; look="$guides/look-$BROWSER_SESSION"; acts=
+    case "$1" in click|dblclick|fill|type|select|check|uncheck|press|find|upload|dialog|keyboard)
+      [ -n "$shot" ] || { acts=1; [ -s "$look" ] || { run snapshot -c > "$look" 2>/dev/null; run get url > "$look.url" 2>/dev/null; }; } ;;
+    esac
     # a failure is also noted for the end of the result (requestsTrailer), since >/dev/null or | tail -1 can hide it
     # (141: | head stopped reading, not a failure)
     e="$(mktemp)"
@@ -929,6 +960,19 @@ ${CALLS_PY}
 PY
       AGENT_BROWSER_NO_VERSION_CHECK=1 AGENT_BROWSER_INIT_SCRIPTS="$BROWSER_POINTER" EMPLIO_AB="$ab" python3 -c "$py" "$@" 2>"$e"; rc=$?
     else run "$@" 2>"$e"; rc=$?; fi
+    if [ "$rc" = 0 ] && [ -n "$acts" ]; then
+      sleep 0.3
+      now="$(mktemp)"; run snapshot -c > "$now" 2>/dev/null
+      url="$(run get url 2>/dev/null)"
+      [ "$url" = "$(cat "$look.url" 2>/dev/null)" ] || echo "Now on $url"
+      new="$(grep -vxF -f "$look" "$now" | cut -c1-200)"
+      n=$(printf '%s\n' "$new" | grep -c .)
+      if [ "$n" = 0 ]; then echo "Nothing changed on the page."
+      else echo "New on the page:"; printf '%s\n' "$new" | head -25; [ "$n" -gt 25 ] && echo "...and $((n - 25)) more lines: snapshot -i"; fi
+      mv "$now" "$look"; printf '%s\n' "$url" > "$look.url"
+    elif [ "$rc" = 0 ]; then
+      case "$1" in open|goto|navigate|back|forward|reload|tab|pushstate) run snapshot -c > "$look" 2>/dev/null; run get url > "$look.url" 2>/dev/null ;; esac
+    fi
     [ "$rc" = 0 ] && case "$1 $2" in "set viewport"|"set device") mkdir -p "$guides" && printf '%s\\n' "$@" > "$size" ;; esac
     # Some browser services say yes to a new page size and keep the old one: theirs is fixed when the browser starts.
     # So look, and if the width didn't take, ask the server to start this chat's browser again at that size
@@ -940,6 +984,7 @@ PY
       esac
     fi
     cat "$e" >&2
+    [ "$rc" = 0 ] && [ -n "$shot" ] && [ -f "$shot" ] && printf 'VIEW:%s\t%s\n' "$EZ_KEY" "$(realpath "$shot")"
     step="$*"; [ "$rc" = 0 ] || [ "$rc" = 141 ] || printf '%s: %s\\n' "\${step:0:80}" "$(head -c 300 "$e")" >> "/tmp/emplio-failed.$EZ_KEY"
     rm -f "$e"; exit $rc ;;
   team)
@@ -1366,14 +1411,15 @@ export const commandList = (agent: boolean) =>
           "files.list(); files.get(id)",
           "apps.list(); apps.actions(app, [words]); apps.info(action)  # find an action (gmail.send_email), then its input",
           'apps.run(action, args: dict, account=None) -> the app\'s JSON  # a file: {"file": "/work/tmp/x.pdf"}',
-          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.read(*urls); web.answer(question)",
+          "web.search(words, n=8, site=\"a.com,b.com\", since=\"YYYY-MM-DD\", full=False) -> [{title, url, date, text}]; web.answer(question) -> short answer with sources, for a fact try it first; web.read(*urls) -> a page's whole text, only when you need all of it",
           "db.sql(query) -> [dict] (a change: {changed, last_id}); db.tables() -> [{name, type, rows}]",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None); tasks.list() -> [{id, title, status, due, assignee}]",
           "skills.use(name); logins.list(); person(email); activity([words], who=None, since=None)",
+          "plan.set(*steps); plan.done(*n); plan.update(n, step); plan.clear()",
         ]
       : [
           "ask(question, *answers, multi=False, input=None)  # 2-4 answers to tap, none: open question",
-          "hand(agent, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
+          "hand(agent_or_job_id, input=brief, new=False, description=None, level=\"light\"|\"strong\")  # finishes after the run",
           "files.show(name_or_id); files.share(id)",
           "tasks.add(title, to=\"ai\"|\"me\"|email, due=\"YYYY-MM-DD[ HH:MM]\", notes=None, agent=None, every=\"<cron>\", actions=\"app.action,...\")",
           "tasks.list(all=False, who=None, due=False) -> [{id, title, status, due, assignee, agent, waiting_on}]",
@@ -1434,7 +1480,7 @@ ${only(manager, `- AGENT.md: standing instructions (below): the owner's rules fo
 ${only(agent, `- Files over 1 MB or binary in those folders are .media pointers: \`emplio media get <file.media>\` puts the file in /work/tmp/media/; \`emplio view <file.media>\` looks at it.
 - Work in /work/tmp/<short-job-name>/, then copy results where they belong. A script you keep is Python (it runs on any computer). Anything worth reusing (script, tool, app) goes in ${admin ? `company/projects/<name>/ (me/projects/<name>/ if only for ${name})` : "me/projects/<name>/"}; say where.
 - Files you make go in /work/out/ (the same name again is its next version; text for people: .md; a web page: one self-contained .html): they're stored in Files by themselves and Emplio shows them. A stored one from another chat: \`emplio files get <id>\` copies it here.
-`)}${only(manager && !background, `- out/: the same name again is its next version; text for people is .md, a web page one self-contained .html. A job's file: changes go back to that job, never into the file yourself. ${name} sees a file only when you show it (\`emplio files show <name or id>\`, after viewing it), once, finished, with your answer; never write its link or path. \`emplio files share <id>\` (a public link) only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""}
+`)}${only(manager && !background, `- out/: the same name again is its next version; text for people is .md, a web page one self-contained .html. A job's file: changes go back to that job, never into the file yourself. ${name} sees a file only when you show it (\`emplio files show <name or id>\`, after viewing it): only one they asked for (a sheet, a document, a list to keep) or ask to see, once, finished, with your answer; a job's working file (its notes, a running report, a log) stays unshown, you tell what's in it. Never write its link or path. \`emplio files share <id>\` (a public link) only when asked to share outside the team.${s.channel && s.channel !== "web" ? ` On ${s.channel} they get the file itself.` : ""}
 `)}
 Where things go:
 - Business facts (clients, suppliers, products, prices, how things are done, decisions): company/knowledge/${admin ? "" : " (as a proposal in inbox/)"}{clients,suppliers,people,topics}/<name>.md or decisions.md, each dated with its source ("2026-10-24, Ravi: Acme pays in 45 days"). Changed: add the new, mark the old "(replaced <date>)". People disagree: keep both and ${admin ? "ask the owner" : "say so in the proposal"}.
@@ -1480,13 +1526,13 @@ Database: the business's SQLite database, \`emplio db\` (\`emplio db help\`). St
 
 Tasks: something to do or check later goes in \`emplio tasks add "<what>" --due <date> --to <email|ai|me>\` (\`emplio tasks help\`).
 
-Web: \`emplio web search <words>\`, \`emplio web read <url>\` (clean text), \`emplio web answer <question>\` (\`emplio web help\`). Use these, or curl, before the browser.
+Web: \`emplio web search <words>\`, \`emplio web answer <question>\` (a short answer with sources: for a fact, try it first), \`emplio web read <url>\` (a public page's whole text: only when you need all of it) (\`emplio web help\`). Use these, or curl, before the browser.
 
 Pictures: \`emplio image "<full description>" [--from <image>] [--ratio 1:1|16:9|9:16|4:5...]\` makes one with the business's image model and saves it in /work/out/, and you see it and it's shown in the chat by itself; \`--from\` edits a logo or photo (\`emplio image help\`). Use it for any picture asked for (posts, banners, product shots), never code drawing (Pillow, SVG); a real logo or photo to include goes in \`--from\` (\`from_=\` in Python). Not right: make it again with a better description.
 
 Browser: \`emplio browser\` drives ${browserKindFor(s.user.id, cloud.browser.BROWSER_KIND)} that stays open between commands: \`emplio browser open <url>\`, \`emplio browser snapshot -i\` (refs), \`emplio browser click @e3\`. Every browser command, and how to work a site, come with your first browser result; \`emplio browser help\` shows them again.
 On a site: an app connection first; then the site's own requests (each browser result lists them); page steps only when neither can.
-- Downloads land in ${DOWNLOADS}/. Screenshots: \`emplio browser screenshot /work/tmp/x.png\`, then \`emplio view\`.${bg ? "" : `
+- Downloads land in ${DOWNLOADS}/. Screenshots: \`emplio browser screenshot\` shows you the page.${bg ? "" : `
 
 ${cloud.computer.previewNote(name)}`}`)}
 Never ask anyone to paste a password or key in chat; if one is pasted, don't repeat it.`;
@@ -1520,7 +1566,7 @@ ${py ? `- Doing the same thing on a site a second time: make it a function using
 5. Look for what you need (\`snapshot -i | grep -i save\`); the whole page only on a first look.
 6. One step at a time only where the next depends on what appears.
 - Keep output (no /dev/null). Tokens never go in files, skills or messages; don't read \`network requests --json\` (it prints login tokens). After saving, check every record on the site against what you meant.
-- Refs go stale when the page changes: snapshot again. No ref works (a canvas, a map, an unlabelled icon): \`emplio browser screenshot --annotate /work/tmp/x.png\` and \`emplio view\` it (its numbers are refs); not there either, click the spot: \`emplio browser mouse move <x> <y> && emplio browser mouse down left && emplio browser mouse up left\`, then look again. Before anything that can't be undone, check the row.
+- Reading a page or clicking by its refs is usually cheapest; seeing it is fine whenever that's easier (no labels, a canvas or map, a layout to check, refs that keep missing): \`emplio browser screenshot\` shows you the page, \`emplio browser click <x> <y>\` clicks a spot in it and shows you the page after. Refs go stale when the page changes: snapshot again. Before anything that can't be undone, check the row.
 - Local prices or a site refusing it: \`emplio browser local\`, then open again. Tabs persist (\`emplio browser tab\`): reuse the one on that site.
 - ${s.channel === "web" && !bg ? `${name} watches it live and can take over. Going round in circles: ask them to click Show Emplio how and do it once.` : `${name} isn't watching it.`} Sign-ins are saved for all their chats: try the site first. A CAPTCHA: wait ~10 s. A login you can't do: ${bg ? "say so in your report" : s.channel === "web" ? `nothing saved: \`emplio logins ask\` first; still stuck: ask ${name} to sign in in the live browser` : `send ${name} the sign-in link (browser.signInLink in the result)`}. Never guess passwords.]`;
   return py ? inPython(text) : text;
@@ -1709,12 +1755,22 @@ async function sandboxFor(s: Session): Promise<Box> {
   // (the cloud's sleeps by itself) and the right one is looked up. Files are saved to git after every command, so nothing is lost either way.
   const mine = deviceFor(s.user.id, true);
   const right = known && (known.local ? !!mine && known.id.startsWith(`local:${mine.id}:`) : !mine);
-  if (known && right && (await known.keepAwake(awakeFor).then(() => true, () => false))) {
-    if (!known.local) meter(s, awakeFor);
-    return known;
+  if (known && right) {
+    // asked every command, so it stays awake as long as before; waited on only when it was last confirmed a while
+    // ago, since the answer is one more trip to the computer before the command can start
+    const recent = Date.now() - (keptAt.get(known.id) ?? 0) < KEPT_FRESH_MS;
+    const kept = known.keepAwake(awakeFor).then(
+      () => (keptAt.set(known.id, Date.now()), true),
+      () => (keptAt.delete(known.id), false),
+    );
+    if (recent || (await kept)) {
+      if (!known.local) meter(s, awakeFor);
+      return known;
+    }
   }
   const start = async () => {
     const box = await findOrCreate(s, !!known?.local);
+    keptAt.set(box.id, Date.now());
     live.set(boxKey(s), box);
     if (!box.local) meter(s, IDLE_MS);
     return box;
@@ -1723,6 +1779,11 @@ async function sandboxFor(s: Session): Promise<Box> {
   if (mine || (awake.get(boxKey(s))?.until ?? 0) > Date.now()) return start();
   return withComputer(s.watched ? PRIORITY.person : s.background ? PRIORITY.background : PRIORITY.work, s.watched ? PERSON_WAIT_MS : WORK_WAIT_MS, start, s.signal);
 }
+// when each computer last said it was awake. Well inside IDLE_MS: one that can't have gone to sleep since isn't waited on.
+// ponytail: never pruned; a few bytes per computer
+const keptAt = new Map<string, number>();
+const KEPT_FRESH_MS = 60_000;
+
 // how long a start waits for a free computer: a person in a live chat a little, work nobody watches a while
 const PERSON_WAIT_MS = 2 * 60_000;
 const WORK_WAIT_MS = 20 * 60_000;
@@ -1828,18 +1889,22 @@ export const outPath = (p: string) => {
 };
 
 // `show`: paths in out/ to put in the chat, stored first if they're new or changed
-export async function collectOut(box: Box, s: Session, others: boolean, show: string[] = []) {
-  const r = await exec(box, `cat ${OUT_SEEN} 2>/dev/null; echo '${SEP}'; ${LIST_OUT}; echo '${SEP}'; ${others ? OPEN_OUT : "true"}`);
+// listed: the same listing, printed at the end of the command (afterTrailer) instead of asked for after it
+export async function collectOut(box: Box, s: Session, others: boolean, show: string[] = [], listed?: string) {
+  const r = listed !== undefined ? { exitCode: 0, result: listed } : await exec(box, `cat ${OUT_SEEN} 2>/dev/null; echo '${SEP}'; ${LIST_OUT}; echo '${SEP}'; ${others ? OPEN_OUT : "true"}`);
   // a computer that didn't answer gave "Command timed out after 60s", not a list of files
   if (r.exitCode === 124 || !r.result?.includes(SEP)) return { stored: [] as Saved[], shown: [] as Saved[], failed: [] as string[] };
-  const [seenText = "", nowText = "", openText = ""] = r.result.split(SEP);
+  let [seenText = "", nowText = "", openText = ""] = r.result.split(SEP);
+  // a listing from the command's end can be older than another chat's pickup since: what that one stored is known here
+  if (listed !== undefined) seenText = seenOn.get(box.id) ?? seenText;
   const rows = (t: string) =>
     t
       .split("\n").filter(Boolean)
       .map((l) => l.split("\t"));
   const seen = new Map<string, { sig: string; id?: string }>(rows(seenText).map(([path, sig, id]) => [path!, { sig: sig!, id: id || undefined }]));
   const open = new Set(openText.split("\n").filter(Boolean));
-  const now = new Map(rows(nowText).map(([path, time, size]) => [path!, `${time}:${size}`]));
+  // only the listing's own lines: something the command left running can print after the command ended
+  const now = new Map(rows(nowText).filter(([path]) => path!.startsWith(`${WORK}/out/`)).map(([path, time, size]) => [path!, `${time}:${size}`]));
   const stored: Saved[] = [];
   const failed: string[] = [];
   for (const [path, sig] of now) {
@@ -1867,7 +1932,9 @@ export async function collectOut(box: Box, s: Session, others: boolean, show: st
   }
   // gone from out/: forgotten, so a file made again under that name is stored again
   const keep = [...seen].filter(([path]) => now.has(path));
-  if (stored.length || keep.length !== seen.size) await upload(box, OUT_SEEN, keep.map(([path, v]) => `${path}\t${v.sig}\t${v.id ?? ""}\n`).join(""));
+  const seenNow = keep.map(([path, v]) => `${path}\t${v.sig}\t${v.id ?? ""}\n`).join("");
+  if (stored.length || keep.length !== seen.size) await upload(box, OUT_SEEN, seenNow);
+  seenOn.set(box.id, seenNow);
   const shown: Saved[] = [];
   for (const path of show) {
     const id = seen.get(path)?.id;
@@ -1877,6 +1944,10 @@ export async function collectOut(box: Box, s: Session, others: boolean, show: st
   }
   return { stored, shown, failed };
 }
+
+// what each computer's out-seen file holds, as of its last pickup
+// ponytail: never pruned; a line per file in out/ per computer
+const seenOn = new Map<string, string>();
 
 // Revert what a non-admin may not change in company/. Cheap, so it runs after every command and the
 // agent hears about it straight away.
@@ -2086,10 +2157,25 @@ async function park(box: Box, name: string, text: string, ext = "json") {
 // After the command: the emplio requests it made, printed with their contents (and removed), the page's new calls
 // to its server if it used the browser, then any browser step that failed, whatever the command did with its output;
 // keeping its exit code.
-export const requestsTrailer = (key: string) =>
+export const requestsTrailer = (key: string, more = "") =>
   `\n__ez=$?; for f in $(ls -tr /tmp/emplio-req.${key}.* 2>/dev/null); do printf 'EZREQ:${key}\\t%s\\t%s\\n' "$f" "$(cat "$f")"; rm -f "$f"; done; ` +
   `{ [ -n "$BROWSER_CDP_URL" ] || [ -s /tmp/emplio-browser.${key} ]; } && emplio browser calls --new 2>/dev/null; rm -f /tmp/emplio-browser.${key}; ` +
-  `if [ -s /tmp/emplio-failed.${key} ]; then printf '\\n[Browser steps that failed in this command, whatever the output above shows; check before carrying on:\\n'; cat /tmp/emplio-failed.${key}; printf ']\\n'; fi; rm -f /tmp/emplio-failed.${key}; exit $__ez`;
+  `if [ -s /tmp/emplio-failed.${key} ]; then printf '\\n[Browser steps that failed in this command, whatever the output above shows; check before carrying on:\\n'; cat /tmp/emplio-failed.${key}; printf ']\\n'; fi; rm -f /tmp/emplio-failed.${key}; ${more}exit $__ez`;
+
+// The out/ listing (collectOut) and a member's check (scopeScript), printed at the end of the command itself rather
+// than asked for in trips of their own after it. Each part ends in `|| true`: a command that turned on `set -e`
+// must not end here, with another exit code. Missing when the command didn't reach its end (an `exit`, a timeout):
+// then they're asked for after it, as before.
+const afterMark = (key: string) => `AFTER:${key}`;
+export const afterTrailer = (key: string, member: boolean) =>
+  `printf '\\n%s\\n' '${afterMark(key)}'; cat ${OUT_SEEN} 2>/dev/null || true; echo '${SEP}'; ${LIST_OUT} || true; echo '${SEP}'; ${OPEN_OUT} || true; echo '${SEP}'; ` +
+  (member ? `(${scopeScript}) || true; ` : "");
+export function splitAfter(output: string, key: string): { output: string; listed?: string; rejected?: string[] } {
+  const at = output.lastIndexOf(`\n${afterMark(key)}\n`);
+  if (at < 0) return { output };
+  const [seen = "", now = "", open = "", checked] = output.slice(at + afterMark(key).length + 2).split(SEP);
+  return { output: output.slice(0, at), listed: [seen, now, open].join(SEP), rejected: checked === undefined ? undefined : tagged(checked, "REJECTED") };
+}
 
 // Puts each request's contents back in place of its marker. A marker a pipe dropped or cut short
 // (emplio ... | grep x, | head -c 300) still runs, from its file, after the rest.
@@ -2144,7 +2230,7 @@ export async function toolsCommand(s: Session, args: string[], runner = (command
 
 // Swap each emplio tag in the output for its result, in place, so the agent and the chat both see it.
 // Files `emplio view` asked for also come back separately, for the model to look at.
-// `job`: run by one of the chat's jobs, which may not touch the person's checklist
+// `job`: run by one of the chat's jobs (its checklist is its own chat's, not the person's)
 export async function runEz(box: Box, s: Session, output: string, key: string, job = false) {
   const views: string[] = [];
   // emplio hand and threads run after the box is free again (runBash): wait would otherwise hold up the threads' own commands
@@ -2422,8 +2508,6 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
         },
       }, WORK));
     }
-    else if (line.startsWith(`PLAN:${key}\t`) && job)
-      lines.push("error: the checklist is Emplio's, for the person; jobs don't use emplio plan. Just do your task and report.");
     else if (line.startsWith(`PLAN:${key}\t`)) {
       const reply = await planCommand(s.conversationId, Buffer.from(line.slice(`PLAN:${key}\t`.length), "base64").toString().split("\0").slice(0, -1));
       lines.push(reply.text);
@@ -2654,7 +2738,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (refused) return { box, switched, browserId: undefined, result: { exitCode: 1, output: refused } as BoxResult };
 
     // a command that drives the browser gets this chat's browser, started on first use
-    let env: Record<string, string> = { TZ: await timezoneOf(s.user.id), EMPLIO_WORK: WORK };
+    const looked = lookups(s);
+    let env: Record<string, string> = { TZ: await looked.tz, EMPLIO_WORK: WORK };
     let browserId: string | undefined;
     // code mode: a function an earlier step wrote that drives the browser doesn't say so when it's called, so while
     // this chat's browser is up every step gets it
@@ -2669,7 +2754,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     const git = gitForCommand(s);
     if (git) env = { ...env, ...git.env };
     // its commits name the person as GitHub knows them, not the computer's BOX_EMAIL, so a repo's deploys accept them
-    env = { ...env, ...gitAuthor(s, await githubAddress(s)) };
+    env = { ...env, ...gitAuthor(s, await looked.github) };
 
     if (background) {
       // code mode: its emplio calls are answered live for an hour (nothing collects them after)
@@ -2703,9 +2788,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
   let browserId = ran.browserId;
   let result = ran.result;
   const key = crypto.randomUUID();
+  let ended: ReturnType<typeof splitAfter> | undefined;
   if (!result) {
     const answering = liveFor(s, box, key, job, false);
-    const done = await exec(box, `${command}${requestsTrailer(key)}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
+    const done = await exec(box, `${command}${requestsTrailer(key, afterTrailer(key, !isAdmin(s)))}`, { ...ran.env, EZ_KEY: key, ...answering?.env }, s.settings.commandSeconds, WORK, signal).finally(() => commandEnded(boxKey(s)));
     if (done.exitCode === 124 || done.exitCode === 125) console.warn(`command in chat ${s.conversationId} ended ${done.exitCode} on ${box.id} after ${Math.round((Date.now() - ready) / 1000)}s`);
     const bag = liveDone(answering?.token);
     browserId ??= bag?.browserId;
@@ -2720,7 +2806,8 @@ async function runInBox(s: Session, command: string, background: boolean, signal
         output: `${done.result}\n\nThe computer froze (most likely out of memory: too much running at once) and has been replaced by a fresh one for your next command. Company files are safe as of the last save; anything only in /work/tmp or not yet saved is gone. Run heavy commands (installs, builds) one at a time.`,
       };
     }
-    const printed = ran.git ? (done.result ?? "").replaceAll(ran.git.proxy, "https://") : (done.result ?? "");
+    ended = splitAfter(done.result ?? "", key);
+    const printed = ran.git ? ended.output.replaceAll(ran.git.proxy, "https://") : ended.output;
     const emplio = await runEz(box, s, withRequests(printed, key), key, job);
     // what live requests put on screen (cards, the checklist, files to look at) comes with the result as usual
     if (bag) {
@@ -2770,7 +2857,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     }
     const saved = (out.shown as Saved[] | undefined) ?? [];
     await after("storing files from out/", async () => {
-      const made = await collectOut(box, s, commandsOn(boxKey(s)) > 0, (out.showOut as string[] | undefined) ?? []);
+      const made = await collectOut(box, s, commandsOn(boxKey(s)) > 0, (out.showOut as string[] | undefined) ?? [], ended?.listed);
       saved.push(...made.shown);
       if (made.stored.length) out.stored = made.stored.map((f) => `${f.filename}${f.id ? ` (${f.id.slice(0, 8)})` : ""}`);
       if (made.failed.length) notDone.push(`not stored or shown yet (still in ${WORK}/out, tried again after your next command): ${made.failed.join(", ")}`);
@@ -2780,7 +2867,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     if (saved.length) out.saved = saved;
     if (!isAdmin(s))
       await after("checking what this person may change", async () => {
-        const rejected = tagged((await exec(box, scopeScript)).result, "REJECTED");
+        const rejected = ended?.rejected ?? tagged((await exec(box, scopeScript)).result, "REJECTED");
         if (rejected.length) out.rejected = { paths: rejected, reason: "only admins can change these; reverted" };
       });
     // Emplio hears it: the command ran, so it isn't one to repeat
@@ -2789,6 +2876,10 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     return out;
   });
 }
+
+// what a command's environment needs that doesn't change within a reply, looked up at its first command only
+const perReply = new WeakMap<Session, { tz: Promise<string>; github: Promise<string | null> }>();
+const lookups = (s: Session) => perReply.get(s) ?? perReply.set(s, { tz: timezoneOf(s.user.id), github: githubAddress(s) }).get(s)!;
 
 // boxes that ran a command since their last save (a reply's save also carries other chats' changes)
 const used = new Set<string>();
