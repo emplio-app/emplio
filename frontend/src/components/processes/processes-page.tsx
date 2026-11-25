@@ -431,7 +431,7 @@ export function StartForm({ p, clientId, onDone }: { p: Process; clientId?: stri
   const [subject, setSubject] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const start = useMutation({
-    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId: p.for === "client" ? client : null, subject, inputs: values }),
+    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, client: p.for === "client" ? client : null, subject, inputs: values }),
     onSuccess: (r) => {
       toast.success(`Started for ${runName(r)}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined });
       onDone();
@@ -456,7 +456,7 @@ export function StartForm({ p, clientId, onDone }: { p: Process; clientId?: stri
     >
       {p.for === "client" && !clientId && (
         <ClientPicker
-          items={[{ value: "", label: "Pick a client" }, ...(clients.data ?? []).filter((c) => c.stage !== "past").map((c) => ({ value: c.id, label: c.name }))]}
+          items={[{ value: "", label: "Pick a client" }, ...(clients.data ?? []).filter((c) => c.stage !== "past").map((c) => ({ value: c.slug, label: c.name }))]}
           value={client}
           onChange={setClient}
           className="w-full"

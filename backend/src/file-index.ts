@@ -8,17 +8,28 @@ import { db } from "./db";
 import { fileIndex } from "./db/schema";
 import { listPaths, readFile } from "./gitea";
 import { toQuery } from "./search";
+import { parseThing } from "./things";
 
 // .media: the pointer to a big file kept in storage, with its name and, for a document, its words
 const TEXT = /\.(md|txt|csv|tsv|json|jsonl|ya?ml|toml|ini|html?|xml|py|js|mjs|ts|sh|sql|media)$|(^|\/)[^./]+$/i;
 const MAX_BYTES = 200_000;
 
 const syncing = new Map<string, Promise<unknown>>();
+// A client file (company/clients/<slug>.md) new as active, or moved from prospect to active, however it was written
+// (emplio clients, the app, Emplio editing it by hand): the new-client automations run for them, here only, so never
+// twice. A repo's first indexing starts nothing.
+const stageOf = (path: string, text: string) => parseThing(path, text)?.fields.stage?.toLowerCase() || "active";
+const CLIENT_FILE = /^clients\/([a-z0-9][a-z0-9-]*)\.md$/;
+
 export function syncFiles(workspaceId: string, repo: string) {
   const key = `${workspaceId}/${repo}`;
+  const won: string[] = [];
   const run = (syncing.get(key) ?? Promise.resolve()).then(async () => {
     const files = (await listPaths(workspaceId, repo)).filter((f) => TEXT.test(f.path) && f.size <= MAX_BYTES);
-    const rows = await db.select({ path: fileIndex.path, sha: fileIndex.sha }).from(fileIndex).where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo)));
+    const rows = await db
+      .select({ path: fileIndex.path, sha: fileIndex.sha, text: sql<string | null>`case when ${fileIndex.path} ~ ${CLIENT_FILE.source} then ${fileIndex.text} end` })
+      .from(fileIndex)
+      .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo)));
     const gone = rows.filter((r) => !files.some((f) => f.path === r.path)).map((r) => r.path);
     if (gone.length) await db.delete(fileIndex).where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo), inArray(fileIndex.path, gone)));
     for (const f of files) {
@@ -28,9 +39,14 @@ export function syncFiles(workspaceId: string, repo: string) {
       if (text === null || text.includes("\0")) continue;
       const values = { workspaceId, repo, path: f.path, sha: f.sha, text, updatedAt: new Date() };
       await db.insert(fileIndex).values(values).onConflictDoUpdate({ target: [fileIndex.workspaceId, fileIndex.repo, fileIndex.path], set: values });
+      const slug = repo === "company" && rows.length ? CLIENT_FILE.exec(f.path)?.[1] : undefined;
+      const old = rows.find((r) => r.path === f.path);
+      if (slug && stageOf(f.path, text) === "active" && (!old || stageOf(f.path, old.text ?? "") === "prospect")) won.push(slug);
     }
   });
   syncing.set(key, run.catch(() => {}));
+  // after this sync, outside the queue: an automation may commit, and wait on the next sync
+  void run.then(() => won.length ? import("./automations").then((a) => Promise.all(won.map((slug) => a.forNewClient(workspaceId, slug)))) : undefined).catch((error) => console.error("new-client automations failed", error));
   return run;
 }
 

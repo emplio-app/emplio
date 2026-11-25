@@ -15,9 +15,9 @@ import { INPUT_TYPES, type Process, type ProcessInput, type ProcessRun, type Pro
 import { record } from "./activity";
 import { context, type Ctx } from "./auth";
 import { db } from "./db";
-import { automations, clients, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
+import { automations, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
 import { findAgent } from "./agents";
-import { detailOf, findClient } from "./clients";
+import { detailOf, findClient, listClients } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { listTeam } from "./team";
 import { DEFAULT_ZONE } from "./time";
@@ -306,11 +306,10 @@ const person = (team: { id: string; name: string | null; email: string }[], q: s
 export async function startRun(
   w: { workspaceId: string; userId: string },
   name: string,
-  o: { clientId?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
+  o: { client?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
 ): Promise<Run | null> {
   const p = await getProcess(w.workspaceId, name);
-  const c =
-    p.for === "client" && o.clientId ? await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, o.clientId)) }) : null;
+  const c = p.for === "client" && o.client ? (await listClients(w)).find((x) => x.slug === o.client) : null;
   // an input not given, filled in from the client's detail of the same name (their Tax number), when it fits its type
   const fromClient = Object.fromEntries(
     p.inputs.flatMap((x) => {
@@ -326,12 +325,12 @@ export async function startRun(
   const given = { ...fromClient, ...checkInputs(p.inputs, { ...fromClient, ...(o.inputs ?? {}) }, true) };
   const inputs: RunInput[] = p.inputs.map((x) => ({ ...x, value: given[x.key] ?? null }));
   let subject = o.subject?.trim() || (p.for === "other" ? (inputs[0]?.value ?? "") : "");
-  let clientId: string | null = null;
+  let client: string | null = null;
   if (p.for === "client") {
-    if (!o.clientId) throw new ProcessError(`"${p.title}" is done for a client: say which (--client <name>)`);
+    if (!o.client) throw new ProcessError(`"${p.title}" is done for a client: say which (--client <name>)`);
     if (!c) throw new ProcessError("no such client (emplio clients list)");
     subject = c.name;
-    clientId = c.id;
+    client = c.slug;
   } else if (!subject) throw new ProcessError(`say who or what this "${p.title}" is for (--for "Sarah Lee, React developer"${p.inputs[0] ? `, or its ${p.inputs[0].name}: --${p.inputs[0].key}` : ""})`);
   const [run] = await db
     .insert(processRuns)
@@ -340,7 +339,7 @@ export async function startRun(
       process: name,
       processTitle: p.title,
       subject: subject.slice(0, 200),
-      clientId,
+      client,
       inputs,
       period: o.period ?? null,
       steps: p.steps as ProcessStepDef[],
@@ -376,8 +375,9 @@ export async function assign(workspaceId: string, who: string, handlerId: string
 // The task for step i of a run: who does it, when it's due, and what it's part of.
 async function makeStep(run: Run, i: number, note?: string) {
   const step = run.steps[i]!;
-  const client = run.clientId ? await db.query.clients.findFirst({ where: eq(clients.id, run.clientId) }) : null;
-  const { assigneeId, agent, missing } = await assign(run.workspaceId, step.who, client?.handlerIds[0], run.startedBy);
+  const client = run.client ? (await listClients(run)).find((c) => c.slug === run.client) : null;
+  // the first handler who's on the team
+  const { assigneeId, agent, missing } = await assign(run.workspaceId, step.who, client?.handlers.find((h) => h.id)?.id, run.startedBy);
   const dueAt = dueOf(run, step);
   const waiting = step.who.toLowerCase() === "client";
   const notes = stepNotes(run, i, note, missing);
@@ -391,7 +391,7 @@ async function makeStep(run: Run, i: number, note?: string) {
     assigneeId,
     agent,
     requesterId: run.startedBy,
-    clientId: run.clientId,
+    client: run.client,
     dueAt,
     runId: run.id,
     stepIndex: i,
@@ -418,7 +418,7 @@ export function stepNotes(run: Pick<Run, "id" | "steps" | "inputs" | "processTit
 // for one its first input instead, if any), then the period.
 function taskTitle(run: Run, i: number) {
   const first = run.inputs[0]?.value;
-  const label = run.clientId ? (first ? ` · ${first}` : "") : ` · ${run.subject}`;
+  const label = run.client ? (first ? ` · ${first}` : "") : ` · ${run.subject}`;
   return `${run.steps[i]!.name}${label}${run.period ? ` · ${run.period}` : ""}`.slice(0, 300);
 }
 
@@ -540,7 +540,7 @@ export async function stopRun(w: Who, id: string) {
   return run;
 }
 
-export async function listRuns(workspaceId: string, f: { process?: string; clientId?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
+export async function listRuns(workspaceId: string, f: { process?: string; client?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
   const rows = await db
     .select()
     .from(processRuns)
@@ -548,7 +548,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       and(
         eq(processRuns.workspaceId, workspaceId),
         f.process ? eq(processRuns.process, f.process) : undefined,
-        f.clientId ? eq(processRuns.clientId, f.clientId) : undefined,
+        f.client ? eq(processRuns.client, f.client) : undefined,
         f.all ? undefined : eq(processRuns.status, "active"),
       ),
     )
@@ -568,7 +568,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       process: r.process,
       processTitle: r.processTitle,
       subject: r.subject,
-      clientId: r.clientId,
+      client: r.client,
       inputs: r.inputs,
       period: r.period,
       status: r.status,
@@ -650,7 +650,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
     if (!q) return undefined;
     const c = await findClient(who.workspaceId, q);
     if (typeof c === "string") throw new ProcessError(c);
-    return c.id;
+    return c.slug;
   };
   try {
     switch (sub) {
@@ -685,7 +685,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Removed ${words[0]}; runs going carry on.`;
       case "start": {
         if (!words[0]) break;
-        const run = await startRun(who, words[0], { clientId: await clientOf(opts.client), subject: opts.for, inputs: inputFlags });
+        const run = await startRun(who, words[0], { client: await clientOf(opts.client), subject: opts.for, inputs: inputFlags });
         const [r] = await listRuns(who.workspaceId, { process: words[0], all: true }).then((l) => l.filter((x) => x.id === run!.id));
         const details = inputsLine(run!.inputs);
         return `Started ${run!.id.slice(0, 8)}: "${run!.processTitle}" for ${run!.subject}${details ? ` (${details})` : ""}. Step 1, ${r?.steps[0]?.name}: ${r?.current ? `${r.current.assigneeName}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}` : "made"}.`;
@@ -696,7 +696,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Now: ${inputsLine(run.inputs) || "nothing filled in"}.`;
       }
       case "runs": {
-        const runs = await listRuns(who.workspaceId, { process: words[0], clientId: await clientOf(opts.client), all: !!opts.all });
+        const runs = await listRuns(who.workspaceId, { process: words[0], client: await clientOf(opts.client), all: !!opts.all });
         if (data) return JSON.stringify(runs);
         if (!runs.length) return opts.all ? "No runs." : "Nothing going. (--all for finished ones)";
         return runs
@@ -742,13 +742,13 @@ export async function processRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { process?: string; client?: string; all?: string } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listRuns(ctx.workspaceId, { process: req.query.process, clientId: req.query.client, all: req.query.all === "1" });
+    return listRuns(ctx.workspaceId, { process: req.query.process, client: req.query.client, all: req.query.all === "1" });
   });
-  app.post<{ Body: { process?: string; clientId?: string | null; subject?: string; inputs?: Record<string, unknown> } }>("/process-runs", async (req, reply) => {
+  app.post<{ Body: { process?: string; client?: string | null; subject?: string; inputs?: Record<string, unknown> } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     try {
-      const run = await startRun(ctx, req.body?.process ?? "", { clientId: req.body?.clientId, subject: req.body?.subject, inputs: req.body?.inputs ?? {} });
+      const run = await startRun(ctx, req.body?.process ?? "", { client: req.body?.client, subject: req.body?.subject, inputs: req.body?.inputs ?? {} });
       return (await listRuns(ctx.workspaceId, { process: run!.process })).find((r) => r.id === run!.id);
     } catch (error) {
       return fail(reply, error);

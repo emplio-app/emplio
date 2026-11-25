@@ -595,8 +595,8 @@ export type Task = {
   // the AI is working on it right now (its work chat is replying)
   running: boolean;
   chases: number;
-  // the client it's for (clients.ts)
-  clientId: string | null;
+  // the client it's for: their file's name, company/clients/<client>.md (clients.ts)
+  client: string | null;
   clientName: string | null;
   // a process's step: which go (and its process's file name), which step of how many, where sending it back goes
   // (an OK step), and what was filled in when it started
@@ -604,7 +604,7 @@ export type Task = {
   createdAt: string;
   doneAt: string | null;
 };
-export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; clientId?: string | null };
+export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; client?: string | null };
 
 // A process (backend processes.ts): steps done in order, for each client or anything else with a name. The file is
 // company/processes/<name>.md; each go of it is a ProcessRun, and each step a task.
@@ -648,7 +648,7 @@ export type ProcessRun = {
   process: string;
   processTitle: string;
   subject: string;
-  clientId: string | null;
+  client: string | null;
   // what was filled in when it started (changed since, maybe); the first one names it beside its client
   inputs: RunInput[];
   period: string | null;
@@ -662,23 +662,22 @@ export type ProcessRun = {
   doneAt: string | null;
 };
 
-// A client of the business (backend clients.ts): the Clients page and `emplio clients`. Their notes are the file
-// company/clients/<slug>.md.
+// A client of the business (backend clients.ts): the Clients page and `emplio clients`. All of it is the file
+// company/clients/<slug>.md: name, stage, handler and details at its top, their notes below.
 export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
 export type ClientStage = (typeof CLIENT_STAGES)[number];
 export type Client = {
-  id: string;
   slug: string;
   name: string;
   stage: ClientStage;
-  handlers: { id: string; name: string }[];
+  // [[team/<name>]] links; id: the teammate's user id when their team file's email is a member's
+  handlers: { id: string | null; name: string; path: string }[];
   // what's known about them, in their own words: Contact email, Tax number, Files: monthly. Processes fill inputs of the
   // same name from these; a schedule's clients: [Files=monthly] picks the clients with that one.
   details: ClientDetail[];
   // tasks not done or cancelled, and how many of them wait on someone
   openTasks: number;
   waitingTasks: number;
-  updatedAt: string;
 };
 export type ClientDetail = { name: string; value: string };
 
@@ -695,7 +694,8 @@ export type ThingPage = {
   linkedFrom: { field: string; from: string; kind: ThingKind; title: string; fields: Record<string, string> }[];
 };
 // details: only the ones changing; "" or null removes one
-export type ClientInput = { name?: string; stage?: ClientStage; handlerIds?: string[]; details?: Record<string, string | null> };
+// handlers: each a teammate's user id, email or name, or a team file (team/<name>)
+export type ClientInput = { name?: string; stage?: ClientStage; handlers?: string[]; details?: Record<string, string | null> };
 
 // A file the AI employee made (backend made.ts): the Files page and the previews in the chat.
 export type MadeFile = {

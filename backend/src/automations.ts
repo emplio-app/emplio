@@ -22,8 +22,8 @@ import { chatLink, heldBack, post } from "./channels";
 import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
-import { activity, automationRuns, automations, clients as clientsTable, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
-import { pickClients } from "./clients";
+import { activity, automationRuns, automations, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
+import { listClients, pickClients } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
@@ -140,17 +140,17 @@ export const makesTasks = (row: Pick<Row, "clients" | "when" | "who">) => !!row.
 // or one task (the first line its title, the rest how; who: does it, else whoever handles the client, or the agent
 // named), due dueDays later, titled with the period on a schedule. Never twice for one client and period. Every task
 // is made by makeTask (tasks.ts), as any task is.
-async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: unknown; clientId?: string } = {}) {
+async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: unknown; client?: string } = {}) {
   const paused = await heldBack(row.workspaceId);
   if (paused || !row.userId) {
     await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason, status: "failed", error: paused ?? "nobody to run it as", finishedAt: new Date() });
     return;
   }
-  const all = row.clients || o.clientId ? await db.select().from(clientsTable).where(eq(clientsTable.workspaceId, row.workspaceId)) : [];
-  const targets = o.clientId ? all.filter((c) => c.id === o.clientId) : row.clients ? pickClients(all, row.clients) : [null];
+  const all = row.clients || o.client ? await listClients(row) : [];
+  const targets = o.client ? all.filter((c) => c.slug === o.client) : row.clients ? pickClients(all, row.clients) : [null];
   const period = row.when === "schedule" ? periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE) : null;
   // what stops a second one: per client and period, or per new client; a task on an event or by hand isn't kept from repeating
-  const keyOf = (slug: string) => (o.clientId ? `${row.name}/new/${o.clientId}` : period ? `${row.name}/${slug}/${period}` : undefined);
+  const keyOf = (slug: string) => (o.client ? `${row.name}/new/${o.client}` : period ? `${row.name}/${slug}/${period}` : undefined);
   const { assign, startRun } = await import("./processes");
   const { makeTask } = await import("./tasks");
   const [title, ...rest] = row.prompt.split("\n");
@@ -161,10 +161,10 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
   for (const c of targets) {
     try {
       if (row.process) {
-        if (await startRun({ workspaceId: row.workspaceId, userId: row.userId }, row.process, { clientId: c?.id, period, repeatKey: keyOf(c?.slug ?? "-") })) made++;
+        if (await startRun({ workspaceId: row.workspaceId, userId: row.userId }, row.process, { client: c?.slug, period, repeatKey: keyOf(c?.slug ?? "-") })) made++;
         continue;
       }
-      const a = row.agent ? { assigneeId: null, agent: row.agent, missing: "" } : await assign(row.workspaceId, row.who ?? "handler", c?.handlerIds[0], row.userId);
+      const a = row.agent ? { assigneeId: null, agent: row.agent, missing: "" } : await assign(row.workspaceId, row.who ?? "handler", c?.handlers.find((h) => h.id)?.id, row.userId);
       const t = await makeTask({
         workspaceId: row.workspaceId,
         // the client is on the task itself (shown beside the title everywhere)
@@ -173,7 +173,7 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
         assigneeId: a.assigneeId,
         agent: a.agent,
         requesterId: row.userId,
-        clientId: c?.id ?? null,
+        client: c?.slug ?? null,
         dueAt: due,
         repeatKey: keyOf(c?.slug ?? "-"),
       });
@@ -191,13 +191,13 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
   else if (made && row.clients) await post(row.workspaceId, row.userId, `${name}${period ? ` for ${period}` : ""}: ${row.process ? "started" : "a task added"} for ${made} client${made === 1 ? "" : "s"}${row.process ? "" : `, due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}. It's on the Work page.`).catch(() => {});
 }
 
-// A client added as active, or won: the automations for each new client, for them.
-export async function forNewClient(workspaceId: string, clientId: string) {
+// A client added as active, or won (their file, file-index.ts): the automations for each new client, for them.
+export async function forNewClient(workspaceId: string, client: string) {
   const rows = await db
     .select()
     .from(automations)
     .where(and(eq(automations.workspaceId, workspaceId), eq(automations.when, "new client"), eq(automations.enabled, true), isNull(automations.error)));
-  for (const row of rows) await makeWork(row, "new client", { clientId }).catch((error) => console.error("a new-client automation failed", row.name, error));
+  for (const row of rows) await makeWork(row, "new client", { client }).catch((error) => console.error("a new-client automation failed", row.name, error));
 }
 
 // What a run does: makes tasks, or Emplio does it in a chat of its own.

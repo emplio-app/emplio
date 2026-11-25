@@ -1,4 +1,4 @@
-import type { ClientDetail, ProcessInput, RunInput, Approval, PlanStep, JobInfo } from "@emplio/shared";
+import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { type AnyPgColumn, bigint, boolean, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -174,8 +174,8 @@ export const conversations = pgTable(
     // button reopens (browser.ts)
     browserUsedAt: timestamp({ withTimezone: true }),
     browserPage: text(),
-    // the client it's about, if any (the reader labels it)
-    clientId: uuid().references((): AnyPgColumn => clients.id, { onDelete: "set null" }),
+    // the client it's about, if any (the reader labels it): their file's name, company/clients/<client>.md
+    client: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -308,7 +308,8 @@ export const processRuns = pgTable(
     // the process's title then, and what this go is for: the client's name or the thing's, and the period
     processTitle: text().notNull(),
     subject: text().notNull(),
-    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    // the client's file name, company/clients/<client>.md
+    client: text(),
     // what was filled in when it started (changed since, maybe): the process's inputs then, each with its value
     inputs: jsonb().$type<RunInput[]>().notNull().default([]),
     period: text(),
@@ -324,7 +325,7 @@ export const processRuns = pgTable(
     startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     doneAt: timestamp({ withTimezone: true }),
   },
-  (t) => [index().on(t.workspaceId, t.process, t.status), index().on(t.clientId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
+  (t) => [index().on(t.workspaceId, t.process, t.status), index().on(t.workspaceId, t.client), uniqueIndex().on(t.workspaceId, t.repeatKey)],
 );
 export type ProcessStepDef = { name: string; who: string; how?: string; days?: number; after?: number | "start"; afterInput?: string; back?: number };
 
@@ -612,28 +613,6 @@ export const paidSites = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.site] })],
 );
 
-// Clients (clients.ts): who the business works for, and who on the team handles each. Their story (what happened,
-// who's who there) stays in their notes file, company/clients/<slug>.md; this row is what tasks and chats
-// point at.
-export const clients = pgTable(
-  "clients",
-  {
-    id: uuid().primaryKey().defaultRandom(),
-    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    // the notes file's name: clients/<slug>.md
-    slug: text().notNull(),
-    name: text().notNull(),
-    stage: text({ enum: ["prospect", "active", "past"] }).notNull().default("active"),
-    // the teammates who look after them (user ids); empty: nobody named yet
-    handlerIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
-    // what's known about them, name and value, in the order added (Contact email, Tax number, Files)
-    details: jsonb().$type<ClientDetail[]>().notNull().default([]),
-    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex().on(t.workspaceId, t.slug)],
-);
-
 // Tasks (tasks.ts): everything to be done in a business, by a person or by the AI (assigneeId null). Who
 // asked is told when one is two days late; people are reminded on their channel once it's due.
 export const tasks = pgTable(
@@ -655,8 +634,8 @@ export const tasks = pgTable(
     dueAt: timestamp({ withTimezone: true }),
     // the chat it came from
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
-    // the client it's for, if any
-    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    // the client it's for, if any: their file's name, company/clients/<client>.md
+    client: text(),
     // the AI's own: the chat it last worked on it in
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
     // a repeating job's task: "<automation>/<client slug>/<period>", so a run never adds the same one twice
@@ -672,7 +651,7 @@ export const tasks = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.clientId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
+  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.workspaceId, t.client), uniqueIndex().on(t.workspaceId, t.repeatKey)],
 );
 
 // Saved passwords and keys (logins.ts): one person's, in one business. The value is encrypted (secrets.ts) and

@@ -113,6 +113,20 @@
       "when": 1795598258153,
       "tag": "20261125091738_one_way_to_make_work",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795628939539,
+      "tag": "20261125174859_clients_to_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795628958744,
+      "tag": "20261125174918_drop_clients_table",
+      "breakpoints": true
     }
   ]
 }

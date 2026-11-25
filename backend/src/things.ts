@@ -1,10 +1,11 @@
-// Things kept as files in company/, one folder per kind and one .md file each: clients/ (a client's notes; the
-// Clients list keeps their stage, who handles them and their details), contacts/ (someone at a client), team/ (someone
+// Things kept as files in company/, one folder per kind and one .md file each: clients/ (a client: name, stage,
+// handler and details at the top, their notes below; clients.ts), contacts/ (someone at a client), team/ (someone
 // on the team: role, skills, hours), services/ (what the business sells), projects/ (one client buying one service).
 // A file starts with key: value lines between --- lines, then words. A link is another file's folder and name in
 // [[ ]], like [[clients/northwind]], written once in one of the two files: the way back is worked out here, so a
 // client's page lists the contacts and projects that name it. Emplio writes the files; the app reads them here.
-// ponytail: parsed from the search copy (file_index) on every call; a table of its own when lists get long
+// ponytail: parsed from the search copy (file_index) on every call; a table of its own when lists get long. That copy
+// follows every commit (gitea.ts indexLater), so it's read as it is; only a repo never indexed is filled first.
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { THING_KINDS, type Thing, type ThingKind, type ThingPage } from "@emplio/shared";
@@ -19,7 +20,7 @@ const FILE = new RegExp(`^(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)\\.md$`
 const LINK = /\[\[([a-z]+\/[a-z0-9][a-z0-9-]*)\]\]/g;
 
 // "sarah-lee" -> "Sarah Lee"
-const words = (name: string) => name.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+export const words = (name: string) => name.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 
 // A file in one of the folders, read; null for any other file.
 export function parseThing(file: string, text: string): Thing | null {
@@ -50,7 +51,8 @@ export function parseThing(file: string, text: string): Thing | null {
 }
 
 export async function listThings(workspaceId: string, kind?: ThingKind): Promise<Thing[]> {
-  await syncFiles(workspaceId, "company");
+  const indexed = await db.select({ path: fileIndex.path }).from(fileIndex).where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, "company"))).limit(1);
+  if (!indexed.length) await syncFiles(workspaceId, "company");
   const rows = await db
     .select({ path: fileIndex.path, text: fileIndex.text })
     .from(fileIndex)

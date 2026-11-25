@@ -1,6 +1,6 @@
 import type { RunInput } from "@emplio/shared";
 
-type Go = { subject: string; clientId: string | null; inputs: RunInput[] };
+type Go = { subject: string; client: string | null; inputs: RunInput[] };
 
 // A value filled in, as people read it: 85,000 · 1 Dec 2026 · the rest as typed.
 export function inputText(x: Pick<RunInput, "type" | "value">) {
@@ -11,10 +11,10 @@ export function inputText(x: Pick<RunInput, "type" | "value">) {
 }
 
 // whether a go's first input is already in its name
-const named = (r: Go) => !!r.inputs[0]?.value && (!!r.clientId || r.inputs[0].value === r.subject);
+const named = (r: Go) => !!r.inputs[0]?.value && (!!r.client || r.inputs[0].value === r.subject);
 
 // What a go is called: its first input then its client (INV-1042 · Northwind), else what it's for.
-export const runName = (r: Go) => (named(r) && r.clientId ? `${inputText(r.inputs[0]!)} · ${r.subject}` : r.subject);
+export const runName = (r: Go) => (named(r) && r.client ? `${inputText(r.inputs[0]!)} · ${r.subject}` : r.subject);
 
 // The rest of what was filled in, for under its name: "Amount 85,000 · Due date 1 Dec 2026"
 export const runDetails = (r: Go) =>

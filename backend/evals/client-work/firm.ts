@@ -9,11 +9,12 @@ export const FIRM: Business["firm"] = {
     "An accounting and company-secretarial firm: bookkeeping, tax returns, payroll and annual filings for about 40 small companies. Each client has one of us looking after them. Invoices are due in 30 days.",
 };
 
-const person = (name: string, email: string) => ({ id: email, name, email });
+// a handler is their team file, [[team/<name>]]
+const person = (name: string, email: string) => ({ id: email, name, email, path: `team/${name.toLowerCase()}` });
 const RAJ = person("Raj", "raj@kaveri.example");
 const PRIYA = person("Priya", "priya@kaveri.example");
 const client = (slug: string, name: string, stage: Client["stage"], handlers: Client["handlers"], details: [string, string][], openTasks = 2, waitingTasks = 0): Client =>
-  ({ id: slug, slug, name, stage, handlers, details: details.map(([n, value]) => ({ name: n, value })), openTasks, waitingTasks }) as unknown as Client;
+  ({ slug, name, stage, handlers, details: details.map(([n, value]) => ({ name: n, value })), openTasks, waitingTasks });
 
 export const CLIENTS = {
   northwind: client("northwind-traders", "Northwind Traders", "active", [RAJ], [["Contact email", "sarah@northwind.example"], ["Files", "monthly"], ["Tax number", "27AAACN1234F1Z5"]], 3, 1),

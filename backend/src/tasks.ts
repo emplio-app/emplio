@@ -21,8 +21,9 @@ import { isReplying } from "./live";
 import { chatLink, heldBack, mainChat, post, sendTo } from "./channels";
 import { db } from "./db";
 import { at, DEFAULT_ZONE, hourIn, timezoneOf, when } from "./time";
-import { clients, conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
-import { findClient, labelChat, listClients } from "./clients";
+import { conversations, jobs, tasks, workspaceMembers, workspaces } from "./db/schema";
+import { listThings, words } from "./things";
+import { FOLDER, findClient, labelChat, listClients } from "./clients";
 import { stepFinished, stepInfo } from "./processes";
 import { listTeam } from "./team";
 
@@ -62,8 +63,7 @@ async function agentNames(rows: Row[], workspaceId: string) {
 async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
   const names = new Map((await listTeam(workspaceId)).map((m) => [m.id, m.name ?? m.email]));
   const agents = await agentNames(rows, workspaceId);
-  const ids = [...new Set(rows.flatMap((t) => (t.clientId ? [t.clientId] : [])))];
-  const clientNames = new Map(ids.length ? (await db.select({ id: clients.id, name: clients.name }).from(clients).where(inArray(clients.id, ids))).map((c) => [c.id, c.name]) : []);
+  const clientNames = new Map(rows.some((t) => t.client) ? (await listThings(workspaceId, FOLDER)).map((c) => [c.path.slice(FOLDER.length + 1), c.title]) : []);
   const runs = await stepInfo([...new Set(rows.flatMap((t) => (t.runId ? [t.runId] : [])))]);
   return rows.map((t) => withName({
     id: t.id,
@@ -82,8 +82,9 @@ async function toTask(rows: Row[], workspaceId: string): Promise<Task[]> {
     // "doing" says it was picked up, not that a run is going now (a run cut off, or set by hand)
     running: !!t.workConversationId && isReplying(t.workConversationId),
     chases: t.chases,
-    clientId: t.clientId,
-    clientName: t.clientId ? (clientNames.get(t.clientId) ?? null) : null,
+    client: t.client,
+    // a file gone since: its name as words
+    clientName: t.client ? (clientNames.get(t.client) ?? words(t.client)) : null,
     process: processOf(t, runs.get(t.runId ?? "")),
     createdAt: t.createdAt.toISOString(),
     doneAt: t.doneAt?.toISOString() ?? null,
@@ -119,7 +120,7 @@ export async function listTasks(w: Who, f: { assignee?: string | null; open?: bo
   if (f.open) where.push(inArray(tasks.status, OPEN));
   else if (!f.old) where.push(or(inArray(tasks.status, OPEN), gte(tasks.updatedAt, new Date(Date.now() - 30 * 86_400_000))));
   if (f.due) where.push(lte(tasks.dueAt, new Date()));
-  if (f.client) where.push(eq(tasks.clientId, f.client));
+  if (f.client) where.push(eq(tasks.client, f.client));
   const rows = await db
     .select()
     .from(tasks)
@@ -140,10 +141,7 @@ async function check(w: Who, input: TaskInput) {
     });
     if (!m) return "that person isn't on the team";
   }
-  if (input.clientId) {
-    const c = await db.query.clients.findFirst({ where: and(eq(clients.workspaceId, w.workspaceId), eq(clients.id, input.clientId)) });
-    if (!c) return "no such client (emplio clients list)";
-  }
+  if (input.client && !(await listThings(w.workspaceId, FOLDER)).some((t) => t.path === `${FOLDER}/${input.client}`)) return "no such client (emplio clients list)";
   if (input.agent) {
     if (input.assigneeId) return "a task goes to a person or to an agent, not both";
     // by its id (slug) or its name, renamed ones too; saved by id, which stays when it's renamed
@@ -182,11 +180,11 @@ export async function addTask(w: Who, input: TaskInput, conversationId?: string)
       requesterId: w.userId,
       dueAt: input.dueAt ? parseDue(input.dueAt, await timezoneOf(w.userId)) : null,
       conversationId: conversationId || null,
-      clientId: input.clientId ?? null,
+      client: input.client ?? null,
       doneAt: status === "done" ? new Date() : null,
   });
   const task = await one(row!);
-  await labelChat(conversationId, task.clientId);
+  await labelChat(conversationId, task.client);
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "task", summary: `Added task "${task.title}" for ${task.assigneeName}` });
   return { ok: true, task };
 }
@@ -211,7 +209,7 @@ export async function updateTask(w: Who, id: string, input: TaskInput, conversat
   if (input.title !== undefined) set.title = input.title.trim();
   if (input.notes !== undefined) set.notes = input.notes?.trim() || null;
   if (input.waitingOn !== undefined) set.waitingOn = input.waitingOn?.trim() || null;
-  if (input.clientId !== undefined) set.clientId = input.clientId;
+  if (input.client !== undefined) set.client = input.client;
   if (input.assigneeId !== undefined) set.assigneeId = input.assigneeId;
   // a person or an agent: picking one drops the other
   if (input.assigneeId) set.agent = null;
@@ -576,12 +574,12 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     if (loose.length === 1) return loose[0]!.id;
     return `error: ${loose.length ? `"${s}" matches ${loose.map((m) => m.name ?? m.email).join(", ")}; use their email` : `nobody on the team matches "${s}" (emplio team list)`}`;
   };
-  // the client named in --client: its id, null for "none", undefined when not given, or "error: ..."
+  // the client named in --client: its slug, null for "none", undefined when not given, or "error: ..."
   const client = async (): Promise<string | null | undefined> => {
     if (opts.client === undefined) return undefined;
     if (opts.client.trim().toLowerCase() === "none") return null;
     const c = await findClient(w.workspaceId, opts.client);
-    return typeof c === "string" ? `error: ${c}` : c.id;
+    return typeof c === "string" ? `error: ${c}` : c.slug;
   };
   const input = async (): Promise<TaskInput | string> => {
     const to = person(opts.to);
@@ -589,7 +587,7 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     const c = await client();
     if (c?.startsWith("error:")) return c;
     const i: TaskInput = {};
-    if (c !== undefined) i.clientId = c;
+    if (c !== undefined) i.client = c;
     if (to !== undefined) i.assigneeId = to;
     if (opts.due !== undefined) i.dueAt = opts.due === "none" ? null : opts.due;
     if (opts.notes !== undefined) i.notes = opts.notes;
@@ -669,10 +667,10 @@ export async function tasksCommand(w: Who, conversationId: string, args: string[
     if (typeof i === "string") return i;
     // no --client: a title naming one client (its name or first word) is theirs
     // ponytail: word match on names; a client called "Call" would catch every call, match on more if that bites
-    if (i.clientId === undefined) {
+    if (i.client === undefined) {
       const t = words.join(" ").toLowerCase();
       const hits = (await listClients(w)).filter((c) => c.stage !== "past" && [c.name, c.name.split(/\s+/)[0]!].some((n) => n.length >= 4 && new RegExp(`(^|[^a-z0-9])${n.toLowerCase().replace(/[^a-z0-9 ]/g, "")}([^a-z0-9]|$)`).test(t)));
-      if (hits.length === 1) i.clientId = hits[0]!.id;
+      if (hits.length === 1) i.client = hits[0]!.slug;
     }
     const r = await addTask(w, { assigneeId: null, ...i, title: words.join(" ") }, conversationId);
     return r.ok ? `added ${show(r.task)}` : `error: ${r.error}`;
@@ -705,7 +703,7 @@ const BODY = {
     assigneeId: { type: ["string", "null"], format: "uuid" },
     agent: { type: ["string", "null"], maxLength: 100 },
     dueAt: { type: ["string", "null"], maxLength: 40 },
-    clientId: { type: ["string", "null"], format: "uuid" },
+    client: { type: ["string", "null"], pattern: "^[a-z0-9][a-z0-9-]*$", maxLength: 100 },
   },
 };
 

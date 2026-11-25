@@ -166,15 +166,15 @@ export function ClientsPage() {
     onMutate: ({ id, ...body }) =>
       queryClient.setQueryData<Client[]>(clientsQueryKey, (old) =>
         old?.map((c) =>
-          c.id === id
+          c.slug === id
             ? {
                 ...c,
                 ...(body.name !== undefined && { name: body.name }),
                 ...(body.stage !== undefined && { stage: body.stage }),
-                ...(body.handlerIds !== undefined && {
-                  handlers: body.handlerIds.map((h) => {
+                ...(body.handlers !== undefined && {
+                  handlers: body.handlers.map((h) => {
                     const m = team.data?.find((t) => t.id === h);
-                    return { id: h, name: m?.name ?? m?.email ?? "" };
+                    return c.handlers.find((x) => x.id === h || x.path === h) ?? { id: h, name: m?.name ?? m?.email ?? "", path: "" };
                   }),
                 }),
               }
@@ -191,7 +191,7 @@ export function ClientsPage() {
   const shown = all
     .filter((c) => (filter === "unhandled" ? c.stage === "active" && !c.handlers.length : filter === "all" || c.stage === filter))
     .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name)].join(" ").toLowerCase().includes(w)));
-  const current = all.find((c) => c.id === openId) ?? null;
+  const current = all.find((c) => c.slug === openId) ?? null;
   const unhandled = all.filter((c) => c.stage === "active" && !c.handlers.length).length;
   const waiting = all.reduce((n, c) => n + c.waitingTasks, 0);
 
@@ -310,10 +310,10 @@ export function ClientsPage() {
           ) : (
             <ul className="grid gap-1.5">
               {shown.map((c) => (
-                <li key={c.id}>
+                <li key={c.slug}>
                   <button
                     type="button"
-                    onClick={() => setOpenId(c.id)}
+                    onClick={() => setOpenId(c.slug)}
                     className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:outline-none"
                   >
                     <Monogram c={c} />
@@ -363,15 +363,15 @@ export function ClientsPage() {
               <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} back={{ label: current.name, onClick: () => setTaskId(null) }} />
             </div>
           ) : current ? (
-            <div key={current.id} className={cn("flex min-h-0 flex-1 flex-col", cameBack && "duration-200 ease-out animate-in fade-in-0 slide-in-from-left-8 motion-reduce:animate-none")}>
+            <div key={current.slug} className={cn("flex min-h-0 flex-1 flex-col", cameBack && "duration-200 ease-out animate-in fade-in-0 slide-in-from-left-8 motion-reduce:animate-none")}>
               <ClientDetails
-                key={current.id}
+                key={current.slug}
                 c={current}
                 known={[...new Set(all.flatMap((x) => x.details.map((d) => d.name)))]}
                 admin={admin}
                 team={team.data ?? []}
-                tasks={(tasks.data ?? []).filter((t) => t.clientId === current.id)}
-                onChange={(body) => update.mutate({ id: current.id, ...body })}
+                tasks={(tasks.data ?? []).filter((t) => t.client === current.slug)}
+                onChange={(body) => update.mutate({ id: current.slug, ...body })}
                 onOpenTask={setTaskId}
               />
             </div>
@@ -532,7 +532,9 @@ function ClientDetails({
 }) {
   const [name, setName] = useState(c.name);
   const open = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
-  const handlerIds = c.handlers.map((h) => h.id);
+  // a handler with a team file but not on the team (a freelancer) is picked by their file
+  const handlerIds = c.handlers.map((h) => h.id ?? h.path);
+  const people = [...team, ...c.handlers.flatMap((h) => (h.id ? [] : [{ id: h.path, name: h.name, email: "", role: "member" as const, reportsTo: null }]))];
   return (
     <>
       <SheetHeader className="gap-3 border-b pr-12">
@@ -579,20 +581,20 @@ function ClientDetails({
             </SelectContent>
           </Select>
           <Label className="text-muted-foreground">Handled by</Label>
-          <HandlerPicker clientName={c.name} team={team} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlerIds: ids })} />
+          <HandlerPicker clientName={c.name} team={people} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlers: ids })} />
         </div>
 
-        <ClientFacts key={c.id} c={c} known={known} onChange={(details) => onChange({ details })} />
+        <ClientFacts key={c.slug} c={c} known={known} onChange={(details) => onChange({ details })} />
 
         <ClientLinked slug={c.slug} />
 
-        <ClientProcesses clientId={c.id} onOpenTask={onOpenTask} />
+        <ClientProcesses clientId={c.slug} onOpenTask={onOpenTask} />
 
         <section className="grid gap-2">
           <div className="flex items-center justify-between">
             <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Open work</h2>
             {tasks.length > 0 && (
-              <Link href={`/tasks?client=${c.id}`} className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
+              <Link href={`/tasks?client=${c.slug}`} className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
                 All their tasks
                 <ArrowUpRightIcon className="size-3" />
               </Link>
@@ -640,7 +642,7 @@ function ClientDetails({
           <FileTextIcon />
           Notes
         </Button>
-        <Button size="sm" className="ml-auto" nativeButton={false} render={<Link href={`/tasks?client=${c.id}`} />}>
+        <Button size="sm" className="ml-auto" nativeButton={false} render={<Link href={`/tasks?client=${c.slug}`} />}>
           <ListTodoIcon />
           Their tasks
         </Button>
@@ -805,7 +807,7 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
 function StartItem({ p, clientId, onAsk }: { p: Process; clientId: string; onAsk: () => void }) {
   const queryClient = useQueryClient();
   const start = useMutation({
-    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, clientId }),
+    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, client: clientId }),
     onSuccess: (r) => toast.success(`Started ${r.processTitle}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined }),
     onError: (e) => toast.error(e.message),
     onSettled: () => {

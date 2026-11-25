@@ -248,9 +248,9 @@ function useTaskActions(onRemoved?: () => void) {
                     body.dueAt &&
                     new Date(`${body.dueAt}T18:00:00+05:30`).toISOString(),
                 }),
-                ...(body.clientId !== undefined && {
+                ...(body.client !== undefined && {
                   clientName:
-                    clients.data?.find((c) => c.id === body.clientId)?.name ??
+                    clients.data?.find((c) => c.slug === body.client)?.name ??
                     null,
                 }),
                 ...(body.agent !== undefined && {
@@ -302,11 +302,11 @@ export function TasksPage() {
   const tasks = useTasks();
   const { update, people, clients } = useTaskActions();
   const [show, setShow] = useState("all");
-  // /tasks?client=<id> (from the Clients page): that client's
+  // /tasks?client=<slug> (from the Clients page): that client's
   const [client, setClient] = useState(useSearchParams().get("client") ?? "all");
   const clientItems = [
     { value: "all", label: "All clients" },
-    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.id === client).map((c) => ({ value: c.id, label: c.name })),
+    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.slug === client).map((c) => ({ value: c.slug, label: c.name })),
   ];
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
@@ -325,7 +325,7 @@ export function TasksPage() {
           ? !t.assigneeId
           : true,
     )
-    .filter((t) => client === "all" || t.clientId === client)
+    .filter((t) => client === "all" || t.client === client)
     .filter((t) => matches(t, words))
     .sort(byDue);
   const openTasks = all.filter(isOpen);
@@ -656,7 +656,7 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
           key={current.id}
           t={current}
           people={people}
-          clients={(clients.data ?? []).map((c) => ({ value: c.id, label: c.name }))}
+          clients={(clients.data ?? []).map((c) => ({ value: c.slug, label: c.name }))}
           onChange={(body) => update.mutate({ id: current.id, ...body })}
           onRemove={() =>
             confirm({
@@ -813,7 +813,7 @@ function QuickAdd({ people, clientId }: { people: People; clientId: string | nul
       onSubmit={(e) => {
         e.preventDefault();
         if (title.trim())
-          add.mutate({ title, ...pick(who), dueAt: due || null, clientId });
+          add.mutate({ title, ...pick(who), dueAt: due || null, client: clientId });
       }}
     >
       <div className="flex items-center gap-2 px-1">
@@ -980,8 +980,8 @@ function TaskDetails({
           <Label className="text-muted-foreground">Client</Label>
           <ClientPicker
             items={[{ value: "none", label: "No client" }, ...clients]}
-            value={t.clientId ?? "none"}
-            onChange={(v) => onChange({ clientId: v === "none" ? null : v })}
+            value={t.client ?? "none"}
+            onChange={(v) => onChange({ client: v === "none" ? null : v })}
             className="w-full"
           />
           <Label htmlFor="task-due" className="text-muted-foreground">

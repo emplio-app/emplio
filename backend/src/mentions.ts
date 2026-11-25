@@ -46,7 +46,7 @@ async function fileMentions(who: Who): Promise<Mention[]> {
   });
 }
 
-// clients from the Clients list, plus any notes file under clients/ not on it yet; id is the notes path
+// clients (their files), plus records in other folders; id is the file path
 async function clientMentions(who: Who, files: Mention[]): Promise<Mention[]> {
   const listed = (await listClients(who).catch(() => [])).map((c): Mention => ({ kind: "record", id: notesPath(c), label: c.name, detail: `Client · ${c.stage}` }));
   const ids = new Set(listed.map((m) => m.id));
