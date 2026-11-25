@@ -189,7 +189,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
               variant="outline"
               size="sm"
               nativeButton={false}
-              render={<Link href={`/knowledge?file=${encodeURIComponent(`company/processes/${p.name}.md`)}`} />}
+              render={<Link href={`/chat?file=${encodeURIComponent(`company/processes/${p.name}.md`)}`} />}
             >
               <FileTextIcon />
               Edit steps
