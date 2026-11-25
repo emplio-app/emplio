@@ -367,6 +367,7 @@ export function ClientsPage() {
               <ClientDetails
                 key={current.id}
                 c={current}
+                known={[...new Set(all.flatMap((x) => x.details.map((d) => d.name)))]}
                 admin={admin}
                 team={team.data ?? []}
                 tasks={(tasks.data ?? []).filter((t) => t.clientId === current.id)}
@@ -446,8 +447,11 @@ function dueText(iso: string) {
 }
 
 // Short facts kept on a client (Contact email, Tax number, Files: monthly): anyone may fill them in. Processes fill an
-// input of the same name from them; Emplio adds them as it learns them.
-function ClientFacts({ c, onChange }: { c: Client; onChange: (details: Record<string, string | null>) => void }) {
+// input of the same name from them; Emplio adds them as it learns them. A detail any client has shows on every client,
+// empty until filled in.
+function ClientFacts({ c, known, onChange }: { c: Client; known: string[]; onChange: (details: Record<string, string | null>) => void }) {
+  const has = new Set(c.details.map((d) => d.name.toLowerCase()));
+  const rows = [...c.details, ...known.filter((n) => !has.has(n.toLowerCase())).map((name) => ({ name, value: "" }))];
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const add = () => {
@@ -459,9 +463,9 @@ function ClientFacts({ c, onChange }: { c: Client; onChange: (details: Record<st
   return (
     <section className="grid gap-2">
       <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Details</h2>
-      {c.details.length > 0 && (
+      {rows.length > 0 && (
         <div className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-x-3 gap-y-1.5">
-          {c.details.map((d) => (
+          {rows.map((d) => (
             <Fact key={`${d.name}:${d.value}`} name={d.name} value={d.value} onChange={(v) => onChange({ [d.name]: v })} />
           ))}
         </div>
@@ -492,20 +496,26 @@ function Fact({ name, value, onChange }: { name: string; value: string; onChange
       </Label>
       <Input
         aria-label={name}
+        placeholder="Not set"
         value={v}
         onChange={(e) => setV(e.target.value)}
         onBlur={() => (v.trim() ? v.trim() !== value && onChange(v.trim()) : setV(value))}
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       />
-      <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => onChange(null)}>
-        <XIcon />
-      </Button>
+      {value ? (
+        <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => onChange(null)}>
+          <XIcon />
+        </Button>
+      ) : (
+        <span />
+      )}
     </>
   );
 }
 
 function ClientDetails({
   c,
+  known,
   admin,
   team,
   tasks,
@@ -513,6 +523,7 @@ function ClientDetails({
   onOpenTask,
 }: {
   c: Client;
+  known: string[];
   admin: boolean;
   team: TeamMember[];
   tasks: Task[];
@@ -571,7 +582,7 @@ function ClientDetails({
           <HandlerPicker clientName={c.name} team={team} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlerIds: ids })} />
         </div>
 
-        <ClientFacts key={c.id} c={c} onChange={(details) => onChange({ details })} />
+        <ClientFacts key={c.id} c={c} known={known} onChange={(details) => onChange({ details })} />
 
         <ClientProcesses clientId={c.id} onOpenTask={onOpenTask} />
 
