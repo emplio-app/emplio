@@ -4,8 +4,9 @@ import type { WebSocket } from "@fastify/websocket";
 // What the open apps see as it happens, over WebSockets (routes in chat.ts):
 //  - replies: each running reply's chunks are kept until it's saved, so anyone opening that chat (after
 //    switching chats, in another tab, on their phone, after a reload) gets it replayed and then follows it live;
-//  - events: a nudge to each of a person's open apps when their chat list changes (a reply started or
-//    finished, a title was written), so the sidebar's working and unread marks stay current; and a notification
+//  - events: a nudge to each of a person's open apps naming the lists that changed (a reply started or finished,
+//    a title was written, an OK card asked or answered), so they fetch just those again, and the sidebar's working
+//    and unread marks stay current; and a notification
 //    (push.ts) shown inside the app they're looking at, which tells us here what that is.
 // ponytail: in this process's memory; with more than one server, move both to Redis pub/sub
 
@@ -18,7 +19,9 @@ const replies = new Map<string, Reply>();
 const apps = new Map<string, Map<WebSocket, string | null>>();
 
 type Note = { title: string; body: string; path: string };
-export const send = (socket: WebSocket, frame: WebSocketChatTransportResponse | { type: "chats" } | ({ type: "note" } & Note)) => {
+// what an app shows that can change without it asking: the chat list, the jobs list, the task list, OK cards
+export type Changed = "chats" | "jobs" | "tasks" | "approvals";
+export const send = (socket: WebSocket, frame: WebSocketChatTransportResponse | { type: "changed"; what: Changed[] } | ({ type: "note" } & Note)) => {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
 };
 
@@ -39,14 +42,16 @@ export function follow(id: string, userId: string, stream: ReadableStream<UIMess
     reply.ended = true;
     reply.watchers.clear();
   })();
-  notify(userId);
+  // working marks: in the chat list, or the jobs list for a job's chat
+  notify(userId, ["chats", "jobs"]);
   return reply;
 }
 
 // The reply is saved: from here the chat loads from the database.
 export function settle(id: string, reply: Reply) {
   if (replies.get(id) === reply) replies.delete(id);
-  notify(reply.userId);
+  // what the reply did may have added or finished tasks too
+  notify(reply.userId, ["chats", "jobs", "tasks"]);
 }
 
 export const isReplying = (id: string) => replies.has(id);
@@ -110,9 +115,9 @@ export function addApp(userId: string, socket: WebSocket) {
 // hidden (the Mac app keeps its window's page alive in the background, a background tab) doesn't count.
 export const isLooking = (userId: string, path: string) => [...(apps.get(userId)?.values() ?? [])].includes(path);
 
-// This person's chat list changed: their open apps fetch it again.
-export function notify(userId: string) {
-  for (const socket of apps.get(userId)?.keys() ?? []) send(socket, { type: "chats" });
+// Some of this person's lists changed: their open apps fetch those again (lib/api.ts useLiveEvents).
+export function notify(userId: string, what: Changed[]) {
+  for (const socket of apps.get(userId)?.keys() ?? []) send(socket, { type: "changed", what });
 }
 
 // A notification, inside the app they're looking at right now. False when there's none, so it goes to their devices

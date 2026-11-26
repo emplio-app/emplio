@@ -16,7 +16,10 @@ import { approvals, workspaceMembers } from "./db/schema";
 import { postMessage } from "./chat";
 import { startedIn } from "./jobs";
 import { connectCard, getAction, providerFor, runAction } from "./integrations";
-import { notify } from "./live";
+import { type Changed, notify } from "./live";
+
+// an OK card asked or answered: the chat's cards, and the jobs list, which shows a job waiting on one
+const CARDS: Changed[] = ["approvals", "jobs"];
 import type { Session } from "./sandbox";
 
 // The command waits this long for the answer; the card stays answerable until VALID_MS, then it expires.
@@ -67,7 +70,7 @@ const setAllowed = (workspaceId: string, userId: string, value: ReturnType<typeo
 
 // An ask's answer or outcome, kept; their open apps look again.
 const keep = (id: string, userId: string, set: { decision?: NonNullable<Approval["decision"]>; result?: NonNullable<Approval["result"]> }) =>
-  db.update(approvals).set(set).where(eq(approvals.id, id)).then(() => notify(userId));
+  db.update(approvals).set(set).where(eq(approvals.id, id)).then(() => notify(userId, CARDS));
 
 // Whether a card in this chat is still waiting for their tap (the next-step card stays away then, chat.ts).
 export const waitingIn = async (chatId: string) =>
@@ -135,7 +138,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
   };
   const showIn = await startedIn(s.conversationId);
   await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card });
-  notify(s.user.id);
+  notify(s.user.id, CARDS);
   s.notify(card);
   const keepLater = () => {
     const run = own?.run ?? (() => runAction({ workspaceId: s.workspaceId, userId: s.user.id }, action, input, { conversationId: s.conversationId, account }));
@@ -198,7 +201,7 @@ export async function decide(id: string, workspaceId: string, userId: string, de
   if (!l || l.workspaceId !== workspaceId || l.userId !== userId) {
     // nothing can carry it out any more (it ran out, or the server restarted): its card closes too
     await db.update(approvals).set({ decision: "timeout" }).where(and(eq(approvals.id, id), eq(approvals.userId, userId), isNull(approvals.decision)));
-    notify(userId);
+    notify(userId, CARDS);
     return false;
   }
   later.delete(id);
@@ -219,7 +222,7 @@ export async function decide(id: string, workspaceId: string, userId: string, de
   // in the chat, so the AI employee knows how it went
   // not awaited: a reply running in the chat now holds it (chat.ts holdChat), and the button shouldn't wait for that
   void postMessage(l.conversationId, { id: generateId(), role: "assistant", parts: [{ type: "text", text }] })
-    .then(() => notify(userId))
+    .then(() => notify(userId, ["chats"]))
     .catch(() => {});
   return text;
 }
