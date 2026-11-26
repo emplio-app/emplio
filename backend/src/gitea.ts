@@ -149,12 +149,14 @@ async function writeFilesNow(workspaceId: string, repo: string, files: { path: s
 
 // Read a file and write what change makes of it (it and any other files) as one step, so a write in between (a quick
 // second edit, a box's push) isn't lost: on a clash it's read and changed again, once.
-export const editFile = (workspaceId: string, repo: string, path: string, change: (text: string) => { path: string; content: string | null }[], message: string, author: Author) =>
+export const editFile = (workspaceId: string, repo: string, path: string, change: (text: string | null) => { path: string; content: string | null }[], message: string, author: Author) =>
   locked(`${workspaceId}/${repo}`, async () => {
     for (let i = 0; ; i++) {
       const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents/${path}?ref=main`);
+      // not there: null for change to decide; any other failure stops here, so a hiccup never writes a page from nothing
+      if (!res.ok && res.status !== 404) throw new Error(`gitea: read ${path} failed (${res.status})`);
       const cur = res.ok ? ((await res.json()) as { sha: string; content: string }) : null;
-      const files = change(cur ? Buffer.from(cur.content, "base64").toString() : "");
+      const files = change(cur ? Buffer.from(cur.content, "base64").toString() : null);
       if (!files.length) return;
       try {
         return await writeFilesNow(workspaceId, repo, files, message, author, cur ? { [path]: cur.sha } : {});

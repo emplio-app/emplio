@@ -67,7 +67,7 @@ export function AutomationsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { data: me } = useMe();
-  const canManage = me?.workspaces[0]?.role !== "member";
+  const canManage = !!me && me.workspaces[0]?.role !== "member";
   const queryClient = useQueryClient();
   const list = useQuery({
     queryKey: automationsQueryKey,

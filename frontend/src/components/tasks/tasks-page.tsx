@@ -636,10 +636,14 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
   const { update, start, remove, people, clients } = useTaskActions(onRemoved);
   const [confirmDialog, confirm] = useConfirm();
   const queryClient = useQueryClient();
-  // sent back, this task is cancelled and the earlier step's new one takes over: show that one
+  // sent back, this task is cancelled and the earlier step's new one takes over
   const sendBack = useMutation({
     mutationFn: ({ runId, note }: { runId: string; note: string }) => api(`/process-runs/${runId}/back`, { note }),
-    onSuccess: () => toast.success("Sent back"),
+    // this task is cancelled now: the panel closes, the earlier step's new task is in the list
+    onSuccess: () => {
+      toast.success("Sent back");
+      onRemoved();
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });

@@ -176,14 +176,14 @@ export function KnowledgePage() {
                     <div key={k} className="contents">
                       <dt className="text-muted-foreground">{k}</dt>
                       <dd className="whitespace-pre-line">
-                        <Linked text={v} prefix={agentPath({ repo: open.repo, path: "" })} titles={titles} />
+                        <Linked text={v} prefix="company/" titles={titles} />
                       </dd>
                     </div>
                   ))}
                 </dl>
               )}
               {/* a tool, script or list: shown as the code it is */}
-              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](/knowledge?file=${encodeURIComponent(agentPath({ repo: open.repo, path: linkFile(p) }))})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](/knowledge?file=${encodeURIComponent(agentPath({ repo: "company", path: linkFile(p) }))})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
               {!!backlinks.data?.length && (
                 <div className="mt-8 border-t pt-4 text-sm">
                   <p className="mb-2 text-muted-foreground">Linked from</p>

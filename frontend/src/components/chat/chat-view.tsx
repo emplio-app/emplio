@@ -1081,7 +1081,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     <TriangleAlertIcon className="size-4 shrink-0 text-destructive" />
                     <span className="flex-1">{paused ? pausedNote(error.message) : replyFailed(error.message)}</span>
                     {/* what it did before failing is saved: carry on from there instead of redoing it */}
-                    {paused && me?.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
+                    {paused && !!me && me.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
                     {!paused && messages.at(-1)?.role === "assistant" && (
                       <Button size="sm" variant="outline" onClick={() => handlers.current.dispatch({ text: "Continue", files: [] })}>
                         Continue

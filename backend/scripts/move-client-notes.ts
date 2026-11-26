@@ -19,27 +19,44 @@ const APPLY = process.argv.includes("--apply");
 const ONLY = process.argv.slice(2).find((a) => !a.startsWith("--"));
 const OLD = new RegExp(`^(?:knowledge/(?=clients/))?(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)\\.md$`);
 
-// "key: value" lines (as they were written before) to YAML; the words below as they were
+// "key: value" lines (as they were written before) to YAML; the words below as they were. A key's "- item" lines under
+// it are its list; any other line in the top isn't lost: it goes to the top of the words.
+const valueOf = (v: string): unknown => {
+  const links = v.match(/\[\[[^\]]+\]\]/g) ?? [];
+  if (links.length && !v.replace(/\[\[[^\]]+\]\]|[\s,]/g, "")) return links.length > 1 ? links : links[0];
+  let read: unknown = v;
+  try {
+    read = parse(v);
+  } catch {}
+  // a number or yes/no only when it reads back the same (+91…, 007, "#4" after an address stay text)
+  return (typeof read === "number" || typeof read === "boolean") && String(read) === v ? read : v;
+};
+
 export function toYaml(text: string) {
   const top = TOP.exec(text);
   if (!top) return text;
   const fields: Record<string, unknown> = {};
+  const rest: string[] = [];
+  let last: string | null = null;
   for (const line of (top[1] ?? "").split(/\r?\n/)) {
-    const kv = /^([A-Za-z][\w -]*?)\s*:\s*(.*)$/.exec(line);
-    if (!kv) continue;
-    const v = kv[2]!.trim();
-    const links = v.match(/\[\[[^\]]+\]\]/g) ?? [];
-    if (links.length && !v.replace(/\[\[[^\]]+\]\]|[\s,]/g, "")) fields[kv[1]!] = links.length > 1 ? links : links[0];
-    else {
-      let read: unknown = v;
-      try {
-        read = parse(v);
-      } catch {}
-      // a number or yes/no only when it reads back the same (+91…, 007, "#4" after an address stay text)
-      fields[kv[1]!] = (typeof read === "number" || typeof read === "boolean") && String(read) === v ? read : v;
+    const item = /^\s*-\s+(.*)$/.exec(line);
+    if (item && last) {
+      const cur = fields[last];
+      fields[last] = [...(Array.isArray(cur) ? cur : cur === "" ? [] : [cur]), ...[valueOf(item[1]!.trim())].flat()];
+      continue;
     }
+    const kv = /^([A-Za-z][\w -]*?)\s*:\s*(.*)$/.exec(line);
+    if (!kv) {
+      if (line.trim()) rest.push(line);
+      last = null;
+      continue;
+    }
+    last = kv[1]!;
+    fields[last] = valueOf(kv[2]!.trim());
   }
-  return `---\n${Object.keys(fields).length ? stringify(fields) : ""}---\n${text.slice(top[0].length)}`;
+  for (const [k, v] of Object.entries(fields)) if (v === "") delete fields[k];
+  const body = text.slice(top[0].length);
+  return `---\n${Object.keys(fields).length ? stringify(fields) : ""}---\n${rest.length ? `${rest.join("\n")}\n\n` : ""}${body}`;
 }
 
 if (import.meta.main) {

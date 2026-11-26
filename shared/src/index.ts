@@ -676,6 +676,10 @@ export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
 export type ClientStage = string;
 export const STAGE_RULE = /^[a-z][a-z0-9 -]{0,29}$/;
 export const isWorking = (stage: string) => stage !== "prospect" && stage !== "past";
+// won and being worked for: what every-client work and onboarding go to; the business's other words (lead, on hold) aren't
+// ponytail: a business whose word for won is something else gets neither; add it here
+export const WON_STAGES = ["active", "onboarding", "won"];
+export const isWon = (stage: string) => WON_STAGES.includes(stage);
 export type Client = {
   slug: string;
   name: string;

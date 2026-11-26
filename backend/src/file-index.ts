@@ -3,6 +3,7 @@
 // blob sha changed; a repo never indexed is filled on its first search. Text files only (TEXT below), up to MAX_BYTES each. Who may search which repo is the
 // caller's to decide. The agent's own chats search the files on their computer instead (emplio search); this is
 // for what has no computer, like the chat review.
+import { isWon } from "@emplio/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import { fileIndex } from "./db/schema";
@@ -18,13 +19,11 @@ const syncing = new Map<string, Promise<unknown>>();
 // A client's page (company/clients/<slug>/index.md) new as active, or moved from prospect to active, however it was written
 // (emplio clients, the app, Emplio editing it by hand): the new-client automations run for them, here only, so never
 // twice. A repo's first indexing starts nothing.
-// A top that doesn't read has no stage (null): it starts nothing. Only these stages are won; the business's own others
-// (lead, on hold) aren't.
-// ponytail: a business whose won word is something else gets no onboarding; add it here or let Emplio start them
-const WON = ["active", "onboarding", "won"];
+// A top that doesn't read at all has no stage (null): it starts nothing. A warning in one that reads (a link
+// unquoted) doesn't stop it.
 const stageOf = (text: string) => {
   const t = readTop(text);
-  return t.problems.length ? null : String(t.values.stage ?? "").toLowerCase() || "active";
+  return t.problems.length && !Object.keys(t.values).length ? null : String(t.values.stage ?? "").toLowerCase() || "active";
 };
 const CLIENT_FILE = /^clients\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
 // the same client's file where it was before (clients/<slug>.md, knowledge/clients/): moved there isn't new
@@ -50,7 +49,7 @@ export function syncFiles(workspaceId: string, repo: string) {
       await db.insert(fileIndex).values(values).onConflictDoUpdate({ target: [fileIndex.workspaceId, fileIndex.repo, fileIndex.path], set: values });
       const slug = repo === "company" && rows.length ? CLIENT_FILE.exec(f.path)?.[1] : undefined;
       const old = rows.find((r) => r.path === f.path) ?? rows.find((r) => WAS_CLIENT.exec(r.path)?.[1] === slug);
-      if (slug && WON.includes(stageOf(text) ?? "") && (!old || stageOf(old.text ?? "") === "prospect")) won.push(slug);
+      if (slug && isWon(stageOf(text) ?? "") && (!old || stageOf(old.text ?? "") === "prospect")) won.push(slug);
     }
   });
   syncing.set(key, run.catch(() => {}));

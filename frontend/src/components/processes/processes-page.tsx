@@ -47,7 +47,8 @@ function oneStart(a: Process["startedBy"][number]) {
           : "On a schedule";
   const one = a.clients?.length === 1 && a.clients[0]!.includes("=") ? `clients with ${a.clients[0]}` : null;
   const n = a.clients?.includes("*") ? "every active client" : (one ?? `${a.clients?.length ?? 0} client${a.clients?.length === 1 ? "" : "s"}`);
-  return `${when}, for ${n}`;
+  // not for clients (a process for other things): no count
+  return a.clients?.length ? `${when}, for ${n}` : when;
 }
 
 const WHO: Record<string, string> = { handler: "Their handler", owner: "Owner", emplio: "Emplio", client: "The client" };
@@ -115,7 +116,9 @@ export function ProcessesPage() {
 export function ProcessPage() {
   const { name } = useParams<{ name: string }>();
   const { data: me } = useMe();
-  const admin = me?.workspaces[0]?.role !== "member";
+  // not while still loading: a member would see the owner's buttons for a moment
+  const role = me?.workspaces[0]?.role;
+  const admin = !!role && role !== "member";
   const processes = useProcesses();
   const p = processes.data?.find((x) => x.name === decodeURIComponent(name));
   const [all, setAll] = useState(false);

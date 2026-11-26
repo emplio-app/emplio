@@ -5,7 +5,7 @@
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins (details: anyone).
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { isWorking, STAGE_RULE, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role, type TeamMember, type Thing } from "@emplio/shared";
+import { isWon, STAGE_RULE, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role, type TeamMember, type Thing } from "@emplio/shared";
 import { record } from "./activity";
 import { context } from "./auth";
 import { db } from "./db";
@@ -65,12 +65,12 @@ export function mergeDetails(old: ClientDetail[], given: Record<string, string |
 // A schedule's clients: list: all (*), names, and Detail=value (every active client with that detail, any case)
 export function pickClients<T extends { slug: string; name: string; stage: string; details: ClientDetail[] }>(all: T[], list: string[]): T[] {
   const wanted = list.map((c) => c.trim().toLowerCase());
-  if (wanted.includes("*")) return all.filter((c) => isWorking(c.stage));
+  if (wanted.includes("*")) return all.filter((c) => isWon(c.stage));
   const byDetail = wanted.flatMap((w) => (w.includes("=") ? [w.split("=").map((s) => s.trim()) as [string, string]] : []));
   return all.filter(
     (c) =>
       (c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name)))) ||
-      (isWorking(c.stage) && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
+      (isWon(c.stage) && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
   );
 }
 
@@ -137,7 +137,8 @@ export async function findClient(workspaceId: string, q: string, exact = false):
   const all = await listClients({ workspaceId });
   const s = q.trim().toLowerCase();
   if (!s) return "which client?";
-  const hit = all.find((c) => c.slug === s || c.slug === slugOf(s) || c.name.toLowerCase() === s);
+  // a slug before a name: one named "Acme" kept as acme-2 never stands in for acme
+  const hit = all.find((c) => c.slug === s) ?? all.find((c) => c.slug === slugOf(s)) ?? (exact ? undefined : all.find((c) => c.name.toLowerCase() === s));
   if (hit) return hit;
   if (exact) return `no client "${q}"`;
   const loose = all.filter((c) => c.name.toLowerCase().includes(s) || c.slug.includes(slugOf(s) || s));
@@ -157,7 +158,8 @@ export async function handlerLinks(workspaceId: string, asked: string[], me: str
   for (const raw of asked) {
     const part = raw.trim().toLowerCase();
     if (!part) continue;
-    if (/^team\/[a-z0-9-]+$/.test(part) && people.some((t) => t.path === part)) {
+    // a team/ link stays as given, its file there or not (a link to nothing yet is only a warning)
+    if (/^team\/[a-z0-9-]+$/.test(part)) {
       links.push(part);
       continue;
     }
@@ -192,7 +194,7 @@ export async function handlerLinks(workspaceId: string, asked: string[], me: str
 // One commit to the company files as whoever made the change, read back before anything reads them.
 // files: or a change to one file (path), read and written as one step
 type Change = { path: string; content: string | null };
-async function commit(w: Who, files: Change[] | ((text: string) => Change[]), message: string, path = "") {
+async function commit(w: Who, files: Change[] | ((text: string | null) => Change[]), message: string, path = "") {
   const me = (await listTeam(w.workspaceId)).find((m) => m.id === w.userId);
   const author = me ? { name: me.name ?? me.email, email: me.email } : UPKEEP;
   if (typeof files === "function") await editFile(w.workspaceId, "company", path, files, message, author);
@@ -256,11 +258,15 @@ export async function updateClient(w: Who, q: string, input: ClientInput, conver
   const c = await changes(w, input, old);
   if (typeof c === "string") return { ok: false, error: c };
   // the file keeps its name, and so tasks and chats keep pointing at it
-  const change = (text: string) => {
+  let gone = false;
+  const change = (text: string | null) => {
+    // removed meanwhile: not brought back
+    if (text === null) return ((gone = true), []);
     const next = setFields(text, c.set);
     return next !== text || c.files.length ? [{ path: fileOf(old.slug), content: next }, ...c.files] : [];
   };
   await commit(w, change, `Client ${old.name} changed`, fileOf(old.slug));
+  if (gone) return { ok: false, error: `${old.name} was removed meanwhile` };
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${c.set.name ?? old.name}` });
   return { ok: true, client: await reread(w, old.slug) };
 }

@@ -465,8 +465,10 @@ export async function stepFinished(task: { runId: string | null; stepIndex: numb
 }
 
 const findRun = async (workspaceId: string, id: string) => {
-  const run = await db.query.processRuns.findFirst({ where: and(eq(processRuns.workspaceId, workspaceId), sql`${processRuns.id}::text like ${`${id.trim()}%`}`) });
-  if (!id.trim() || !run) throw new ProcessError(`no process run ${id} (emplio processes runs)`);
+  // the start of its id, nothing else (a % would match any)
+  const ok = /^[0-9a-f-]+$/i.test(id.trim());
+  const run = ok ? await db.query.processRuns.findFirst({ where: and(eq(processRuns.workspaceId, workspaceId), sql`${processRuns.id}::text like ${`${id.trim().toLowerCase()}%`}`) }) : undefined;
+  if (!run) throw new ProcessError(`no process run ${id} (emplio processes runs)`);
   return run;
 };
 const currentTask = (run: Run) =>
@@ -481,6 +483,9 @@ export async function sendBack(w: Who, id: string, note: string) {
   const t = await currentTask(run);
   if (!isAdmin(w) && t?.assigneeId !== w.userId) throw new ProcessError("only whoever does this step, the owner or an admin can send it back");
   const to = step.back - 1;
+  // a note steers the step it goes back to: from a member, not one done by Emplio or an agent (as the owner)
+  if (note.trim() && !isAdmin(w) && (await assign(run.workspaceId, run.steps[to]!.who, "someone", "someone")).assigneeId === null)
+    throw new ProcessError(`step ${to + 1} is done by Emplio; send it back without a note, or ask the owner or an admin`);
   const finished = run.finished.map((f, k) => (k >= to ? null : f));
   const [moved] = await db.update(processRuns).set({ step: to, finished }).where(and(eq(processRuns.id, run.id), eq(processRuns.step, run.step))).returning();
   if (!moved) throw new ProcessError("it moved on meanwhile; try again");

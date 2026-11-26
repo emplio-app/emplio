@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { TaskPanel } from "@/components/tasks/tasks-page";
 import { thingHref } from "@/components/things/things";
@@ -160,7 +160,9 @@ export function ClientsPage() {
     setTaskIdRaw(id);
   };
   const { data: me } = useMe();
-  const admin = me?.workspaces[0]?.role !== "member";
+  // not while still loading: a member would see the owner's buttons for a moment
+  const role = me?.workspaces[0]?.role;
+  const admin = !!role && role !== "member";
   const clients = useClients();
   const tasks = useTasks();
   const team = useQuery({ queryKey: ["team"], queryFn: () => api<TeamMember[]>("/team") });
@@ -171,6 +173,7 @@ export function ClientsPage() {
   const asked = useSearchParams().get("client");
   const [openId, setOpenId] = useState<string | null>(asked);
   useEffect(() => void (asked && setOpenId(asked)), [asked]);
+  const router = useRouter();
   const [adding, setAdding] = useState(false);
 
   const update = useMutation({
@@ -361,6 +364,8 @@ export function ClientsPage() {
           if (o) return;
           setOpenId(null);
           setTaskId(null);
+          // so the same client's link opens them again
+          if (asked) router.replace("/clients", { scroll: false });
         }}
       >
         <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">
