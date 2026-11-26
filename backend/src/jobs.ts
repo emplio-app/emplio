@@ -88,7 +88,7 @@ export const nudged = (msgs: { role: string; parts: unknown }[]) => {
   return commands.length <= SMALL_WORK;
 };
 // jobs in their tool-saving run: its end leaves the report and status as they were and wakes nobody
-const saving = new Set<string>();
+export const saving = new Set<string>();
 export const savedTool = (msgs: { role: string; parts: unknown }[]) => {
   const lastAsk = [...msgs].reverse().find((m) => m.role === "user");
   if (!lastAsk || !textOf(lastAsk).startsWith(FROM_EMPLIO)) return true;
@@ -370,6 +370,9 @@ async function began(w: Row, stop: () => void) {
     return async (answer: string, outcome: "completed" | "failed" | "stopped", interrupted = false) => {
       saving.delete(w.id);
       if (w.agent && w.chatId) await keepTools(w, w.chatId).catch((error) => console.error("keeping an agent's tools failed", error));
+      // carried on while it saved (carryOn): the next run has taken over this job's tracking, and its end ends it.
+      // Ending it here left that run's report unrecorded and the job "working" for good
+      if (e.run !== run) return;
       live.delete(w.id);
       e.end();
       // told of unticked checklist steps (openSteps), it found one really undone and wrote a new report: that one goes
@@ -753,6 +756,8 @@ export type JobsReply = { text: string; started?: string[] };
 // New work for a job that has one: running, it reads it after its current step; finished, it carries on with everything it knew.
 async function carryOn(who: Who, conversationId: string, w: Row, brief: string): Promise<JobsReply> {
   if (!w.chatId) return { text: `error: ${short(w.id)} is from before jobs had their own chat and can't carry on; hand it off with --new` };
+  // what it's given now is work, not the tool-saving run it may be in the middle of
+  saving.delete(w.id);
   const busy = live.has(w.id);
   if (busy) steer(w.chatId);
   else {

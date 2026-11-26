@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.18 (2026-11-26)
+
+### What's new
+
+- An agent given more work while it was saving its steps to reuse could finish that work and still show "working", with its report never reaching you. Its report now always comes through.
+
+### For developers
+
+- `jobs.ts`: the tool-saving run's end no longer ends the job's tracking when a carry-on run has taken it over (its end returned early, so that run's report and status were never written); `carryOn` clears the saving mark. Test: "work handed over while a job saves its tools still ends with its report".
+
 ## 1.4.17 (2026-11-26)
 
 ### What's new
