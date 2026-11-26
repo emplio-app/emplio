@@ -752,6 +752,21 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     // first has the browser pull the position back to fit, and its scroll event isn't theirs (checkBottom).
     let height = (viewHeight.current = el.clientHeight);
     let below = el.scrollHeight - el.scrollTop - height;
+    // Following a reply as it streams: the end is reached at once and the content slides the new lines up into
+    // place, the same way a sent prompt glides (a transform, on the graphics chip, smooth while the page is busy
+    // drawing the reply; scrolling there bit by bit moved in jumps). A slide still running carries on from where
+    // it is, plus what was just added.
+    let glide: Animation | undefined;
+    const follow = () => {
+      const content = contentRef.current;
+      const from = el.scrollTop;
+      el.scrollTop = el.scrollHeight;
+      const added = el.scrollTop - from;
+      if (!content || added <= 0 || added > height || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const left = glide?.playState === "running" ? new DOMMatrix(getComputedStyle(content).transform).m42 : 0;
+      glide?.cancel();
+      glide = content.animate({ transform: [`translateY(${left + added}px)`, "none"] }, { duration: 220, easing: "cubic-bezier(0.33, 1, 0.68, 1)" });
+    };
     const keep = () => void (el.clientHeight === height && (below = el.scrollHeight - el.scrollTop - height));
     const observer = new ResizeObserver(() => {
       const pin = Date.now() - pinnedAt.current < 1500 && el.querySelector<HTMLElement>("[data-pin]");
@@ -760,7 +775,11 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       // ponytail: a phone's composer and keyboard settle right after sending
       if (editBox) editBox.scrollIntoView({ block: "nearest" });
       else if (pin) el.scrollTop = pin.offsetTop - PIN_GAP;
-      else if (stuck.current) el.scrollTop = el.scrollHeight;
+      else if (stuck.current) {
+        // the view itself changed size (the keyboard): straight there
+        if (el.clientHeight === height) follow();
+        else el.scrollTop = el.scrollHeight;
+      }
       // only when it did change: setting the position, even to the same value, ends a flick on an iPhone
       else if (el.clientHeight !== height) el.scrollTop = el.scrollHeight - el.clientHeight - below;
       height = viewHeight.current = el.clientHeight;
@@ -771,7 +790,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     observer.observe(el);
     if (contentRef.current) observer.observe(contentRef.current);
     el.addEventListener("scroll", keep, { passive: true });
-    return () => (observer.disconnect(), el.removeEventListener("scroll", keep));
+    return () => (observer.disconnect(), el.removeEventListener("scroll", keep), glide?.cancel());
   }, [empty]);
 
   useEffect(() => {
