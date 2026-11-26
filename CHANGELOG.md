@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.16 (2026-11-26)
+
+### What's new
+
+- Agents now think a little the whole way through a job, including when they save steps to reuse next time; that step is told to think carefully instead. Same quality in our checks, and it keeps each job cheaper.
+
+### For developers
+
+- `chat.ts`: a job's reasoning stays `low` for its tool-saving run too (measured through OpenRouter on Haiku 5.5, 3 runs each: a step at another effort reads only the cached system prompt, and the job's conversation is paid again at the cache-write price; the high saving run cost ~22% more than staying low); `SAVE_TOOL` asks for careful thought in words ("Ultrathink: …"). Skills eval: right_call 83/93% vs 88/93% before; the saving run writes ~10% more tokens.
+
 ## 1.4.15 (2026-11-26)
 
 ### What's new
