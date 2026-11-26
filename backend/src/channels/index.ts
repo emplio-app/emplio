@@ -151,7 +151,7 @@ export async function post(workspaceId: string, userId: string, markdown: string
     await postMessage(id, { id: generateId(), role: "assistant", parts: [{ type: "text", text: markdown }, ...(o.from ? [{ type: "data-from", data: o.from }] : [])] });
     await db.update(conversations).set({ unread: true }).where(eq(conversations.id, id));
   }
-  notify(userId);
+  notify(userId, ["chats"]);
   void pushTo(userId, markdown, id);
   if (!links.length && o.email) {
     const user = await db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });

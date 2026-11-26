@@ -114,8 +114,8 @@ export const chatTransport = new WebSocketChatTransport({
   prepareSendMessagesRequest: ({ messages }) => ({ messages: messages.slice(-1) }),
 });
 
-// The server's nudges (/events): refetch the chat list when it changed (a reply started or finished, a new
-// title), so the sidebar's working and unread marks stay current. Reconnects after a drop.
+// The server's nudges (/events): refetch the lists it says changed (a reply started or finished, a new title, an OK
+// card), so the sidebar's working and unread marks stay current. Reconnects after a drop.
 // Also the notification center's spot in the app (backend push.ts): we tell the server which page is in front of the
 // person, and while one is, their notifications show here instead of on their devices.
 export function useLiveEvents() {
@@ -127,13 +127,20 @@ export function useLiveEvents() {
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
-    // a reply that ended may have added or finished tasks too; a card asked or answered nudges as well
-    const refresh = () => {
-      void queryClient.invalidateQueries({ queryKey: conversationsQueryKey });
-      // jobs' chats aren't in the chat list: theirs is the jobs list
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
-      void queryClient.invalidateQueries({ queryKey: approvalsQueryKey });
+    // The lists the server can change without this app asking (jobs' chats aren't in the chat list: theirs is the
+    // jobs list). Only those named as changed are fetched again: every nudge used to fetch them all. Nudges close
+    // together (a reply starting, then its title) come as one fetch each.
+    const keys = { chats: conversationsQueryKey, jobs: ["jobs"], tasks: tasksQueryKey, approvals: approvalsQueryKey };
+    type Changed = keyof typeof keys;
+    const due = new Set<Changed>();
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const refresh = (what: Changed[] = Object.keys(keys) as Changed[]) => {
+      for (const w of what) if (w in keys) due.add(w);
+      clearTimeout(soon);
+      soon = setTimeout(() => {
+        for (const w of due) void queryClient.invalidateQueries({ queryKey: keys[w] });
+        due.clear();
+      }, 100);
     };
     const connect = () => {
       socket = new WebSocket(`${API_URL.replace(/^http/, "ws")}/events`);
@@ -145,8 +152,10 @@ export function useLiveEvents() {
         void queryClient.invalidateQueries({ queryKey: versionQueryKey });
       };
       socket.onmessage = (e) => {
-        refresh();
-        const frame = JSON.parse(e.data as string) as { type: string; body?: string; path?: string };
+        const frame = JSON.parse(e.data as string) as { type: string; what?: Changed[]; body?: string; path?: string };
+        if (frame.type === "changed") refresh(frame.what);
+        // a server from before "changed" said only that something did
+        else if (frame.type === "chats") refresh();
         if (frame.type === "note" && frame.body && frame.path) {
           const path = frame.path;
           // a long reply would cover the chat: 4 lines, then cut
@@ -172,6 +181,7 @@ export function useLiveEvents() {
     return () => {
       closed = true;
       clearTimeout(retry);
+      clearTimeout(soon);
       socket?.close();
       window.removeEventListener("focus", told);
       window.removeEventListener("blur", told);

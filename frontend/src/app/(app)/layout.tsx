@@ -30,8 +30,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // the iPhone app: no arrows-and-Done bar above the keyboard (#282). Mobile Safari keeps it, a web page can't hide it
   useEffect(() => {
-    const kb = (window as { Capacitor?: { Plugins?: { Keyboard?: { setAccessoryBarVisible(o: { isVisible: boolean }): Promise<void> } } } })
-      .Capacitor?.Plugins?.Keyboard;
+    const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { Keyboard?: { setAccessoryBarVisible(o: { isVisible: boolean }): Promise<void> } } } })
+      .Capacitor;
+    // iPhone only: Android has no such bar, and its "not implemented" answer showed as an error
+    const kb = cap?.getPlatform?.() === "ios" ? cap.Plugins?.Keyboard : undefined;
     void kb?.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
   }, []);
   usePhoneNotifications(!!me?.user.name, router.push);
@@ -64,7 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// In the phone app (iPhone or Android), once signed in and notifications are allowed: tell the server where to reach this
+// In the iPhone app, once signed in and notifications are allowed: tell the server where to reach this
 // phone, and open the chat a tapped notification is about. The plugin is missing on app builds without it.
 type PushPlugin = {
   checkPermissions(): Promise<{ receive: string }>;
@@ -73,8 +75,10 @@ type PushPlugin = {
 };
 function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) {
   useEffect(() => {
-    const push = (window as { Capacitor?: { Plugins?: { PushNotifications?: PushPlugin } } }).Capacitor?.Plugins?.PushNotifications;
-    if (!signedIn || !push) return;
+    const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { PushNotifications?: PushPlugin } } }).Capacitor;
+    const push = cap?.Plugins?.PushNotifications;
+    // not Android: its app has no Firebase set up, and register() there crashed it right after sign-in
+    if (!signedIn || !push || cap?.getPlatform?.() !== "ios") return;
     const listening = [
       push.addListener("registration", (t: { value: string }) => void api("/push/device", { token: t.value }).catch(() => {})),
       push.addListener("pushNotificationActionPerformed", (a: { notification: { data?: { path?: string } } }) => {

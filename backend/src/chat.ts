@@ -612,7 +612,7 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
     });
     const title = text.trim().replace(/^["']|["'.]$/g, "").slice(0, 80);
     if (title) await db.update(conversations).set({ title }).where(eq(conversations.id, conversationId));
-    notify(userId);
+    notify(userId, ["chats"]);
   } catch {
     // keep the fallback title
   }
@@ -1508,7 +1508,7 @@ export async function chatRoutes(app: FastifyInstance) {
       // opened: whatever finished while it was closed has now been seen
       if (conversation.unread) {
         await db.update(conversations).set({ unread: false }).where(eq(conversations.id, conversation.id));
-        notify(ctx.userId);
+        notify(ctx.userId, ["chats", "jobs"]);
       }
       // rounds with nothing to say are hidden where people talk; a background run shows all it did
       const page = await chatPage(conversation.id, {
@@ -1663,7 +1663,7 @@ export async function chatRoutes(app: FastifyInstance) {
     });
   });
 
-  // Nudges for the open app (live.ts): {type: "chats"} when the chat list changed.
+  // Nudges for the open app (live.ts): {type: "changed", what} naming the lists that changed.
   app.get("/events", { websocket: true, preHandler: authorize }, (socket, req) => addApp(authorized.get(req)!.userId, socket));
 }
 
