@@ -4,7 +4,10 @@
 // so they're made (and, for staff on company files, proposed) the way the rest of its files are.
 import type { KnowledgeFolder } from "@emplio/shared";
 import type { FastifyInstance } from "fastify";
+import { and, eq, sql } from "drizzle-orm";
 import { type Ctx, context } from "./auth";
+import { db } from "./db";
+import { fileIndex } from "./db/schema";
 import { searchFiles } from "./file-index";
 import { listPaths, readFile } from "./gitea";
 
@@ -49,5 +52,18 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     const text = await readFile(ctx.workspaceId, repo, path);
     if (text === null) return reply.code(404).send({ error: "That note isn't there any more." });
     return { text };
+  });
+
+  // the notes in the same folder that link here: [[knowledge/pricing]] for knowledge/pricing.md,
+  // [[clients/northwind]] for clients/northwind/index.md
+  app.get<{ Querystring: { repo: string; path: string } }>("/knowledge/links", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const { repo, path } = req.query;
+    if (!foldersFor(ctx).some((f) => f.repo === repo) || !path?.endsWith(".md")) return reply.code(400).send({ error: "No such note." });
+    const to = `[[${path.replace(/(\/index)?\.md$/, "")}]]`;
+    const rows = await db.select({ path: fileIndex.path }).from(fileIndex)
+      .where(and(eq(fileIndex.workspaceId, ctx.workspaceId), eq(fileIndex.repo, repo), sql`strpos(${fileIndex.text}, ${to}) > 0`));
+    return rows.map((r) => r.path).filter((p) => p !== path && shown(p)).sort();
   });
 }

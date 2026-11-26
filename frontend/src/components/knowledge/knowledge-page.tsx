@@ -22,6 +22,11 @@ type Open = { repo: string; path: string };
 const nameOf = (path: string) => path.replace(/\/index\.md$/, "").split("/").pop()!.replace(/\.md$/, "");
 const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
 // where the AI employee finds the file on its computer
+// [[clients/northwind]] is that folder's index.md; [[knowledge/pricing]] or [[clients/northwind/decisions]] a note
+const LINK = /\[\[([a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+)\]\]/g;
+const linkFile = (p: string) => `${p}${p.split("/").length === 2 && p.split("/")[0]! in KIND_ICON ? "/index" : ""}.md`;
+const linkName = (p: string, titles?: { to: string; title: string | null }[]) =>
+  titles?.find((l) => l.to === p)?.title ?? (p.split("/")[0]! in KIND_ICON ? p.split("/").slice(1).join(" · ") : p.split("/").pop()!).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const agentPath = (o: Open) => `${o.repo.startsWith("me-") ? "me" : o.repo}/${o.path}`;
 
 // A note's header block (--- key: value --- at the top, as skills have) as fields, and the text after it.
@@ -75,6 +80,7 @@ export function KnowledgePage() {
   // a client's, contact's, project's… page (<kind>/<name>/index.md): its [[folder/name]] links get their titles
   const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\/index\.md$/.test(open.path) ? open.path.slice(0, -"/index.md".length) : "";
   const titles = useThingPage(thing, !!thing).data?.links;
+  const backlinks = useQuery({ queryKey: [...KEY, "links", open?.repo, open?.path], queryFn: () => api<string[]>(`/knowledge/links?${new URLSearchParams(open!)}`), enabled: !!open?.path.endsWith(".md") });
   // the tree names a thing's folder by its title (Northwind Traders), not its index.md
   const things = useThings();
   const thingTitles = new Map((things.data ?? []).map((t) => [t.path, t.title]));
@@ -176,7 +182,20 @@ export function KnowledgePage() {
                 </dl>
               )}
               {/* a tool, script or list: shown as the code it is */}
-              <MessageResponse>{open.path.endsWith(".md") ? note!.body : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](/knowledge?file=${encodeURIComponent(agentPath({ repo: open.repo, path: linkFile(p) }))})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              {!!backlinks.data?.length && (
+                <div className="mt-8 border-t pt-4 text-sm">
+                  <p className="mb-2 text-muted-foreground">Linked from</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {backlinks.data.map((p) => (
+                      <Badge key={p} variant="secondary" render={<button type="button" onClick={() => setOpen({ repo: open.repo, path: p })} />}>
+                        <FileTextIcon data-icon="inline-start" />
+                        {(p.endsWith("/index.md") && thingTitles.get(p.slice(0, -"/index.md".length))) || nameOf(p)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </article>
           )}
         </main>
@@ -190,16 +209,16 @@ const KIND_ICON: Record<string, typeof UserIcon> = { clients: Building2Icon, con
 // text as it is.
 // hrefOf: where a link goes instead (a client's chip to the Clients page)
 export function Linked({ text, prefix, titles, hrefOf }: { text: string; prefix: string; titles?: { to: string; title: string | null }[]; hrefOf?: (to: string) => string | null }) {
-  const parts = text.split(/\[\[([a-z]+\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)?)\]\]/);
+  const parts = text.split(LINK);
   if (parts.length === 1) return text;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {parts.map((p, i) => {
         if (i % 2 === 0) return p.replace(/^[\s,"]+|[\s,"]+$/g, "") ? <span key={i}>{p}</span> : null;
         const Icon = KIND_ICON[p.split("/")[0]!] ?? FileTextIcon;
-        const name = titles?.find((l) => l.to === p)?.title ?? p.split("/").slice(1).join(" · ").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const name = linkName(p, titles);
         return (
-          <Badge key={i} variant="secondary" render={<Link href={hrefOf?.(p) ?? `/knowledge?file=${encodeURIComponent(`${prefix}${p}${p.split("/").length === 2 ? "/index" : ""}.md`)}`} />}>
+          <Badge key={i} variant="secondary" render={<Link href={hrefOf?.(p) ?? `/knowledge?file=${encodeURIComponent(prefix + linkFile(p))}`} />}>
             <Icon data-icon="inline-start" />
             {name}
           </Badge>
