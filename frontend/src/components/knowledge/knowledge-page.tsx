@@ -23,7 +23,7 @@ const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
 const agentPath = (o: Open) => `${o.repo.startsWith("me-") ? "me" : o.repo}/${o.path}`;
 
 // A note's header block (--- key: value --- at the top, as skills have) as fields, and the text after it.
-// ponytail: flat keys only; a nested or list value shows as its raw lines
+// ponytail: flat keys only; a list's "- item" lines become one item a line, a nested value shows as its raw lines
 export function splitNote(text: string) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!m) return { fields: [], body: text };
@@ -33,7 +33,8 @@ export function splitNote(text: string) {
     if (kv) fields.push([kv[1]!, kv[2]!]);
     else if (fields.length) fields[fields.length - 1]![1] += `\n${line.trim()}`;
   }
-  const clean = (v: string) => v.trim().replace(/^[>|]-?\s*/, "").replace(/^(["'])([\s\S]*)\1$/, "$2").trim();
+  const unquote = (v: string) => v.trim().replace(/^(["'])([\s\S]*)\1$/, "$2").trim();
+  const clean = (v: string) => (/^\s*\n?- /.test(v) ? v.trim().split("\n").map((l) => unquote(l.replace(/^- /, ""))).join("\n") : unquote(v.trim().replace(/^[>|]-?\s*/, "")));
   return { fields: fields.map(([k, v]) => [k, clean(v)] as [string, string]), body: text.slice(m[0].length) };
 }
 
@@ -69,8 +70,8 @@ export function KnowledgePage() {
   const hits = [...named, ...(found.data ?? []).filter((h) => !named.some((n) => n.repo === h.repo && n.path === h.path))];
   const folder = folders.data?.find((f) => f.repo === open?.repo);
   const note = file.data && splitNote(file.data.text);
-  // a client, contact, project… file: its [[folder/name]] links get their titles
-  const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\.md$/.test(open.path) ? open.path.slice(0, -3) : "";
+  // a client's, contact's, project's… page (<kind>/<name>/index.md): its [[folder/name]] links get their titles
+  const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\/index\.md$/.test(open.path) ? open.path.slice(0, -"/index.md".length) : "";
   const titles = useThingPage(thing, !!thing).data?.links;
 
   return (
@@ -179,18 +180,19 @@ export function KnowledgePage() {
 }
 
 const KIND_ICON: Record<string, typeof UserIcon> = { clients: Building2Icon, contacts: UserIcon, team: UsersIcon, services: BriefcaseIcon, projects: FolderKanbanIcon };
-// A field's [[folder/name]] links as chips that open that note; other text as it is.
+// A field's [[folder/name]] links as chips that open that thing's index.md ([[folder/name/note]]: that note); other
+// text as it is.
 function Linked({ text, prefix, titles }: { text: string; prefix: string; titles?: { to: string; title: string | null }[] }) {
-  const parts = text.split(/\[\[([a-z]+\/[a-z0-9][a-z0-9-]*)\]\]/);
+  const parts = text.split(/\[\[([a-z]+\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)?)\]\]/);
   if (parts.length === 1) return text;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {parts.map((p, i) => {
-        if (i % 2 === 0) return p.replace(/^[\s,]+|[\s,]+$/g, "") ? <span key={i}>{p}</span> : null;
+        if (i % 2 === 0) return p.replace(/^[\s,"]+|[\s,"]+$/g, "") ? <span key={i}>{p}</span> : null;
         const Icon = KIND_ICON[p.split("/")[0]!] ?? FileTextIcon;
-        const name = titles?.find((l) => l.to === p)?.title ?? p.split("/")[1]!.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const name = titles?.find((l) => l.to === p)?.title ?? p.split("/").slice(1).join(" · ").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
         return (
-          <Badge key={i} variant="secondary" render={<Link href={`/knowledge?file=${prefix}${p}.md`} />}>
+          <Badge key={i} variant="secondary" render={<Link href={`/knowledge?file=${encodeURIComponent(`${prefix}${p}${p.split("/").length === 2 ? "/index" : ""}.md`)}`} />}>
             <Icon data-icon="inline-start" />
             {name}
           </Badge>

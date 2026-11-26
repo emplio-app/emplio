@@ -18,7 +18,7 @@ import { about, CLIENTS, FIRM } from "./firm";
 // - read: a question: look it up, answer, change nothing (an existing schedule is a near miss: don't make it again).
 export type Category = "task" | "process" | "ask" | "repeat" | "new-client" | "client" | "detail" | "write-process" | "read";
 // the doors a reply can go through (scorers.ts reads them off its commands)
-// contact: a file in company/contacts/ (src/things.ts)
+// contact: a page in company/contacts/, <name>/index.md (src/things.ts)
 export type Kind = "task" | "process" | "repeat" | "new-client" | "client" | "detail" | "write-process" | "contact" | "change" | "ask";
 
 export type Case = {

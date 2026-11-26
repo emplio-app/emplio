@@ -22,8 +22,8 @@ const PER_KIND = 4;
 const FUZZY_CHATS = 200;
 // git's own files, and the pointers to big files kept in storage; everything else the Knowledge page shows can be @mentioned
 const HIDDEN = /(^|\/)\.|\.media$/;
-// the things (things.ts) and the older knowledge/ ones
-const RECORDS = /^(?:knowledge\/)?(clients|contacts|team|services|projects|suppliers|people)\/([^/]+)\.md$/;
+// the things' pages (things.ts: <kind>/<name>/index.md) and the older knowledge/ ones (<kind>/<name>.md)
+const RECORDS = /^(?:knowledge\/)?(clients|contacts|team|services|projects|suppliers|people)\/([^/]+)(?:\/index)?\.md$/;
 const RECORD_KIND = { clients: "Client", contacts: "Contact", team: "Team", services: "Service", projects: "Project", suppliers: "Supplier", people: "Contact" } as const;
 
 const pretty = (slug: string) => slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

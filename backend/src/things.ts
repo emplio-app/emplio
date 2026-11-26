@@ -1,53 +1,138 @@
-// Things kept as files in company/, one folder per kind and one .md file each: clients/ (a client: name, stage,
-// handler and details at the top, their notes below; clients.ts), contacts/ (someone at a client), team/ (someone
-// on the team: role, skills, hours), services/ (what the business sells), projects/ (one client buying one service).
-// A file starts with key: value lines between --- lines, then words. A link is another file's folder and name in
-// [[ ]], like [[clients/northwind]], written once in one of the two files: the way back is worked out here, so a
-// client's page lists the contacts and projects that name it. Emplio writes the files; the app reads them here.
+// Things kept as folders in company/, one folder per kind and one folder per thing: clients/ (a client: name, stage,
+// handler and details at the top, their notes below; clients.ts), contacts/ (someone at a client), team/ (someone on
+// the team: role, skills, hours), services/ (what the business sells), projects/ (one client buying one service).
+// A thing's main page is <kind>/<slug>/index.md; other files beside it (decisions.md, meeting notes) are plain notes.
+// Kinds stay side by side, never inside a client: a contact for two clients, or a project that moves, breaks nothing.
+// A page starts with YAML between --- lines, flat as Obsidian's properties (text, number, true/false, a YYYY-MM-DD date
+// or a list of those), then words. A link is [[clients/northwind]] (that folder's index.md) or
+// [[clients/northwind/decisions]] (a note in it), quoted in the YAML; written once, in one of the two files: the way
+// back is worked out here, so a client's page lists the contacts and projects that name it. A page that breaks a rule
+// is still read (what could be), with its problems listed: Emplio fixes them, nothing is refused.
 // ponytail: parsed from the search copy (file_index) on every call; a table of its own when lists get long. That copy
 // follows every commit (gitea.ts indexLater), so it's read as it is; only a repo never indexed is filled first.
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { THING_KINDS, type Thing, type ThingKind, type ThingPage } from "@emplio/shared";
+import { isMap, isSeq, LineCounter, parseDocument, type Node } from "yaml";
+import { CLIENT_STAGES, THING_KINDS, type Thing, type ThingKind, type ThingPage, type ThingProblem } from "@emplio/shared";
 import { context } from "./auth";
 import { db } from "./db";
 import { fileIndex } from "./db/schema";
 import { syncFiles } from "./file-index";
 
-// what each kind must link to
-const NEEDS: Partial<Record<ThingKind, string[]>> = { contacts: ["client"], projects: ["client"] };
-const FILE = new RegExp(`^(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)\\.md$`);
-const LINK = /\[\[([a-z]+\/[a-z0-9][a-z0-9-]*)\]\]/g;
+const FILE = new RegExp(`^(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)/index\\.md$`);
+const LINK = /\[\[([a-z]+\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)?)\]\]/g;
+export const TOP = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+// the few fields the app reads, and what they must be
+const BUILT_IN: Record<string, (v: unknown, kind: ThingKind) => string | null> = {
+  stage: (v, kind) => (kind !== "clients" || CLIENT_STAGES.includes(v as never) ? null : `stage is one of ${CLIENT_STAGES.join(", ")}`),
+  due: (v) => (typeof v === "string" && DATE.test(v) ? null : "due is a date: YYYY-MM-DD"),
+  start: (v) => (typeof v === "string" && DATE.test(v) ? null : "start is a date: YYYY-MM-DD"),
+  fee: (v) => (typeof v === "number" ? null : "fee is a number, no currency or commas: 18000"),
+};
 
 // "sarah-lee" -> "Sarah Lee"
 export const words = (name: string) => name.split("-").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+export const thingFile = (path: string) => `${path}/index.md`;
 
-// A file in one of the folders, read; null for any other file.
-export function parseThing(file: string, text: string): Thing | null {
+// a value's type, as Obsidian names them; a link is text
+const typeOf = (v: unknown) => (Array.isArray(v) ? "list" : typeof v === "number" ? "number" : typeof v === "boolean" ? "checkbox" : DATE.test(String(v)) ? "date" : "text");
+// [[x]] left unquoted is a list in a list to YAML: read back as the link it was meant to be
+const unquoted = (v: unknown) => Array.isArray(v) && v.length === 1 && Array.isArray(v[0]) && v[0].length === 1 && typeof v[0][0] === "string";
+const asLink = (v: unknown) => (unquoted(v) ? `[[${(v as string[][])[0]![0]}]]` : v);
+
+// The YAML at the top of a file, read (keys lowercase), with what's wrong in it and the line of each key (the file's
+// line numbers: the --- line is 1). Used for any file with a top, things or not.
+export function readTop(text: string) {
+  const top = TOP.exec(text);
+  const values: Record<string, unknown> = {};
+  const lines: Record<string, number> = {};
+  const problems: ThingProblem[] = [];
+  if (!top) return { values, lines, problems, top };
+  const counter = new LineCounter();
+  const doc = parseDocument(top[1] ?? "", { lineCounter: counter });
+  const at = (n?: Node | null) => (n?.range ? counter.linePos(n.range[0]).line + 1 : null);
+  for (const e of doc.errors) problems.push({ line: (e.linePos?.[0].line ?? 0) + 1, text: e.message.split("\n")[0]!.replace(/ at line \d+, column \d+:?$/, "") });
+  if (problems.length) return { values, lines, problems, top };
+  if (doc.contents && !isMap(doc.contents)) return { values, lines, problems: [{ line: 2, text: "the top is key: value lines" }], top };
+  for (const pair of isMap(doc.contents) ? doc.contents.items : []) {
+    const key = String((pair.key as { value?: unknown })?.value ?? pair.key).trim().toLowerCase();
+    const node = pair.value as Node | null;
+    const line = at(pair.key as Node) ?? 2;
+    lines[key] = line;
+    const v = node?.toJSON();
+    const items = isSeq(node) ? node.items : [node];
+    if (isMap(node) || items.some((i) => isMap(i))) {
+      problems.push({ line, text: `${key} has fields inside it; keep it flat: one value or a list` });
+      continue;
+    }
+    if (unquoted(v)) problems.push({ line, text: `put links in quotes: "${asLink(v)}"` });
+    else
+      for (const [i, item] of items.entries()) {
+        const one = isSeq(node) ? (v as unknown[])[i] : v;
+        if (unquoted(one)) problems.push({ line: at(item as Node) ?? line, text: `put links in quotes: "${asLink(one)}"` });
+        else if (Array.isArray(one)) problems.push({ line: at(item as Node) ?? line, text: `${key} has a list inside a list; keep it to one list` });
+      }
+    if (v === null || v === undefined || v === "") continue;
+    values[key] = Array.isArray(v) && !unquoted(v) ? v.map(asLink) : asLink(v);
+  }
+  return { values, lines, problems, top };
+}
+
+// A thing's page, read; null for any other file. types and lines: each field's, for the checks across files.
+export function parseThing(file: string, text: string): (Thing & { types: Record<string, string>; lines: Record<string, number> }) | null {
   const m = FILE.exec(file);
   if (!m) return null;
   const kind = m[1] as ThingKind;
-  const top = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  const { values, lines, problems, top } = readTop(text);
   const fields: Record<string, string> = {};
-  for (const line of top?.[1]?.split(/\r?\n/) ?? []) {
-    const kv = /^([A-Za-z][\w -]*?)\s*:\s*(.*)$/.exec(line);
-    if (kv) fields[kv[1]!.trim().toLowerCase()] = kv[2]!.trim();
+  const types: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    types[k] = typeOf(v);
+    fields[k] = Array.isArray(v) ? v.map(String).join(", ") : String(v);
+    const wrong = BUILT_IN[k]?.(v, kind);
+    if (wrong) problems.push({ line: lines[k]!, text: wrong });
   }
   const body = (top ? text.slice(top[0].length) : text).trim();
   const links = [
     ...Object.entries(fields).flatMap(([field, v]) => [...v.matchAll(LINK)].map((l) => ({ field, to: l[1]! }))),
     ...[...body.matchAll(LINK)].map((l) => ({ field: "text", to: l[1]! })),
   ];
-  const missing = (NEEDS[kind] ?? []).filter((f) => !links.some((l) => l.field === f));
   return {
-    path: file.slice(0, -3),
+    path: file.slice(0, -"/index.md".length),
     kind,
     title: fields.name || /^#\s+(.+?)\s*$/m.exec(body)?.[1] || words(m[2]!),
     fields,
     body,
     links,
-    error: missing.length ? `needs ${missing.map((f) => `${f}: [[...]]`).join(", ")}` : null,
+    problems,
+    types,
+    lines,
   };
+}
+
+// The checks that need the other files: one type per field name in a kind (the most used one; a single value is
+// fine where others have a list of them), and links to a thing that isn't there (a warning: it may come later).
+// ponytail: a link to a note inside a folder ([[clients/x/decisions]]) or outside the kinds (processes/) isn't checked;
+// only things are read here
+export function checkThings<T extends Thing & { types: Record<string, string>; lines: Record<string, number> }>(all: T[]) {
+  const paths = new Set(all.map((t) => t.path));
+  for (const kind of THING_KINDS) {
+    const mine = all.filter((t) => t.kind === kind);
+    const count = new Map<string, Map<string, number>>();
+    for (const t of mine) for (const [k, type] of Object.entries(t.types)) count.set(k, (count.get(k) ?? new Map()).set(type, (count.get(k)?.get(type) ?? 0) + 1));
+    for (const t of mine)
+      for (const [k, type] of Object.entries(t.types)) {
+        // Map keeps the first use first: a tie goes to it
+        const main = [...count.get(k)!].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+        if (type !== main && !(main === "list" && type === "text"))
+          t.problems.push({ line: t.lines[k] ?? null, text: `${k} is a ${type} here but a ${main} in other ${kind} files; use one type` });
+      }
+  }
+  for (const t of all)
+    for (const l of t.links)
+      if (l.to.split("/").length === 2 && THING_KINDS.includes(l.to.split("/")[0] as ThingKind) && !paths.has(l.to)) t.problems.push({ line: t.lines[l.field] ?? null, text: `[[${l.to}]] links to nothing yet`, warning: true });
+  return all;
 }
 
 export async function listThings(workspaceId: string, kind?: ThingKind): Promise<Thing[]> {
@@ -57,7 +142,25 @@ export async function listThings(workspaceId: string, kind?: ThingKind): Promise
     .select({ path: fileIndex.path, text: fileIndex.text })
     .from(fileIndex)
     .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, "company"), sql`${fileIndex.path} ~ ${FILE.source}`));
-  return rows.flatMap((r) => parseThing(r.path, r.text) ?? []).filter((t) => !kind || t.kind === kind).sort((a, b) => a.title.localeCompare(b.title));
+  const all = checkThings(rows.flatMap((r) => parseThing(r.path, r.text) ?? []));
+  return all
+    .map(({ types: _, lines: __, ...t }) => t)
+    .filter((t) => !kind || t.kind === kind)
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+// What's wrong in a computer's changed thing pages (company/ paths and their text), checked with the saved others, as
+// lines for Emplio: errors only, warnings are for the app.
+export async function thingProblems(workspaceId: string, changed: { path: string; text: string }[]) {
+  const mine = changed.flatMap((f) => parseThing(f.path, f.text) ?? []);
+  if (!mine.length) return [];
+  const rows = await db
+    .select({ path: fileIndex.path, text: fileIndex.text })
+    .from(fileIndex)
+    .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, "company"), sql`${fileIndex.path} ~ ${FILE.source}`));
+  const others = rows.filter((r) => !changed.some((f) => f.path === r.path)).flatMap((r) => parseThing(r.path, r.text) ?? []);
+  checkThings([...mine, ...others]);
+  return mine.flatMap((t) => t.problems.filter((p) => !p.warning).map((p) => `company/${thingFile(t.path)}${p.line ? ` line ${p.line}` : ""}: ${p.text} — fix it`));
 }
 
 // One thing (null when its file isn't there yet), with the title of each it links to (null: nothing there, a broken
@@ -86,7 +189,7 @@ export async function thingsRoutes(app: FastifyInstance) {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const path = req.query.path ?? "";
-    if (!FILE.test(`${path}.md`)) return reply.code(400).send({ error: "No such thing." });
+    if (!FILE.test(thingFile(path))) return reply.code(400).send({ error: "No such thing." });
     return thingPage(ctx.workspaceId, path);
   });
 }

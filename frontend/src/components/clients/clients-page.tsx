@@ -77,7 +77,7 @@ const TINTS = [
 ];
 const tint = (slug: string) => TINTS[[...slug].reduce((n, c) => n + c.charCodeAt(0), 0) % TINTS.length]!;
 
-const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/clients/${c.slug}.md`)}`;
+const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/clients/${c.slug}/index.md`)}`;
 
 function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">; size?: "md" | "lg" }) {
   return (
@@ -701,7 +701,7 @@ const LINKED = [
   { kind: "contacts", label: "Contacts", sub: (f: Record<string, string>) => [f.role, f.email] },
   { kind: "projects", label: "Projects", sub: (f: Record<string, string>) => [f.due ? `due ${f.due}` : f.start ? "ongoing" : "", f.fee] },
 ] as const;
-const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, "$1");
+const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, (_, p: string) => p.split("/")[0]!);
 
 function ClientLinked({ slug }: { slug: string }) {
   const page = useThingPage(`clients/${slug}`);
@@ -715,7 +715,7 @@ function ClientLinked({ slug }: { slug: string }) {
         <ul className="grid gap-1">
           {items.map((l) => (
             <li key={l.from}>
-              <Link href={`/knowledge?file=${encodeURIComponent(`company/${l.from}.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
+              <Link href={`/knowledge?file=${encodeURIComponent(`company/${l.from}/index.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
                 <span className="text-sm">{l.title}</span>
                 <span className="text-xs text-muted-foreground">{sub(l.fields).map(plain).filter(Boolean).join(" · ")}</span>
               </Link>

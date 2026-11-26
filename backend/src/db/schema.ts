@@ -174,7 +174,7 @@ export const conversations = pgTable(
     // button reopens (browser.ts)
     browserUsedAt: timestamp({ withTimezone: true }),
     browserPage: text(),
-    // the client it's about, if any (the reader labels it): their file's name, company/clients/<client>.md
+    // the client it's about, if any (the reader labels it): their folder's name, company/clients/<client>/
     client: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -308,7 +308,7 @@ export const processRuns = pgTable(
     // the process's title then, and what this go is for: the client's name or the thing's, and the period
     processTitle: text().notNull(),
     subject: text().notNull(),
-    // the client's file name, company/clients/<client>.md
+    // the client's folder name, company/clients/<client>/
     client: text(),
     // what was filled in when it started (changed since, maybe): the process's inputs then, each with its value
     inputs: jsonb().$type<RunInput[]>().notNull().default([]),
@@ -634,7 +634,7 @@ export const tasks = pgTable(
     dueAt: timestamp({ withTimezone: true }),
     // the chat it came from
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
-    // the client it's for, if any: their file's name, company/clients/<client>.md
+    // the client it's for, if any: their folder's name, company/clients/<client>/
     client: text(),
     // the AI's own: the chat it last worked on it in
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),

@@ -1,6 +1,6 @@
 // Clients: who the business works for, at what stage (prospect, active, past) and who on the team handles each. All
-// of it is their file, company/clients/<slug>.md (things.ts): name, stage, handler ([[team/<name>]] links) and their
-// details (any other key) at the top, their notes below; tasks, process runs and chats point at the slug, which stays
+// of it is their page, company/clients/<slug>/index.md (things.ts): name, stage, handler (a list of "[[team/<name>]]"
+// links) and their details (any other key) in the YAML at the top, their notes below; tasks, process runs and chats point at the slug, which stays
 // when they're renamed. The web app's Clients page and `emplio clients` change the file here, each change a commit.
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins (details: anyone).
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -13,7 +13,8 @@ import { conversations, processRuns, tasks } from "./db/schema";
 import { syncFiles } from "./file-index";
 import { readFile, UPKEEP, writeFiles } from "./gitea";
 import { listTeam } from "./team";
-import { listThings, thingPage, words as titleOf } from "./things";
+import { parseDocument, isMap, isScalar } from "yaml";
+import { listThings, thingFile, thingPage, TOP, words as titleOf } from "./things";
 
 type Who = { workspaceId: string; userId: string; role: Role };
 type Result = { ok: true; client: Client } | { ok: false; error: string };
@@ -21,7 +22,7 @@ type File = { path: string; content: string };
 
 const isAdmin = (w: Who) => w.role !== "member";
 export const FOLDER = "clients";
-export const notesPath = (c: { slug: string }) => `company/${FOLDER}/${c.slug}.md`;
+export const notesPath = (c: { slug: string }) => `company/${thingFile(`${FOLDER}/${c.slug}`)}`;
 
 // "Acme Foods Pvt. Ltd." -> "acme-foods-pvt-ltd": the notes file's name
 export const slugOf = (name: string) =>
@@ -74,18 +75,19 @@ export function pickClients<T extends { slug: string; name: string; stage: strin
 }
 
 
-// A file's top lines changed: each key set (in place, else added at the end) or removed (null); the rest and the
-// words below as they were.
-export function setFields(text: string, set: Record<string, string | null>) {
-  const top = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
-  const lines = top ? top[1]!.split(/\r?\n/) : [];
+// A file's YAML top changed: each key set (in place, any case, else added at the end) or removed (null); other keys,
+// comments and the words below as they were. YAML that doesn't read is left for whoever broke it to fix.
+export function setFields(text: string, set: Record<string, unknown>) {
+  const top = TOP.exec(text);
+  const doc = parseDocument(top?.[1] ?? "");
+  if (doc.errors.length) throw new Error(`the YAML at the top of this file doesn't read (${doc.errors[0]!.message.split("\n")[0]}); fix it first`);
   for (const [k, v] of Object.entries(set)) {
-    const i = lines.findIndex((l) => l.includes(":") && l.slice(0, l.indexOf(":")).trim().toLowerCase() === k);
-    if (v === null) i >= 0 && lines.splice(i, 1);
-    else if (i >= 0) lines[i] = `${k}: ${v}`;
-    else lines.push(`${k}: ${v}`);
+    const old = isMap(doc.contents) ? doc.contents.items.find((p) => isScalar(p.key) && String(p.key.value).toLowerCase() === k)?.key : undefined;
+    if (v === null) old && doc.delete(old);
+    else doc.set(old ?? k, v);
   }
-  return `---\n${lines.join("\n")}\n---\n${top ? text.slice(top[0].length) : text ? `\n${text}` : ""}`;
+  const yaml = isMap(doc.contents) && doc.contents.items.length ? String(doc) : "";
+  return `---\n${yaml}---\n${top ? text.slice(top[0].length) : text ? `\n${text}` : ""}`;
 }
 
 // A team file's member: its email: one's, else its name one's (team files written before emails were kept).
@@ -172,15 +174,15 @@ export async function handlerLinks(workspaceId: string, asked: string[], me: str
     }
     const mine = people.find((t) => memberOf(t, team)?.id === m.id);
     if (mine) {
-      if (!mine.fields.email) files.push({ path: `${mine.path}.md`, content: setFields((await readFile(workspaceId, "company", `${mine.path}.md`)) ?? "", { email: m.email }) });
+      if (!mine.fields.email) files.push({ path: thingFile(mine.path), content: setFields((await readFile(workspaceId, "company", thingFile(mine.path))) ?? "", { email: m.email }) });
       links.push(mine.path);
       continue;
     }
     // a new team file, under a name no other file has
     const base = slugOf(m.name ?? m.email.split("@")[0]!) || "teammate";
     let path = `team/${base}`;
-    for (let n = 2; people.some((t) => t.path === path) || files.some((f) => f.path === `${path}.md`); n++) path = `team/${base}-${n}`;
-    files.push({ path: `${path}.md`, content: setFields("", { name: m.name ?? m.email, email: m.email, role: m.role }) });
+    for (let n = 2; people.some((t) => t.path === path) || files.some((f) => f.path === thingFile(path)); n++) path = `team/${base}-${n}`;
+    files.push({ path: thingFile(path), content: setFields("", { name: m.name ?? m.email, email: m.email, role: m.role }) });
     links.push(path);
   }
   return { links: [...new Set(links)], files };
@@ -195,10 +197,10 @@ async function commit(w: Who, files: { path: string; content: string | null }[],
 }
 
 // The file's top lines for what's asked; a string is what's wrong.
-async function changes(w: Who, input: ClientInput, old: Client | null): Promise<{ set: Record<string, string | null>; files: File[] } | string> {
+async function changes(w: Who, input: ClientInput, old: Client | null): Promise<{ set: Record<string, unknown>; files: File[] } | string> {
   if (input.name !== undefined && !slugOf(input.name)) return "a client needs a name";
   if (input.stage !== undefined && !CLIENT_STAGES.includes(input.stage)) return `stage is one of ${CLIENT_STAGES.join(", ")}`;
-  const set: Record<string, string | null> = {};
+  const set: Record<string, unknown> = {};
   let files: File[] = [];
   if (input.name !== undefined) set.name = input.name.replace(/\s+/g, " ").trim();
   if (input.stage !== undefined) set.stage = input.stage;
@@ -206,19 +208,20 @@ async function changes(w: Who, input: ClientInput, old: Client | null): Promise<
     const [team, things] = await Promise.all([listTeam(w.workspaceId), listThings(w.workspaceId, "team")]);
     const h = await handlerLinks(w.workspaceId, input.handlers, w.userId, team, things);
     if (typeof h === "string") return h;
-    set.handler = h.links.length ? h.links.map((l) => `[[${l}]]`).join(", ") : null;
+    set.handler = h.links.length ? h.links.map((l) => `[[${l}]]`) : null;
     files = h.files;
   }
   if (input.details !== undefined) {
     const d = mergeDetails(old?.details ?? [], input.details);
     if (typeof d === "string") return d;
     for (const o of old?.details ?? []) set[o.name.toLowerCase()] = null;
-    for (const n of d) set[n.name.toLowerCase()] = n.value;
+    // a fee is a number in the file (things.ts), the rest text as given
+    for (const n of d) set[n.name.toLowerCase()] = n.name.toLowerCase() === "fee" && /^\d+(\.\d+)?$/.test(n.value) ? Number(n.value) : n.value;
   }
   return { set, files };
 }
 
-const fileOf = (slug: string) => `${FOLDER}/${slug}.md`;
+const fileOf = (slug: string) => thingFile(`${FOLDER}/${slug}`);
 const reread = async (w: Who, slug: string) => (await listClients(w)).find((c) => c.slug === slug)!;
 
 export async function addClient(w: Who, input: ClientInput, conversationId?: string): Promise<Result> {
@@ -269,7 +272,7 @@ export async function labelChat(conversationId: string | null | undefined, clien
 // @mentioned clients (their file's path, mentions.ts) in a message: the first one labels the chat
 export async function labelFromMentions(workspaceId: string, conversationId: string, picked: unknown) {
   const slugs = (Array.isArray(picked) ? picked : []).flatMap((m) => {
-    const slug = m?.kind === "record" && typeof m.id === "string" ? new RegExp(`^company/${FOLDER}/([^/]+)\\.md$`).exec(m.id)?.[1] : null;
+    const slug = m?.kind === "record" && typeof m.id === "string" ? new RegExp(`^company/${FOLDER}/([^/]+)/index\\.md$`).exec(m.id)?.[1] : null;
     return slug ? [slug] : [];
   });
   if (!slugs.length) return;
@@ -289,13 +292,13 @@ export const clientNoteText = (c: Client) =>
 
 export const USAGE = `usage: emplio clients list [--stage prospect|active|past]   every client: stage, who handles them, open tasks
        emplio clients show <name>                         one client: who handles them, their details, open tasks, their file
-       emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone): the file company/${FOLDER}/<slug>.md
+       emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone): their page company/${FOLDER}/<slug>/index.md
        emplio clients update <name> [options] ["Detail=value"]...   change one (owner and admins; details: anyone)
        emplio clients remove <name>                       delete one added by mistake (owner and admins); otherwise --stage past
 options: --stage prospect|active|past   prospect: not won yet; past: no longer working with them (default: active)
          --handler <names or emails>    who on the team looks after them, comma-separated; "none" clears it
          --name <new name>              update only; the file keeps its name
-Name, stage, handler ([[team/<name>]]) and details are the key: value lines at the top of their file, their notes below;
+Name, stage, handler ("[[team/<name>]]") and details are the YAML at the top of their page, their notes below;
 change those with this command (not by editing the file), so the app reacts (a client won starts its automations).
          "Detail=value"                 a short fact kept on them: "Contact email=sarah@northwind.com" "Tax number=27AAACN1234F1Z5"
                                         "Files=monthly"; "Detail=" removes one. A process input of the same name is filled in
@@ -355,8 +358,8 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
       `${client.name} (${client.stage})`,
       `handled by: ${client.handlers.map((h) => h.name).join(", ") || "nobody named yet"}`,
       ...client.details.map((d) => `${d.name}: ${d.value}`),
-      `file: /work/${notesPath(c)} (the lines above at its top, their notes below)`,
-      ...linked.map((l) => `${l.kind === "contacts" ? "contact" : l.kind === "projects" ? "project" : l.kind}: ${l.title} (/work/company/${l.from}.md, as ${l.field})`),
+      `page: /work/${notesPath(c)} (the lines above in its YAML top, their notes below; other notes on them beside it)`,
+      ...linked.map((l) => `${l.kind === "contacts" ? "contact" : l.kind === "projects" ? "project" : l.kind}: ${l.title} (/work/company/${thingFile(l.from)}, as ${l.field})`),
       ...(open.length
         ? ["open tasks:", ...open.map((t) => `- ${t.id.slice(0, 8)} ${t.status} ${t.dueAt ? t.dueAt.toISOString().slice(0, 10) : "no due date"} ${t.title}${t.waitingOn ? ` (waiting on ${t.waitingOn})` : ""}`)]
         : ["no open tasks"]),
@@ -366,7 +369,7 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
     const i = input();
     if (typeof i === "string") return i;
     const r = await addClient(w, { ...i, name: words.join(" ") }, conversationId);
-    return r.ok ? `added ${line(r.client)}; their notes go in /work/${notesPath(r.client)}, below its top lines` : `error: ${r.error}`;
+    return r.ok ? `added ${line(r.client)}; their notes go in /work/${notesPath(r.client)}, below its YAML top` : `error: ${r.error}`;
   }
   if (sub === "update" && words.length) {
     const i = input();
@@ -438,6 +441,8 @@ if (import.meta.main) {
   const f = setFields("---\nname: A\nfiles: monthly\nOther: x\n---\n# A\nnotes\n", { stage: "past", files: null, name: "B" });
   console.assert(f === "---\nname: B\nOther: x\nstage: past\n---\n# A\nnotes\n", "set fields", f);
   console.assert(setFields("# A\n", { name: "A" }) === "---\nname: A\n---\n\n# A\n", "no top yet");
+  const l = setFields("---\nname: A # kept\n---\n", { handler: ["[[team/a]]", "[[team/b]]"] });
+  console.assert(l === '---\nname: A # kept\nhandler:\n  - "[[team/a]]"\n  - "[[team/b]]"\n---\n', "links as a quoted list", l);
   console.assert(typeof mergeDetails([], { "Tax no.": "1" }) === "string" && typeof mergeDetails([], { Stage: "x" }) === "string", "bad names");
   console.log("ok");
 }

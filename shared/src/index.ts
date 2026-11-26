@@ -595,7 +595,7 @@ export type Task = {
   // the AI is working on it right now (its work chat is replying)
   running: boolean;
   chases: number;
-  // the client it's for: their file's name, company/clients/<client>.md (clients.ts)
+  // the client it's for: their folder's name, company/clients/<client>/ (clients.ts)
   client: string | null;
   clientName: string | null;
   // a process's step: which go (and its process's file name), which step of how many, where sending it back goes
@@ -663,7 +663,7 @@ export type ProcessRun = {
 };
 
 // A client of the business (backend clients.ts): the Clients page and `emplio clients`. All of it is the file
-// company/clients/<slug>.md: name, stage, handler and details at its top, their notes below.
+// company/clients/<slug>/index.md: name, stage, handler and details at its top, their notes below.
 export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
 export type ClientStage = (typeof CLIENT_STAGES)[number];
 export type Client = {
@@ -681,11 +681,13 @@ export type Client = {
 };
 export type ClientDetail = { name: string; value: string };
 
-// Things kept as files in company/<kind>/<name>.md (backend things.ts). path is "clients/northwind", which is also how
-// other files link to it: [[clients/northwind]]. field is the key: line the link is on, or "text" in the words.
+// Things kept as folders in company/: <kind>/<name>/index.md (backend things.ts). path is "clients/northwind", which is
+// also how other files link to it: [[clients/northwind]]. field is the YAML key the link is on, or "text" in the words.
 export const THING_KINDS = ["clients", "contacts", "team", "services", "projects"] as const;
 export type ThingKind = (typeof THING_KINDS)[number];
-export type Thing = { path: string; kind: ThingKind; title: string; fields: Record<string, string>; body: string; links: { field: string; to: string }[]; error: string | null };
+// fields: each value as text (a list's items joined with ", "); problems: what's wrong in the file (line: the file's own)
+export type ThingProblem = { line: number | null; text: string; warning?: true };
+export type Thing = { path: string; kind: ThingKind; title: string; fields: Record<string, string>; body: string; links: { field: string; to: string }[]; problems: ThingProblem[] };
 // one thing (null: no file yet), what it links to (title null: nothing there) and what links to it
 export type ThingPage = {
   path: string;
