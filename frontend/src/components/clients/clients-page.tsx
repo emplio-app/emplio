@@ -197,7 +197,7 @@ export function ClientsPage() {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = all
     .filter((c) => (filter === "unhandled" ? c.stage === "active" && !c.handlers.length : filter === "all" || c.stage === filter))
-    .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name)].join(" ").toLowerCase().includes(w)));
+    .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name), ...c.details.map((d) => d.value)].join(" ").toLowerCase().includes(w)));
   const current = all.find((c) => c.slug === openId) ?? null;
   const unhandled = all.filter((c) => c.stage === "active" && !c.handlers.length).length;
   const waiting = all.reduce((n, c) => n + c.waitingTasks, 0);

@@ -161,7 +161,8 @@ const useOpen = () => {
   return { open: useSearchParams().get("open"), show: (path: string) => router.push(`${pathname}?open=${encodeURIComponent(path)}`, { scroll: false }), close: () => router.replace(pathname, { scroll: false }) };
 };
 
-const matches = (words: string[], ...text: (string | undefined)[]) => words.every((w) => text.join(" ").toLowerCase().includes(w));
+// every word somewhere in its name or any of its fields
+export const matches = (words: string[], ...text: (string | undefined)[]) => words.every((w) => text.join(" ").toLowerCase().includes(w));
 
 // Every project: one client buying one service. Due soonest first, then the ongoing ones (a retainer has no due).
 export function ProjectsPage() {
@@ -172,7 +173,7 @@ export function ProjectsPage() {
   const name = (to?: string) => (to ? (titles.get(to) ?? label(slugOf(to).replace(/-/g, " "))) : undefined);
   const all = (things.data ?? []).filter((t) => t.kind === "projects");
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = all.filter((p) => matches(words, p.title, name(linksIn(p.fields.client)[0]), name(linksIn(p.fields.lead)[0])));
+  const shown = all.filter((p) => matches(words, p.title, name(linksIn(p.fields.client)[0]), name(linksIn(p.fields.lead)[0]), ...Object.values(p.fields), p.body));
   const done = (p: Thing) => DONE.test(p.fields.status ?? "");
   const groups = [
     { title: "Due", list: shown.filter((p) => p.fields.due && !done(p)).sort((a, b) => a.fields.due!.localeCompare(b.fields.due!)) },
@@ -192,7 +193,7 @@ export function ProjectsPage() {
             : "Each client buying one service, with who leads it and when it's due."
       }
     >
-      {all.length > 5 && <Search value={query} onChange={setQuery} placeholder="Search projects, clients or people" />}
+      {all.length > 0 && <Search value={query} onChange={setQuery} placeholder="Search projects, clients or people" />}
       {things.isPending ? (
         <Loading />
       ) : !all.length ? (
@@ -245,14 +246,14 @@ export function ContactsPage() {
   const all = (things.data ?? []).filter((t) => t.kind === "contacts");
   const clientsOf = (c: Thing) => linksIn(c.fields.client).map((to) => titles.get(to) ?? label(slugOf(to)));
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = all.filter((c) => matches(words, c.title, c.fields.role, c.fields.email, ...clientsOf(c)));
+  const shown = all.filter((c) => matches(words, c.title, ...clientsOf(c), ...Object.values(c.fields), c.body));
   const firms = new Set(all.flatMap((c) => linksIn(c.fields.client))).size;
   return (
     <Page
       title="Contacts"
       summary={things.isPending ? "Loading…" : all.length ? `${all.length} people at ${firms} client${firms === 1 ? "" : "s"}` : "The people you deal with at each client."}
     >
-      {all.length > 5 && <Search value={query} onChange={setQuery} placeholder="Search people, clients or roles" />}
+      {all.length > 0 && <Search value={query} onChange={setQuery} placeholder="Search people, clients or roles" />}
       {things.isPending ? (
         <Loading />
       ) : !all.length ? (
@@ -287,10 +288,10 @@ export function ServicesPage() {
   const { show } = useOpen();
   const all = (things.data ?? []).filter((t) => t.kind === "services");
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = all.filter((s) => matches(words, s.title, s.fields.fee, s.fields.price, s.fields.description));
+  const shown = all.filter((s) => matches(words, s.title, ...Object.values(s.fields), s.body));
   return (
     <Page title="Services" summary={things.isPending ? "Loading…" : all.length ? `${all.length} service${all.length === 1 ? "" : "s"}` : "What you offer clients, and for how much."}>
-      {all.length > 5 && <Search value={query} onChange={setQuery} placeholder="Search services" />}
+      {all.length > 0 && <Search value={query} onChange={setQuery} placeholder="Search services" />}
       {things.isPending ? (
         <Loading />
       ) : !all.length ? (

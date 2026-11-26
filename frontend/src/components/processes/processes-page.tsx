@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useAskOpen } from "@/components/chat/composer";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { TaskSheet } from "@/components/tasks/tasks-page";
+import { matches, Search } from "@/components/things/things";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -55,7 +56,10 @@ const late = (iso: string | null) => !!iso && new Date(iso) < new Date();
 
 export function ProcessesPage() {
   const processes = useProcesses();
-  const list = processes.data ?? [];
+  const [query, setQuery] = useState("");
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = processes.data ?? [];
+  const list = all.filter((p) => matches(words, p.title, p.about, ...p.steps.map((s) => s.name)));
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
@@ -68,10 +72,13 @@ export function ProcessesPage() {
             <Skeleton className="h-20 w-full rounded-xl" />
             <Skeleton className="h-20 w-full rounded-xl" />
           </div>
-        ) : !list.length ? (
+        ) : !all.length ? (
           <Empty />
         ) : (
-          <ul className="mx-auto grid w-full max-w-3xl gap-2 px-4 py-6 md:px-6">
+          <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-6 md:px-6">
+          <Search value={query} onChange={setQuery} placeholder="Search processes or steps" />
+          {!list.length && <p className="py-12 text-center text-sm text-muted-foreground">No processes match &ldquo;{query.trim()}&rdquo;.</p>}
+          <ul className="grid gap-2">
             {list.map((p) => (
               <li key={p.name}>
                 <Link
@@ -95,6 +102,7 @@ export function ProcessesPage() {
               </li>
             ))}
           </ul>
+          </div>
         )}
       </div>
     </div>
