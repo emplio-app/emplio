@@ -27,7 +27,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { cn } from "@/lib/utils";
 import {
   Message,
@@ -141,6 +141,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // after the first send the new chat is a real one, still on screen: its slot moves to its own id then (dispatch)
   const [draftKey, setDraftKey] = useState(`chat_draft:${isNew ? "new" : id}`);
   const composer = useComposer(draftKey);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => setSlot(document.getElementById("ask-slot")), []);
   const { input, setInput, quotes, setQuotes, attachments, mentionMenu, box } = composer;
   // a kept draft opens with the cursor after it, ready to go on typing
   useEffect(() => {
@@ -1330,7 +1332,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(0.25rem,var(--safe-bottom))] max-md:pb-3 md:pointer-coarse:pb-[max(0.75rem,var(--safe-bottom))]">
+              {slot && createPortal(
+              // at the app's foot, where every page has its box (composer.tsx LayoutAsk)
+              <div className="relative mx-auto w-full max-w-3xl px-4">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1365,7 +1369,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     {messageBox}
                   </>
                 )}
-              </div>
+              </div>, slot)}
             </>
           )}
         </div>

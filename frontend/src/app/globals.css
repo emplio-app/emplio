@@ -275,6 +275,10 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
 body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) .bottom-tabs {
   display: none;
 }
+/* an empty chat keeps its box in the middle, with its greeting: nothing at the foot */
+.page-ask:has(#ask-slot:empty) {
+  display: none;
+}
 /* The tab bar floats over the page (bottom-tabs.tsx). A page ends above it, unless its lists are marked
    .under-tabs: those run on underneath the glass and get the room at their own end instead. */
 @media (max-width: 767.98px) {
@@ -286,7 +290,7 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     padding-bottom: var(--tabs-h);
   }
   /* with Emplio's message box under the page (composer.tsx LayoutAsk), the box clears the tabs instead */
-  [data-slot="sidebar-inset"]:has(> .page-ask) :is(.page-in, .under-tabs) {
+  [data-slot="sidebar-inset"]:has(> .page-ask:not(:has(#ask-slot:empty))) :is(.page-in, .under-tabs) {
     padding-bottom: 1.5rem;
   }
 }
