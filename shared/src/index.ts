@@ -316,7 +316,7 @@ export const SETTING_FIELDS = [
     section: "work",
     advanced: true,
     label: "Reasoning effort",
-    help: "How much it thinks before acting.",
+    help: "How much Emplio thinks before replying to you. Its agents think a little before each step, whatever this says.",
     type: "choice",
     default: "medium",
     options: [

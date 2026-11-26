@@ -256,13 +256,15 @@ export async function reply(b: Business, chat: ModelMessage[], standIn: StandIn,
   });
   const key = crypto.randomUUID();
   const began = Date.now();
+  // as the app (src/chat.ts): a job thinks low, the rest by the business setting; EVAL_JOB_REASONING tries another
+  const effort = job ? process.env.EVAL_JOB_REASONING || "low" : DEFAULTS.reasoning;
   const { steps, response } = await generateText({
     // many evals at once (run-all.ts): a dropped connection now and then shouldn't end a case
     maxRetries: 6,
     // a request that never answers fails the case instead of holding the run open
     abortSignal: AbortSignal.timeout(600_000),
     model: createOpenRouter()(round ? BACKGROUND_MODEL : CHAT_MODEL),
-    providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: DEFAULTS.reasoning === "off" ? { enabled: false } : { effort: DEFAULTS.reasoning as "low" | "medium" | "high" } } },
+    providerOptions: { openrouter: { cacheControl: { type: "ephemeral" }, reasoning: effort === "off" ? { enabled: false } : { effort: effort as "low" | "medium" | "high" } } },
     system: (job ? jobSystem(b, job) : system(b, round)).map((content, i) => ({ role: "system" as const, content: CODE_MODE ? inPython(content) : content, ...(i === 0 && { providerOptions: { openrouter: { cacheControl: { type: "ephemeral" } } } }) })),
     messages,
     tools: CODE_MODE ? { python } : { bash },
