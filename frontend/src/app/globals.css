@@ -292,6 +292,14 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
 .page-ask:has(#ask-slot:empty) {
   display: none;
 }
+/* Emplio's message box floats over a page's foot (composer.tsx LayoutAsk sets --ask-h to its height, 0 when it's
+   not there): a page's lists (.under-tabs) end above it, so nothing is left hidden under it. */
+:root {
+  --ask-h: 0px;
+}
+.under-tabs {
+  padding-bottom: var(--ask-h);
+}
 /* The tab bar floats over the page (bottom-tabs.tsx). A page ends above it, unless its lists are marked
    .under-tabs: those run on underneath the glass and get the room at their own end instead. */
 @media (max-width: 767.98px) {
@@ -300,11 +308,7 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
   }
   .page-in:not(:has(.under-tabs)),
   .under-tabs {
-    padding-bottom: var(--tabs-h);
-  }
-  /* with Emplio's message box under the page (composer.tsx LayoutAsk), the box clears the tabs instead */
-  [data-slot="sidebar-inset"]:has(> .page-ask:not(:has(#ask-slot:empty))) :is(.page-in, .under-tabs) {
-    padding-bottom: 1.5rem;
+    padding-bottom: max(var(--tabs-h), var(--ask-h));
   }
 }
 

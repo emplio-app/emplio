@@ -317,7 +317,7 @@ export function useAskOpen(open: Open | null | undefined) {
   }, [k]);
 }
 const ASK_PAGES = ["today", "tasks", "clients", "projects", "contacts", "services", "processes", "knowledge", "database", "files", "team"];
-// the box's strip at a page's foot: what scrolls above fades out under it
+// the chat's box at its column's foot (chat-view.tsx): what scrolls above fades out under it
 export const ASK_FOOT = "page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]";
 export function LayoutAsk() {
   const open = useSyncExternalStore(
@@ -326,13 +326,23 @@ export function LayoutAsk() {
     () => null,
   );
   const page = usePathname().split("/")[1] ?? "";
-  // the chat puts its own box here (chat-view.tsx, through #ask-slot): the same place on every page
+  const ref = useRef<HTMLDivElement>(null);
+  const shows = ASK_PAGES.includes(page);
+  // its height as --ask-h: a page's lists (.under-tabs, globals.css) end above it, so nothing stays hidden under it
+  useEffect(() => {
+    const el = ref.current;
+    const set = (h: number) => document.documentElement.style.setProperty("--ask-h", `${h}px`);
+    if (!el) return set(0);
+    const ro = new ResizeObserver(() => set(el.offsetHeight));
+    ro.observe(el);
+    return () => (ro.disconnect(), set(0));
+  }, [shows]);
   // the chat draws its own, in its column (chat-view.tsx), so its side panels run the full height
-  if (!ASK_PAGES.includes(page)) return null;
-  // over the foot of the page, fading it out; on a phone, above the bottom tabs (globals.css .page-ask)
+  if (!shows) return null;
+  // floating over the page's foot, nothing behind it: the page keeps its whole height; on a phone, above the tabs
   return (
-    <div className={ASK_FOOT}>
-      <div id="ask-slot" className="pointer-events-auto">
+    <div ref={ref} className="page-ask pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]">
+      <div id="ask-slot">
         <PageAsk open={open} />
       </div>
     </div>
@@ -366,6 +376,6 @@ function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boo
   return sheet ? (
     <div className="shrink-0 border-t px-3 pt-3 pb-[max(0.75rem,var(--safe-bottom))]">{box}</div>
   ) : (
-    <div className="mx-auto w-full max-w-3xl px-4">{box}</div>
+    <div className="pointer-events-auto mx-auto w-full max-w-3xl px-4">{box}</div>
   );
 }
