@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { failed, HAND_IT_OFF, notCounted, refusal, remindAt } from "./chat";
 import { db } from "./db";
 import { conversations, jobs, messages, users, workspaceMembers, workspaces } from "./db/schema";
-import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, RESTARTED, CARRY_ON, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runEnd, runSpan, savedTool, threadsNote, untoldNote, untoldReports, reportsDue, jobCard, UPDATE_PART } from "./jobs";
+import { agentNudge, cardsIn, expireAsking, openAsks, RULES, closeTo, EMPLIO, jobReply, jobsCommand, nudged, RESTARTED, CARRY_ON, recordedLine, SAVE_TOOL, reportGoes, reportsNote, runEnd, runSpan, saving, savedTool, threadsNote, untoldNote, untoldReports, reportsDue, jobCard, UPDATE_PART } from "./jobs";
 import { announces } from "./checks";
 import { SILENT } from "./reader";
 
@@ -393,6 +393,32 @@ test("told something new while it runs, the job stays working until the reply th
     expect((await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) }))!.status).toBe("working");
     await second("All done.", "completed", false, false, []);
     expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "done", report: "All done." });
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
+});
+
+// real (Ashish, 26 Nov): handed more work while it saved its tools, the job finished it but stayed "working" and its
+// report never reached Emplio: the saving run's end (after its slow tool save) ended the run that had taken over
+test("work handed over while a job saves its tools still ends with its report", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `jobs-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `jobs-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const main = crypto.randomUUID();
+    const chatId = crypto.randomUUID();
+    await db.insert(conversations).values([{ id: main, ...who, title: "main", kind: "main" }, { id: chatId, ...who, title: "job", kind: "job" }]);
+    const [w] = await db.insert(jobs).values({ ...who, conversationId: main, chatId, depth: 2, name: "backup", status: "done", report: "Partly done" }).returning();
+    saving.add(w!.id);
+    const save = await (await jobReply(chatId))!.began(() => {});
+    // the saving run's end has begun (it clears the mark first), and the work handed over starts before it finishes
+    saving.delete(w!.id);
+    const work = await (await jobReply(chatId))!.began(() => {});
+    await save("Saved pull_all_rows", "completed", true);
+    await work("Status: Done. All saved.", "completed", false, false, []);
+    expect(await db.query.jobs.findFirst({ where: eq(jobs.chatId, chatId) })).toMatchObject({ status: "done", report: "Status: Done. All saved." });
   } finally {
     await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
     await db.delete(users).where(eq(users.id, user!.id));

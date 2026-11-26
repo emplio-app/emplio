@@ -628,7 +628,7 @@ export async function generateTitle(bill: Bill & { userId: string; conversationI
     });
     const title = text.trim().replace(/^["']|["'.]$/g, "").slice(0, 80);
     if (title) await db.update(conversations).set({ title }).where(eq(conversations.id, conversationId));
-    notify(userId);
+    notify(userId, ["chats"]);
   } catch {
     // keep the fallback title
   }
@@ -970,11 +970,15 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     job: !!job,
   });
 
-  // reasoning: thinks before answering and between tool calls (high: better plans, slower and pricier replies)
+  // reasoning: thinks before answering and between tool calls (high: better plans, slower and pricier replies).
+  // Emplio's own chat: the business's setting. A job: low (evals, Nov 26: reports as good as medium, about a third
+  // quicker and a quarter cheaper), all through: a change partway would drop the cached conversation; the tool-saving
+  // run asks for careful thought in its words instead (SAVE_TOOL)
+  const effort = job ? "low" : settings.reasoning;
   const providerOptions = {
     openrouter: {
       cacheControl: cache,
-      reasoning: settings.reasoning === "off" ? { enabled: false } : { effort: settings.reasoning as "low" | "medium" | "high" },
+      reasoning: effort === "off" ? { enabled: false } : { effort: effort as "low" | "medium" | "high" },
     },
   };
   // When the person last heard from this reply: its start, then each step that wrote to them. A command that
@@ -1525,7 +1529,7 @@ export async function chatRoutes(app: FastifyInstance) {
       // opened: whatever finished while it was closed has now been seen
       if (conversation.unread) {
         await db.update(conversations).set({ unread: false }).where(eq(conversations.id, conversation.id));
-        notify(ctx.userId);
+        notify(ctx.userId, ["chats", "jobs"]);
       }
       // rounds with nothing to say are hidden where people talk; a background run shows all it did
       const page = await chatPage(conversation.id, {
@@ -1680,7 +1684,7 @@ export async function chatRoutes(app: FastifyInstance) {
     });
   });
 
-  // Nudges for the open app (live.ts): {type: "chats"} when the chat list changed.
+  // Nudges for the open app (live.ts): {type: "changed", what} naming the lists that changed.
   app.get("/events", { websocket: true, preHandler: authorize }, (socket, req) => addApp(authorized.get(req)!.userId, socket));
 }
 

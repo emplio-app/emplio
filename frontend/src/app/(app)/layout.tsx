@@ -1,9 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { RefreshCwIcon } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 import { AppSidebar } from "@/components/chat/app-sidebar";
-import { BottomTabs } from "@/components/chat/bottom-tabs";
+import { BottomTabs, ON_TOP } from "@/components/chat/bottom-tabs";
 import { JustUpdated, NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
 import { DesktopHistory } from "@/components/desktop-history";
@@ -13,6 +16,8 @@ import { useWebNotifications } from "@/components/web-notifications";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api, useMe } from "@/lib/api";
+import { haptic } from "@/lib/haptics";
+import { hideSplash } from "@/lib/splash";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -23,14 +28,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!isPending && !me?.user.name) router.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
   }, [isPending, me, router]);
 
-  useFitToScreen();
   // the iPhone app: no arrows-and-Done bar above the keyboard (#282). Mobile Safari keeps it, a web page can't hide it
   useEffect(() => {
-    const kb = (window as { Capacitor?: { Plugins?: { Keyboard?: { setAccessoryBarVisible(o: { isVisible: boolean }): Promise<void> } } } })
-      .Capacitor?.Plugins?.Keyboard;
+    const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { Keyboard?: { setAccessoryBarVisible(o: { isVisible: boolean }): Promise<void> } } } })
+      .Capacitor;
+    // iPhone only: Android has no such bar, and its "not implemented" answer showed as an error
+    const kb = cap?.getPlatform?.() === "ios" ? cap.Plugins?.Keyboard : undefined;
     void kb?.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
   }, []);
   usePhoneNotifications(!!me?.user.name, router.push);
+  useEffect(() => void (me?.user.name && hideSplash()), [me?.user.name]);
+  useAndroidBack();
   useDesktopLink(me?.user.name ? me.user.id : undefined, router.push);
   const notifyBar = useWebNotifications(!!me?.user.name, router.push);
 
@@ -39,7 +47,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <DraftProvider>
       <TooltipProvider>
-        <SidebarProvider className="h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
+        <SidebarProvider className="app-frame h-(--app-h) min-h-0 translate-y-(--app-top,0px)">
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden pt-(--safe-top)">
             <NewVersionBar />
@@ -50,6 +58,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarInset>
         </SidebarProvider>
         {/* last in the page: of two overlapping window-drag areas, the later one wins, and the sidebar's top row is one */}
+        <PullToRefresh />
         <DesktopHistory />
         <Tour />
       </TooltipProvider>
@@ -57,7 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// In the phone app (iPhone or Android), once signed in and notifications are allowed: tell the server where to reach this
+// In the iPhone app, once signed in and notifications are allowed: tell the server where to reach this
 // phone, and open the chat a tapped notification is about. The plugin is missing on app builds without it.
 type PushPlugin = {
   checkPermissions(): Promise<{ receive: string }>;
@@ -66,8 +75,10 @@ type PushPlugin = {
 };
 function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) {
   useEffect(() => {
-    const push = (window as { Capacitor?: { Plugins?: { PushNotifications?: PushPlugin } } }).Capacitor?.Plugins?.PushNotifications;
-    if (!signedIn || !push) return;
+    const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { PushNotifications?: PushPlugin } } }).Capacitor;
+    const push = cap?.Plugins?.PushNotifications;
+    // not Android: its app has no Firebase set up, and register() there crashed it right after sign-in
+    if (!signedIn || !push || cap?.getPlatform?.() !== "ios") return;
     const listening = [
       push.addListener("registration", (t: { value: string }) => void api("/push/device", { token: t.value }).catch(() => {})),
       push.addListener("pushNotificationActionPerformed", (a: { notification: { data?: { path?: string } } }) => {
@@ -80,54 +91,101 @@ function usePhoneNotifications(signedIn: boolean, open: (path: string) => void) 
   }, [signedIn, open]);
 }
 
-// iPhone keyboards cover the page instead of shrinking it, then slide the view up to the field: size the
-// app to what's visible and move it along with that slide (--app-top), so the composer sits right above the
-// keyboard from the start (scrolling back to the top instead animated, the composer drifting down slowly).
-// Only while typing: otherwise Safari's toolbar sliding in and out moved the composer up and down; 100dvh
-// covers that.
-function useFitToScreen() {
+// Android's back button, as its own apps do: closes what's open on top (a sheet, a menu, the side menu), else goes
+// back a page, else puts the app away. Without this it left the app from anywhere.
+type AppPlugin = {
+  addListener(event: "backButton", run: (e: { canGoBack: boolean }) => void): { remove(): void } | Promise<{ remove(): void }>;
+  minimizeApp(): Promise<void>;
+};
+function useAndroidBack() {
   useEffect(() => {
-    const view = window.visualViewport;
-    // the desktop app has no on-screen keyboard (and keeps its own top strip): the page stays at its own size
-    if (!view || document.documentElement.hasAttribute("data-desktop")) return;
-    const root = document.documentElement.style;
-    const fit = () => {
-      if (view.scale > 1.01) return; // pinch-zoomed: leave the layout alone
-      const el = document.activeElement as HTMLElement | null;
-      const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-      if (!typing) return root.removeProperty("--app-h"), root.removeProperty("--app-top");
-      root.setProperty("--app-h", `${view.height}px`);
-      root.setProperty("--app-top", `${view.offsetTop}px`);
-    };
-    // Once the keyboard is up, the field being typed in stays in sight: iOS scrolls the page to it, but not a
-    // sheet's own scrolling body, which shrank under the keyboard and left the field below its buttons.
-    const reveal = () => {
-      fit();
-      requestAnimationFrame(() => {
-        const el = document.activeElement as HTMLElement | null;
-        const sheet = el?.closest('[data-slot="dialog-content"], [data-slot="sheet-content"]');
-        for (let box = el?.parentElement; el && sheet?.contains(box ?? null); box = box!.parentElement) {
-          if (box!.scrollHeight <= box!.clientHeight || !/auto|scroll/.test(getComputedStyle(box!).overflowY)) continue;
-          const r = el.getBoundingClientRect();
-          const b = box!.getBoundingClientRect();
-          if (r.top < b.top || r.height > b.height) box!.scrollTop -= b.top - r.top + 12;
-          else if (r.bottom > b.bottom) box!.scrollTop += r.bottom - b.bottom + 12;
-          return;
-        }
-      });
-    };
-    fit();
-    view.addEventListener("resize", reveal);
-    view.addEventListener("scroll", fit);
-    window.addEventListener("focusin", reveal);
-    window.addEventListener("focusout", fit);
-    return () => {
-      view.removeEventListener("resize", reveal);
-      view.removeEventListener("scroll", fit);
-      window.removeEventListener("focusin", reveal);
-      window.removeEventListener("focusout", fit);
-      root.removeProperty("--app-h");
-      root.removeProperty("--app-top");
-    };
+    const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { App?: AppPlugin } } }).Capacitor;
+    const app = cap?.Plugins?.App;
+    if (cap?.getPlatform?.() !== "android" || !app) return;
+    const listening = app.addListener("backButton", ({ canGoBack }) => {
+      // Base UI closes the topmost of them on Escape
+      if (document.querySelector(ON_TOP)) {
+        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      } else if (canGoBack) history.back();
+      else void app.minimizeApp();
+    });
+    return () => void Promise.resolve(listening).then((h) => h.remove());
   }, []);
+}
+
+// Pull a list down from its top to fetch it again, as phone apps do. Not the chat (it fills in by itself, and its
+// top is for older messages) and not inside a sheet or the side menu. Moved by hand, no React drawing per frame.
+const PULL = 72;
+function PullToRefresh() {
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
+  const mark = useRef<HTMLDivElement>(null);
+  const off = pathname.startsWith("/chat") || pathname.startsWith("/home");
+  useEffect(() => {
+    const el = mark.current;
+    if (off || !el || !matchMedia("(pointer: coarse)").matches) return;
+    let startY: number | null = null;
+    let pulled = 0;
+    let busy = false;
+    const place = (y: number, glide: boolean) => {
+      el.style.transition = glide ? "transform 250ms cubic-bezier(0.32, 0.72, 0, 1), opacity 250ms" : "none";
+      el.style.transform = `translate(-50%, ${y - 48}px) rotate(${y * 4}deg)`;
+      el.style.opacity = String(Math.min(1, y / PULL));
+    };
+    const scroller = (node: EventTarget | null) => {
+      for (let box = node instanceof HTMLElement ? node : null; box && box !== document.body; box = box.parentElement) {
+        if (box.closest(ON_TOP)) return null;
+        if (box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY)) return box;
+      }
+      return document.body;
+    };
+    const down = (e: TouchEvent) => {
+      const box = scroller(e.target);
+      startY = !busy && box && box.scrollTop <= 0 ? e.touches[0]!.clientY : null;
+      pulled = 0;
+    };
+    const move = (e: TouchEvent) => {
+      if (startY === null) return;
+      const dy = e.touches[0]!.clientY - startY;
+      if (dy <= 0) return void (startY = null, place(0, true));
+      // harder the further it goes, like a rubber band
+      const next = Math.min(PULL * 1.6, dy * 0.5);
+      if (pulled < PULL && next >= PULL) haptic();
+      pulled = next;
+      place(pulled, false);
+    };
+    const up = async () => {
+      if (startY === null) return;
+      startY = null;
+      if (pulled < PULL) return place(0, true);
+      busy = true;
+      place(PULL * 0.75, true);
+      el.firstElementChild?.classList.add("animate-spin");
+      await queryClient.refetchQueries({ type: "active" }).catch(() => {});
+      el.firstElementChild?.classList.remove("animate-spin");
+      place(0, true);
+      busy = false;
+    };
+    document.addEventListener("touchstart", down, { passive: true });
+    document.addEventListener("touchmove", move, { passive: true });
+    document.addEventListener("touchend", up);
+    document.addEventListener("touchcancel", up);
+    return () => {
+      document.removeEventListener("touchstart", down);
+      document.removeEventListener("touchmove", move);
+      document.removeEventListener("touchend", up);
+      document.removeEventListener("touchcancel", up);
+    };
+  }, [off, queryClient]);
+  if (off) return null;
+  return (
+    <div
+      ref={mark}
+      aria-hidden
+      className="pointer-events-none fixed top-[calc(var(--safe-top)+0.5rem)] left-1/2 z-30 rounded-full border bg-background p-2 text-muted-foreground opacity-0 shadow-md md:hidden"
+      style={{ transform: "translate(-50%, -48px)" }}
+    >
+      <RefreshCwIcon className="size-5" />
+    </div>
+  );
 }

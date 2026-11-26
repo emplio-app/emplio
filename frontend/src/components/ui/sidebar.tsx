@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { MenuIcon, PanelLeftIcon } from "lucide-react"
+import { haptic } from "@/lib/haptics"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -190,7 +191,12 @@ function Sidebar({
   if (isMobile) {
     return (
       // follows the finger: swipe in from the screen's edge to open, swipe back to close (globals.css .phone-drawer)
-      <Drawer.Root open={openMobile} onOpenChange={setOpenMobile} swipeDirection={side}>
+      <Drawer.Root
+        open={openMobile}
+        // a small tap as it opens, like a phone's own side menus
+        onOpenChange={(open) => (open && haptic(), setOpenMobile(open))}
+        swipeDirection={side}
+      >
         {/* narrow: anything wider sits over the buttons at the screen's edge */}
         <Drawer.SwipeArea className={cn("fixed inset-y-0 z-40 w-3", side === "left" ? "left-0" : "right-0")} />
         <Drawer.Portal>

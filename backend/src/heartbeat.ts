@@ -528,7 +528,7 @@ async function outcome(chatId: string, userId: string, roundId: string) {
   const last = texts[texts.length - 1]?.replace(SILENT, "").trim() || null;
   if (last) return last;
   await db.update(conversations).set({ unread: false }).where(eq(conversations.id, chatId));
-  notify(userId);
+  notify(userId, ["chats"]);
   return null;
 }
 

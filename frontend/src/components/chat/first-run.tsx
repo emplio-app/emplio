@@ -269,8 +269,11 @@ type PhonePush = {
   requestPermissions(): Promise<{ receive: string }>;
   register(): Promise<void>;
 };
-export const phonePush = () =>
-  (window as { Capacitor?: { Plugins?: { PushNotifications?: PhonePush } } }).Capacitor?.Plugins?.PushNotifications;
+// iPhone only: the Android app has no Firebase set up, and registering there crashed it right after sign-in
+export const phonePush = () => {
+  const cap = (window as { Capacitor?: { getPlatform?(): string; Plugins?: { PushNotifications?: PhonePush } } }).Capacitor;
+  return cap?.getPlatform?.() === "ios" ? cap.Plugins?.PushNotifications : undefined;
+};
 
 const NOTIFY_ASKED = "emplio-notify-asked";
 function useNotifyOffer(sent: number) {

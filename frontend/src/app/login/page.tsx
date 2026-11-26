@@ -14,6 +14,7 @@ import type { AuthStartResponse } from "@emplio/shared";
 import { api, API_URL, meQueryKey, useMe } from "@/lib/api";
 import { JUST_JOINED } from "@/components/chat/first-run";
 import { track } from "@cloud/client";
+import { hideSplash } from "@/lib/splash";
 
 const GOOGLE_ERRORS: Record<string, string> = {
   cancelled: "Google sign-in was cancelled.",
@@ -76,12 +77,16 @@ export default function LoginPage() {
 
   const current = { email: start, code: verify, name: saveName }[step];
 
-  if (isPending || me?.user.name) return null;
+  const showing = !isPending && !me?.user.name;
+  useEffect(() => void (showing && hideSplash()), [showing]);
+
+  if (!showing) return null;
 
   return (
     // centered on a phone too, clear of the status bar; "safe" centering falls back to the top when the keyboard
-    // leaves too little room, so the logo never ends up under the clock
-    <main className="flex flex-1 flex-col items-center justify-center-safe gap-8 px-6 py-24 max-sm:gap-6 max-sm:pt-[calc(var(--safe-top)+2.5rem)] max-sm:pb-10">
+    // leaves too little room, so the logo never ends up under the clock; in the iPhone app, centered in what the
+    // keyboard leaves (--keyboard: providers.tsx)
+    <main className="flex flex-1 flex-col items-center justify-center-safe gap-8 px-6 py-24 max-sm:gap-6 max-sm:pt-[calc(var(--safe-top)+2.5rem)] max-sm:pb-10 mb-(--keyboard,0px) keyboard-glide">
       <Logo />
       <Card className="w-full max-w-sm shadow-xl shadow-primary/5">
         <CardHeader>

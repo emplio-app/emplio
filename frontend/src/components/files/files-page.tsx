@@ -9,7 +9,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useState } from "react";
 import { useConfirm } from "@/components/confirm";
-import { fileHref } from "@/components/chat/attachments";
+import { imageHref } from "@/components/chat/attachments";
 import { inApp } from "@/lib/save-file";
 import { download, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
 import { Button } from "@/components/ui/button";
@@ -140,9 +140,8 @@ export function FilesPage() {
                       >
                         {/* pictures as themselves, everything else as its type's icon */}
                         {kindOf(f) === "image" ? (
-                          // ponytail: the full picture, lazily; a stored thumbnail if long lists get heavy
                           // eslint-disable-next-line @next/next/no-img-element -- our own stored file
-                          <img src={fileHref(f.url)} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full rounded-md object-cover" />
+                          <img src={imageHref(f.url, 36)} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full rounded-md object-cover" />
                         ) : (
                           <FileTypeIcon file={f} className="size-4" />
                         )}

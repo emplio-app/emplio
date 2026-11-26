@@ -266,13 +266,13 @@ input:is([type="date"], [type="datetime-local"], [type="time"], [type="month"], 
   max-height: calc(var(--available-height) - var(--safe-top) - var(--safe-bottom));
 }
 
-/* The tab bar makes way while typing, leaving the screen to the keyboard and the text; the keyboard covers the
+/* The tab bar makes way while typing ([data-typing]: (app)/layout.tsx), leaving the screen to the keyboard and the text; the keyboard covers the
    home bar too, so nothing keeps room for it */
-body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) {
+html[data-typing] body {
   --tabs-h: 0px;
   --safe-bottom: 0px;
 }
-body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) .bottom-tabs {
+html[data-typing] .bottom-tabs {
   display: none;
 }
 /* a side panel slides in from its edge (sheet.tsx), above the motion everything else gets (:where([data-slot]),
@@ -300,6 +300,21 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
 .under-tabs {
   padding-bottom: var(--ask-h);
 }
+/* In the iPhone app the page makes room for the keyboard as it rises and falls (providers.tsx), gliding with it
+   instead of jumping. ponytail: the keyboard's own timing isn't passed on, so this is a close match; tune here. */
+html[data-keyboard-app] {
+  --keyboard-glide: 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+html[data-keyboard-app] .app-frame {
+  transition: height var(--keyboard-glide);
+}
+html[data-keyboard-app] .keyboard-glide {
+  transition: margin-bottom var(--keyboard-glide);
+}
+html[data-keyboard-app] :is([data-slot="dialog-content"], [data-slot="sheet-content"]):not([data-dragged]) {
+  transition: top var(--keyboard-glide), max-height var(--keyboard-glide);
+}
+
 /* The tab bar floats over the page (bottom-tabs.tsx). A page ends above it, unless its lists are marked
    .under-tabs: those run on underneath the glass and get the room at their own end instead. */
 @media (max-width: 767.98px) {
@@ -431,13 +446,13 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
     background: rgb(0 0 0 / 0.4);
     animation-duration: 260ms;
   }
-  /* sideways, a little further and slower, on a phone */
+  /* a phone's tab bar swaps pages in place, no sliding: a quick fade, nothing moving */
   .page-in {
-    --page-x: calc(var(--page-direction, 0) * 20px);
+    --page-x: 0px;
     --page-y: 0px;
   }
   .page-in > * {
-    animation-duration: 300ms;
+    animation-duration: 180ms;
   }
 }
 @keyframes sheet-in {

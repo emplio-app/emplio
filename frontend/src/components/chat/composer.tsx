@@ -144,7 +144,8 @@ export function Composer({ c, onSend, placeholder, busy = false, status, onStop,
       {/* one line, send at its end; the tools sit under the box */}
       <div className="flex w-full items-end">
       {/* on a phone a row under the box is wasted height: attach, skill and mention fold into one + in it */}
-      <div className="hidden h-12 items-center pl-2 pointer-coarse:flex" onMouseDown={(e) => e.preventDefault()}>
+      {/* by the first line, not floating under a new chat's taller box */}
+      <div className={cn("hidden h-12 items-center pl-2 pointer-coarse:flex", roomy && "self-start")} onMouseDown={(e) => e.preventDefault()}>
         <DropdownMenu>
           <DropdownMenuTrigger render={<PromptInputButton aria-label="More" className="rounded-full text-muted-foreground" />}>
             <PlusIcon className="size-5" />
@@ -191,9 +192,10 @@ export function Composer({ c, onSend, placeholder, busy = false, status, onStop,
         />
       </div>
         {/* mic and send share one row, centred on each other and on the first line of text */}
-        <div className="flex h-12 items-center gap-1 pr-2">
-        {/* a press keeps the focus in the box */}
-        <div className="flex" onMouseDown={(e) => e.preventDefault()}>
+        {/* a press keeps the focus in the box: losing it dropped the keyboard and moved send from under the finger
+            before it lifted, so a tap closed the keyboard without sending; the keyboard goes once it's sent */}
+        <div className="flex h-12 items-center gap-1 pr-2" onMouseDown={(e) => e.preventDefault()}>
+        <div className="flex">
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
         </div>
         {/* not `disabled`: the input group fades itself out when anything inside is disabled */}

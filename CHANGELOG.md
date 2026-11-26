@@ -2,6 +2,55 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.18 (2026-11-26)
+
+### What's new
+
+- An agent given more work while it was saving its steps to reuse could finish that work and still show "working", with its report never reaching you. Its report now always comes through.
+
+### For developers
+
+- `jobs.ts`: the tool-saving run's end no longer ends the job's tracking when a carry-on run has taken it over (its end returned early, so that run's report and status were never written); `carryOn` clears the saving mark. Test: "work handed over while a job saves its tools still ends with its report".
+
+## 1.4.17 (2026-11-26)
+
+### What's new
+
+- The phone app feels smoother: the keyboard opens without a delay and the screen glides up with it (no more black corners above it), the sign-in page moves up so you can see what you type, and closing the keyboard no longer flickers.
+- The send button in the chat sends your message and then closes the keyboard, instead of only closing the keyboard.
+- Pull down on a list to refresh it, small vibrations when you tap tabs or open the menu, and Android's back button closes what's open before going back.
+- Pictures load faster on phones: Emplio sends a smaller copy sized for the screen instead of the full photo.
+- Chats open faster: code highlighting and maths are loaded only when a message has them.
+- The app no longer zooms the whole screen when you pinch; pictures and PDFs zoom inside their own frame.
+- The splash screen stays until the app is ready, so you don't see a blank screen first.
+
+### For developers
+
+- `providers.tsx` `useFitToScreen` (moved from `(app)/layout.tsx`, now on every page): with the iPhone app's keyboard resize `none` (`mobile/capacitor.config.js`), `keyboardWillShow`/`keyboardWillHide` size the page at once (`--app-h`, `--keyboard`, `html[data-keyboard-app]` glide) and drive `data-typing`; older app builds keep the visualViewport path.
+- Native iOS tab bar (`AppDelegate.swift` `TabBarPlugin`, registered by `MainViewController`) used by `bottom-tabs.tsx` when the plugin exists; `ZoomPlugin` takes back the web view's scroll delegate so the page never pinch-zooms. Both need a new iPhone build; older builds keep the web tab bar.
+- `GET /files/*?w=<px>` (`files.ts` `thumbnail`): JPEG/PNG/WebP shrunk to 96/320/640/1600 wide WebP; `attachments.tsx` `imageHref`.
+- `message.tsx`: `@streamdown/code`, math and CJK plugins loaded on demand; `lib/zoom.ts` `usePinchZoom` for image/PDF viewers; `lib/splash.ts`; pull-to-refresh and Android back in `(app)/layout.tsx`; query `staleTime` 30s.
+
+## 1.4.16 (2026-11-26)
+
+### What's new
+
+- Agents now think a little the whole way through a job, including when they save steps to reuse next time; that step is told to think carefully instead. Same quality in our checks, and it keeps each job cheaper.
+
+### For developers
+
+- `chat.ts`: a job's reasoning stays `low` for its tool-saving run too (measured through OpenRouter on Haiku 5.5, 3 runs each: a step at another effort reads only the cached system prompt, and the job's conversation is paid again at the cache-write price; the high saving run cost ~22% more than staying low); `SAVE_TOOL` asks for careful thought in words ("Ultrathink: …"). Skills eval: right_call 83/93% vs 88/93% before; the saving run writes ~10% more tokens.
+
+## 1.4.15 (2026-11-26)
+
+### What's new
+
+- Agents work faster and cost less: they think a little before each step instead of a lot, and think hard only when saving steps to reuse next time. Emplio's own replies to you think as before.
+
+### For developers
+
+- `chat.ts`: a job's reasoning is `low` whatever the business's Reasoning setting, and `high` for its tool-saving run (the `[Keep tools]` message); Emplio's own chat keeps the setting. Evals (job-report, checklist, skills, two runs each, Haiku): off 74–82% right first try, low 97–100%, medium ~95%; low ~30% quicker and ~25% cheaper per step than medium. `evals/emplio.ts` mirrors it (`EVAL_JOB_REASONING` to try another).
+
 ## 1.4.14 (2026-11-25)
 
 ### What's new
