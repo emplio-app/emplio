@@ -27,7 +27,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { flushSync } from "react-dom";
 import { cn } from "@/lib/utils";
 import {
   Message,
@@ -49,7 +49,7 @@ import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
 import { ReportButton } from "@/components/chat/report-reply";
-import { Composer, keepDraft, keptDraft, useComposer } from "@/components/chat/composer";
+import { ASK_FOOT, Composer, keepDraft, keptDraft, useComposer } from "@/components/chat/composer";
 import { MessageAttachments, SAY_FILES, SAY_META, SAY_TEXT } from "@/components/chat/attachments";
 import { QuoteButton, QuotedText, addQuote } from "@/components/chat/quote";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -141,8 +141,6 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // after the first send the new chat is a real one, still on screen: its slot moves to its own id then (dispatch)
   const [draftKey, setDraftKey] = useState(`chat_draft:${isNew ? "new" : id}`);
   const composer = useComposer(draftKey);
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => setSlot(document.getElementById("ask-slot")), []);
   const { input, setInput, quotes, setQuotes, attachments, mentionMenu, box } = composer;
   // a kept draft opens with the cursor after it, ready to go on typing
   useEffect(() => {
@@ -1332,9 +1330,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              {slot && createPortal(
-              // at the app's foot, where every page has its box (composer.tsx LayoutAsk)
-              <div className="relative mx-auto w-full max-w-3xl px-4">
+              {/* at the chat column's foot, as every page has its box (composer.tsx LayoutAsk): a side panel keeps its full height */}
+              <div className={ASK_FOOT}>
+              <div className="pointer-events-auto relative mx-auto w-full max-w-3xl px-4">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1369,7 +1367,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     {messageBox}
                   </>
                 )}
-              </div>, slot)}
+              </div>
+              </div>
             </>
           )}
         </div>

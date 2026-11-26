@@ -317,6 +317,8 @@ export function useAskOpen(open: Open | null | undefined) {
   }, [k]);
 }
 const ASK_PAGES = ["today", "tasks", "clients", "projects", "contacts", "services", "processes", "knowledge", "database", "files", "team"];
+// the box's strip at a page's foot: what scrolls above fades out under it
+export const ASK_FOOT = "page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]";
 export function LayoutAsk() {
   const open = useSyncExternalStore(
     (f) => (listeners.add(f), () => void listeners.delete(f)),
@@ -325,13 +327,13 @@ export function LayoutAsk() {
   );
   const page = usePathname().split("/")[1] ?? "";
   // the chat puts its own box here (chat-view.tsx, through #ask-slot): the same place on every page
-  const chat = page === "chat" || page === "home";
-  if (!chat && !ASK_PAGES.includes(page)) return null;
+  // the chat draws its own, in its column (chat-view.tsx), so its side panels run the full height
+  if (!ASK_PAGES.includes(page)) return null;
   // over the foot of the page, fading it out; on a phone, above the bottom tabs (globals.css .page-ask)
   return (
-    <div className="page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]">
+    <div className={ASK_FOOT}>
       <div id="ask-slot" className="pointer-events-auto">
-        {!chat && <PageAsk open={open} />}
+        <PageAsk open={open} />
       </div>
     </div>
   );
