@@ -498,8 +498,9 @@ export async function setInputs(w: Who, id: string, given: Record<string, unknow
   if (run.status !== "active") throw new ProcessError(`it's ${run.status}; only a go still running can change`);
   if (!run.inputs.length) throw new ProcessError("this one has nothing filled in to change (its process had no inputs when it started)");
   if (!Object.keys(given).length) throw new ProcessError(`say what to change: ${run.inputs.map((x) => `--${x.key}`).join(", ")}`);
+  // what's filled in steers the later steps, some done with the owner's access
+  if (!isAdmin(w)) throw new ProcessError("only the owner or an admin can change what was filled in; ask them");
   const t = await currentTask(run);
-  if (!isAdmin(w) && run.startedBy !== w.userId && t?.assigneeId !== w.userId) throw new ProcessError("only whoever started it, whoever has its step, the owner or an admin can change it");
   const next = checkInputs(run.inputs, given, false);
   const changed = run.inputs.filter((x) => x.key in next && next[x.key] !== x.value);
   if (!changed.length) return run;
@@ -540,7 +541,9 @@ export async function stopRun(w: Who, id: string) {
   return run;
 }
 
-export async function listRuns(workspaceId: string, f: { process?: string; client?: string; all?: boolean } = {}): Promise<ProcessRun[]> {
+// viewer: a member, who sees only the runs they started or have a step in (inputs can be amounts, salaries)
+export async function listRuns(workspaceId: string, f: { process?: string; client?: string; all?: boolean; viewer?: Pick<Who, "userId" | "role"> } = {}): Promise<ProcessRun[]> {
+  const member = f.viewer && !isAdmin(f.viewer) ? f.viewer.userId : null;
   const rows = await db
     .select()
     .from(processRuns)
@@ -550,6 +553,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
         f.process ? eq(processRuns.process, f.process) : undefined,
         f.client ? eq(processRuns.client, f.client) : undefined,
         f.all ? undefined : eq(processRuns.status, "active"),
+        member ? sql`(${processRuns.startedBy} = ${member} or exists (select 1 from ${tasks} where ${tasks.runId} = ${processRuns.id} and ${tasks.assigneeId} = ${member}))` : undefined,
       ),
     )
     .orderBy(desc(processRuns.startedAt))
@@ -686,7 +690,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
       case "start": {
         if (!words[0]) break;
         const run = await startRun(who, words[0], { client: await clientOf(opts.client), subject: opts.for, inputs: inputFlags });
-        const [r] = await listRuns(who.workspaceId, { process: words[0], all: true }).then((l) => l.filter((x) => x.id === run!.id));
+        const [r] = await listRuns(who.workspaceId, { process: words[0], all: true, viewer: who }).then((l) => l.filter((x) => x.id === run!.id));
         const details = inputsLine(run!.inputs);
         return `Started ${run!.id.slice(0, 8)}: "${run!.processTitle}" for ${run!.subject}${details ? ` (${details})` : ""}. Step 1, ${r?.steps[0]?.name}: ${r?.current ? `${r.current.assigneeName}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}` : "made"}.`;
       }
@@ -696,7 +700,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Now: ${inputsLine(run.inputs) || "nothing filled in"}.`;
       }
       case "runs": {
-        const runs = await listRuns(who.workspaceId, { process: words[0], client: await clientOf(opts.client), all: !!opts.all });
+        const runs = await listRuns(who.workspaceId, { process: words[0], client: await clientOf(opts.client), all: !!opts.all, viewer: who });
         if (data) return JSON.stringify(runs);
         if (!runs.length) return opts.all ? "No runs." : "Nothing going. (--all for finished ones)";
         return runs
@@ -742,14 +746,14 @@ export async function processRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { process?: string; client?: string; all?: string } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listRuns(ctx.workspaceId, { process: req.query.process, client: req.query.client, all: req.query.all === "1" });
+    return listRuns(ctx.workspaceId, { process: req.query.process, client: req.query.client, all: req.query.all === "1", viewer: ctx });
   });
   app.post<{ Body: { process?: string; client?: string | null; subject?: string; inputs?: Record<string, unknown> } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     try {
       const run = await startRun(ctx, req.body?.process ?? "", { client: req.body?.client, subject: req.body?.subject, inputs: req.body?.inputs ?? {} });
-      return (await listRuns(ctx.workspaceId, { process: run!.process })).find((r) => r.id === run!.id);
+      return (await listRuns(ctx.workspaceId, { process: run!.process, viewer: ctx })).find((r) => r.id === run!.id);
     } catch (error) {
       return fail(reply, error);
     }
@@ -769,7 +773,7 @@ export async function processRoutes(app: FastifyInstance) {
     if (!ctx) return;
     try {
       const run = await setInputs(ctx, req.params.id, req.body?.inputs ?? {});
-      return (await listRuns(ctx.workspaceId, { process: run.process, all: true })).find((r) => r.id === run.id);
+      return (await listRuns(ctx.workspaceId, { process: run.process, all: true, viewer: ctx })).find((r) => r.id === run.id);
     } catch (error) {
       return fail(reply, error);
     }

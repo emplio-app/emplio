@@ -238,6 +238,8 @@ export async function removeTask(w: Who, id: string, conversationId?: string) {
   const t = await find(w, id);
   if (!t || (!isAdmin(w) && !mayChange(w, t))) return { ok: false as const, error: `no task ${id}` };
   if (!isAdmin(w) && t.requesterId !== w.userId) return { ok: false as const, error: "only whoever asked for it or an admin can remove it; mark it cancelled instead" };
+  // gone, its process would wait on it forever
+  if (t.runId && OPEN.includes(t.status)) return { ok: false as const, error: "it's a step of a process: mark it done, or cancelled to skip the step, or stop the process" };
   await db.delete(tasks).where(eq(tasks.id, t.id));
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId, kind: "task", summary: `Removed task "${t.title}"` });
   return { ok: true as const };

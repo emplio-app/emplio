@@ -46,6 +46,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { AskFloat, PageAsk } from "@/components/chat/composer";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks, useThingPage } from "@/lib/api";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { inputText } from "@/lib/process-inputs";
@@ -57,7 +58,8 @@ const KNOWN: { value: ClientStage; label: string; hint: string }[] = [
   { value: "prospect", label: "Prospect", hint: "Not won yet" },
   { value: "past", label: "Past", hint: "No longer working together" },
 ];
-// a stage is the business's own word (Emplio picks it): the three above, then any others its clients are at
+// a stage is the business's own word (Emplio picks it): the three above, then any others its clients are at.
+// "active" as a filter means every working stage (onboarding, on hold, ...), not just the word
 const stageLabel = (s: string) => KNOWN.find((k) => k.value === s)?.label ?? s.charAt(0).toUpperCase() + s.slice(1);
 const stagesOf = (all: Client[]) => [...KNOWN, ...[...new Set(all.map((c) => c.stage))].filter((s) => !KNOWN.some((k) => k.value === s)).sort().map((s) => ({ value: s, label: stageLabel(s), hint: "" }))];
 
@@ -197,10 +199,11 @@ export function ClientsPage() {
 
   const all = clients.data ?? [];
   const FILTERS = [{ value: "all", label: "All" }, ...stagesOf(all).map((s) => ({ value: s.value, label: s.value === "prospect" ? "Prospects" : s.label }))];
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.value, f.value === "all" ? all.length : all.filter((c) => c.stage === f.value).length]));
+  const inFilter = (c: Client, f: string) => (f === "unhandled" ? isWorking(c.stage) && !c.handlers.length : f === "all" || (f === "active" ? isWorking(c.stage) : c.stage === f));
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.value, all.filter((c) => inFilter(c, f.value)).length]));
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = all
-    .filter((c) => (filter === "unhandled" ? isWorking(c.stage) && !c.handlers.length : filter === "all" || c.stage === filter))
+    .filter((c) => inFilter(c, filter))
     .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name), ...c.details.map((d) => d.value)].join(" ").toLowerCase().includes(w)));
   const current = all.find((c) => c.slug === openId) ?? null;
   const unhandled = all.filter((c) => isWorking(c.stage) && !c.handlers.length).length;
@@ -264,24 +267,16 @@ export function ClientsPage() {
 
           {all.length > 0 && (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div role="tablist" aria-label="Stage" className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
-                {FILTERS.map((f) => (
-                  <button
-                    key={f.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={filter === f.value}
-                    onClick={() => setFilter(f.value)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
-                      filter === f.value && "bg-background text-foreground shadow-xs",
-                    )}
-                  >
-                    {f.label}
-                    <span className="tabular-nums opacity-60">{counts[f.value]}</span>
-                  </button>
-                ))}
-              </div>
+              <Tabs value={filter} onValueChange={(v) => setFilter(v as string)} className="shrink-0">
+                <TabsList aria-label="Stage">
+                  {FILTERS.map((f) => (
+                    <TabsTrigger key={f.value} value={f.value} className="px-2.5 text-xs">
+                      {f.label}
+                      <span className="tabular-nums opacity-60">{counts[f.value]}</span>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
               <InputGroup className="h-8 flex-1">
                 <InputGroupAddon>
                   <SearchIcon />
@@ -323,16 +318,16 @@ export function ClientsPage() {
             <ul className="grid gap-1.5">
               {shown.map((c) => (
                 <li key={c.slug}>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     onClick={() => setOpenId(c.slug)}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:outline-none"
+                    className="h-auto justify-start whitespace-normal font-normal group flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:outline-none"
                   >
                     <Monogram c={c} />
                     <span className="grid min-w-0 flex-1 gap-1">
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm font-medium">{c.name}</span>
-                        {filter === "all" && <StagePill stage={c.stage} />}
+                        {c.stage !== filter && <StagePill stage={c.stage} />}
                       </span>
                       <Handlers c={c} />
                     </span>
@@ -352,7 +347,7 @@ export function ClientsPage() {
                         </span>
                       )}
                     </span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -416,14 +411,14 @@ function AddClient({ onDone }: { onDone: () => void }) {
         if (name.trim()) add.mutate({ name, stage });
       }}
     >
-      <input
+      <Input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && onDone()}
         placeholder="Client name, e.g. Northwind Traders"
         aria-label="Client name"
-        className="h-9 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground"
+        className="h-9 border-0 bg-transparent px-2 text-sm focus-visible:ring-0 md:text-sm dark:bg-transparent"
       />
       <div className="flex items-center gap-2">
         <Select items={STAGES} value={stage} onValueChange={(v) => v && setStage(v as ClientStage)}>
@@ -557,13 +552,13 @@ function ClientDetails({
           <div className="grid min-w-0 gap-1">
             <SheetTitle className="sr-only">{c.name}</SheetTitle>
             {admin ? (
-              <input
+              <Input
                 aria-label="Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={() => name.trim() && name.trim() !== c.name && onChange({ name })}
                 onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                className="min-w-0 bg-transparent font-heading text-lg font-semibold outline-none"
+                className="h-auto min-w-0 rounded-none border-0 bg-transparent p-0 font-heading text-lg font-semibold focus-visible:ring-0 md:text-lg dark:bg-transparent"
               />
             ) : (
               <p className="truncate font-heading text-lg font-semibold">{c.name}</p>
@@ -618,7 +613,7 @@ function ClientDetails({
             <ul className="grid gap-1">
               {open.slice(0, 12).map((t) => (
                 <li key={t.id}>
-                  <button type="button" onClick={() => onOpenTask(t.id)} className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-muted/50">
+                  <Button variant="ghost" onClick={() => onOpenTask(t.id)} className="h-auto justify-start whitespace-normal font-normal flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-muted/50">
                     <span
                       className={cn(
                         "mt-1 size-2 shrink-0 rounded-full",
@@ -638,7 +633,7 @@ function ClientDetails({
                         )}
                       </span>
                     </span>
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -792,11 +787,11 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
         <ul className="grid gap-1.5">
           {runs.data.map((r) => (
             <li key={r.id}>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 disabled={!r.current}
                 onClick={() => r.current && onOpenTask(r.current.taskId)}
-                className="grid w-full gap-1.5 rounded-lg border px-3 py-2.5 text-left hover:bg-muted/50 disabled:hover:bg-transparent"
+                className="h-auto justify-start whitespace-normal font-normal grid w-full gap-1.5 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-muted/50 disabled:opacity-100"
               >
                 <span className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate font-medium">
@@ -818,7 +813,7 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
                   {r.current && ` · ${r.current.status === "waiting" ? "waiting" : r.current.assigneeName}`}
                   {r.current?.dueAt && ` · due ${dueText(r.current.dueAt)}`}
                 </span>
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

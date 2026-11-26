@@ -371,9 +371,9 @@ export function TeamPage() {
 // a person, opening their team file when they have one
 function Person({ file, onOpen, children }: { file?: Thing; onOpen: (f: Thing) => void; children: React.ReactNode }) {
   return file ? (
-    <button type="button" onClick={() => onOpen(file)} className="-my-1.5 -ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1.5 pl-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50">
+    <Button variant="ghost" onClick={() => onOpen(file)} className="h-auto justify-start whitespace-normal font-normal -my-1.5 -ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1.5 pr-0 pl-2 text-left hover:bg-muted/50">
       {children}
-    </button>
+    </Button>
   ) : (
     <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
   );

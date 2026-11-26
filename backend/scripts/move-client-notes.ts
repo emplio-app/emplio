@@ -35,7 +35,8 @@ export function toYaml(text: string) {
       try {
         read = parse(v);
       } catch {}
-      fields[kv[1]!] = read === null || typeof read === "object" ? v : read;
+      // a number or yes/no only when it reads back the same (+91…, 007, "#4" after an address stay text)
+      fields[kv[1]!] = (typeof read === "number" || typeof read === "boolean") && String(read) === v ? read : v;
     }
   }
   return `---\n${Object.keys(fields).length ? stringify(fields) : ""}---\n${text.slice(top[0].length)}`;

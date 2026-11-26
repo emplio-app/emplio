@@ -125,8 +125,9 @@ async function writeFileNow(workspaceId: string, repo: string, path: string, con
 export const writeFiles = (workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) =>
   locked(`${workspaceId}/${repo}`, () => writeFilesNow(workspaceId, repo, files, message, author));
 
-async function writeFilesNow(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author) {
-  const shas = new Map((await listPaths(workspaceId, repo)).map((p) => [p.path, p.sha]));
+async function writeFilesNow(workspaceId: string, repo: string, files: { path: string; content: string | Uint8Array | null }[], message: string, author: Author, read: Record<string, string> = {}) {
+  // a file read before (editFile) is written over the version read; Gitea refuses it if it changed since
+  const shas = new Map([...(await listPaths(workspaceId, repo)).map((p) => [p.path, p.sha] as const), ...Object.entries(read)]);
   const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents`, {
     method: "POST",
     body: JSON.stringify({
@@ -145,6 +146,23 @@ async function writeFilesNow(workspaceId: string, repo: string, files: { path: s
   if (!res.ok) throw new Error(`gitea: write ${files.length} files failed (${res.status})`);
   indexLater(workspaceId, repo);
 }
+
+// Read a file and write what change makes of it (it and any other files) as one step, so a write in between (a quick
+// second edit, a box's push) isn't lost: on a clash it's read and changed again, once.
+export const editFile = (workspaceId: string, repo: string, path: string, change: (text: string) => { path: string; content: string | null }[], message: string, author: Author) =>
+  locked(`${workspaceId}/${repo}`, async () => {
+    for (let i = 0; ; i++) {
+      const res = await gitea(`/repos/${orgFor(workspaceId)}/${repo}/contents/${path}?ref=main`);
+      const cur = res.ok ? ((await res.json()) as { sha: string; content: string }) : null;
+      const files = change(cur ? Buffer.from(cur.content, "base64").toString() : "");
+      if (!files.length) return;
+      try {
+        return await writeFilesNow(workspaceId, repo, files, message, author, cur ? { [path]: cur.sha } : {});
+      } catch (error) {
+        if (i) throw error;
+      }
+    }
+  });
 
 // Emplio's own upkeep commits (moving files, repointing paths) are made under this name.
 export const UPKEEP = { name: "Emplio", email: "noreply@emplio.app" };

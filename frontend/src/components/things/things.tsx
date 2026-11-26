@@ -103,9 +103,9 @@ export function Row({ lead, title, meta, right, sub, href, onClick, dim }: { lea
       {body}
     </Link>
   ) : (
-    <button type="button" onClick={onClick} className={cls}>
+    <Button variant="ghost" onClick={onClick} className={cn("h-auto justify-start whitespace-normal font-normal", cls)}>
       {body}
-    </button>
+    </Button>
   );
 }
 

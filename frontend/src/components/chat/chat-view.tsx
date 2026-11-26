@@ -460,7 +460,12 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         meta = JSON.parse(sessionStorage.getItem(SAY_META) ?? "{}");
         sessionStorage.removeItem(SAY_META);
       } catch {}
-      if (say) dispatch({ text: say, files, ...meta });
+      // in line like a typed one: the effect below sends it once the chat is known to be idle (a reply may be running)
+      if (say && isNew) dispatch({ text: say, files, ...meta });
+      else if (say) {
+        waited.current = true;
+        enqueue({ id: uuid(), text: say, files, ...meta });
+      }
     });
     return () => clearTimeout(later);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the chat opens
@@ -531,7 +536,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     setQueue(rest);
     dispatch(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the chat is known to be idle
-  }, [summary, busy]);
+  }, [summary, busy, queue.length]);
 
   // Editing a sent message forks the chat there: the edit goes out after the message before it, the old
   // version stays a switch away ("‹ 1 / 2 ›"). Messages loaded from the server know their versions

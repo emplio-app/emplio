@@ -30,7 +30,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AskFloat, PageAsk } from "@/components/chat/composer";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -304,7 +304,10 @@ export function TasksPage() {
   const { update, people, clients } = useTaskActions();
   const [show, setShow] = useState("all");
   // /tasks?client=<slug> (from the Clients page): that client's
-  const [client, setClient] = useState(useSearchParams().get("client") ?? "all");
+  const params = useSearchParams();
+  const askedClient = params.get("client");
+  const [client, setClient] = useState(askedClient ?? "all");
+  useEffect(() => setClient(askedClient ?? "all"), [askedClient]);
   const clientItems = [
     { value: "all", label: "All clients" },
     ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.slug === client).map((c) => ({ value: c.slug, label: c.name })),
@@ -312,9 +315,9 @@ export function TasksPage() {
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
   // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
-  const [openId, setOpenId] = useState<string | null>(
-    useSearchParams().get("task"),
-  );
+  const askedTask = params.get("task");
+  const [openId, setOpenId] = useState<string | null>(askedTask);
+  useEffect(() => void (askedTask && setOpenId(askedTask)), [askedTask]);
   const [confirmDialog, confirm] = useConfirm();
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);

@@ -316,7 +316,7 @@ export function useAskOpen(open: Open | null | undefined) {
   }, [k]);
 }
 // the chat's box at its column's foot (chat-view.tsx): what scrolls above fades out under it
-export const ASK_FOOT = "page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]";
+export const ASK_FOOT = "page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-3";
 export function AskFloat({ className }: { className?: string }) {
   const open = useSyncExternalStore(
     (f) => (listeners.add(f), () => void listeners.delete(f)),

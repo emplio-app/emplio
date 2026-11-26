@@ -11,7 +11,7 @@ import { context } from "./auth";
 import { db } from "./db";
 import { conversations, processRuns, tasks } from "./db/schema";
 import { syncFiles } from "./file-index";
-import { readFile, UPKEEP, writeFiles } from "./gitea";
+import { editFile, readFile, UPKEEP, writeFiles } from "./gitea";
 import { listTeam } from "./team";
 import { parseDocument, isMap, isScalar } from "yaml";
 import { listThings, thingFile, thingPage, TOP, words as titleOf } from "./things";
@@ -133,12 +133,13 @@ export async function listClients(w: Pick<Who, "workspaceId">, f: { stage?: Clie
 }
 
 // By slug or name: exact first, then a unique part of the name. A string is what's wrong.
-export async function findClient(workspaceId: string, q: string): Promise<Client | string> {
+export async function findClient(workspaceId: string, q: string, exact = false): Promise<Client | string> {
   const all = await listClients({ workspaceId });
   const s = q.trim().toLowerCase();
   if (!s) return "which client?";
-  const exact = all.find((c) => c.slug === s || c.slug === slugOf(s) || c.name.toLowerCase() === s);
-  if (exact) return exact;
+  const hit = all.find((c) => c.slug === s || c.slug === slugOf(s) || c.name.toLowerCase() === s);
+  if (hit) return hit;
+  if (exact) return `no client "${q}"`;
   const loose = all.filter((c) => c.name.toLowerCase().includes(s) || c.slug.includes(slugOf(s) || s));
   if (loose.length === 1) return loose[0]!;
   return loose.length
@@ -189,9 +190,13 @@ export async function handlerLinks(workspaceId: string, asked: string[], me: str
 }
 
 // One commit to the company files as whoever made the change, read back before anything reads them.
-async function commit(w: Who, files: { path: string; content: string | null }[], message: string) {
+// files: or a change to one file (path), read and written as one step
+type Change = { path: string; content: string | null };
+async function commit(w: Who, files: Change[] | ((text: string) => Change[]), message: string, path = "") {
   const me = (await listTeam(w.workspaceId)).find((m) => m.id === w.userId);
-  await writeFiles(w.workspaceId, "company", files, message, me ? { name: me.name ?? me.email, email: me.email } : UPKEEP);
+  const author = me ? { name: me.name ?? me.email, email: me.email } : UPKEEP;
+  if (typeof files === "function") await editFile(w.workspaceId, "company", path, files, message, author);
+  else await writeFiles(w.workspaceId, "company", files, message, author);
   // this sync also starts the new-client automations for one added as active or won (file-index.ts)
   await syncFiles(w.workspaceId, "company");
 }
@@ -215,9 +220,14 @@ async function changes(w: Who, input: ClientInput, old: Client | null): Promise<
   if (input.details !== undefined) {
     const d = mergeDetails(old?.details ?? [], input.details);
     if (typeof d === "string") return d;
-    for (const o of old?.details ?? []) set[o.name.toLowerCase()] = null;
-    // a fee is a number in the file (things.ts), the rest text as given
-    for (const n of d) set[n.name.toLowerCase()] = n.name.toLowerCase() === "fee" && /^\d+(\.\d+)?$/.test(n.value) ? Number(n.value) : n.value;
+    // only the details given change; the rest stay as they are in the file (numbers, lists)
+    for (const [raw, v] of Object.entries(input.details)) {
+      const k = raw.trim().toLowerCase();
+      for (const o of old?.details ?? []) if (detailKey(o.name) === detailKey(raw) && o.name.toLowerCase() !== k) set[o.name.toLowerCase()] = null;
+      const value = (v ?? "").replace(/\s+/g, " ").trim();
+      // a fee is a number in the file (things.ts), the rest text as given
+      set[k] = !value ? null : k === "fee" && /^\d+(\.\d+)?$/.test(value) ? Number(value) : value;
+    }
   }
   return { set, files };
 }
@@ -237,25 +247,28 @@ export async function addClient(w: Who, input: ClientInput, conversationId?: str
   return { ok: true, client: await reread(w, slug) };
 }
 
-export async function updateClient(w: Who, q: string, input: ClientInput, conversationId?: string): Promise<Result> {
+// exact: the app names one by its slug; a part of a name is for chats
+export async function updateClient(w: Who, q: string, input: ClientInput, conversationId?: string, exact = false): Promise<Result> {
   // details (a contact's email, a tax number) anyone may fill in; the rest is for the owner and admins
   if (!isAdmin(w) && Object.keys(input).some((k) => k !== "details")) return { ok: false, error: "only the owner or an admin can change a client (anyone can add their details)" };
-  const old = await findClient(w.workspaceId, q);
+  const old = await findClient(w.workspaceId, q, exact);
   if (typeof old === "string") return { ok: false, error: old };
   const c = await changes(w, input, old);
   if (typeof c === "string") return { ok: false, error: c };
   // the file keeps its name, and so tasks and chats keep pointing at it
-  const text = (await readFile(w.workspaceId, "company", fileOf(old.slug))) ?? "";
-  const next = setFields(text, c.set);
-  if (next !== text || c.files.length) await commit(w, [{ path: fileOf(old.slug), content: next }, ...c.files], `Client ${old.name} changed`);
+  const change = (text: string) => {
+    const next = setFields(text, c.set);
+    return next !== text || c.files.length ? [{ path: fileOf(old.slug), content: next }, ...c.files] : [];
+  };
+  await commit(w, change, `Client ${old.name} changed`, fileOf(old.slug));
   record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${c.set.name ?? old.name}` });
   return { ok: true, client: await reread(w, old.slug) };
 }
 
 // Their file goes; their tasks, process runs and chats stay, without the label.
-export async function removeClient(w: Who, q: string, conversationId?: string) {
+export async function removeClient(w: Who, q: string, conversationId?: string, exact = false) {
   if (!isAdmin(w)) return { ok: false as const, error: "only the owner or an admin can remove a client; set them to past instead" };
-  const c = await findClient(w.workspaceId, q);
+  const c = await findClient(w.workspaceId, q, exact);
   if (typeof c === "string") return { ok: false as const, error: c };
   await commit(w, [{ path: fileOf(c.slug), content: null }], `Client ${c.name} removed`);
   for (const t of [tasks, processRuns, conversations])
@@ -412,14 +425,14 @@ export async function clientRoutes(app: FastifyInstance) {
   app.patch<{ Params: { slug: string }; Body: ClientInput }>("/clients/:slug", { schema: { body: BODY } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    const r = await updateClient(ctx, req.params.slug, req.body);
+    const r = await updateClient(ctx, req.params.slug, req.body, undefined, true);
     return r.ok ? r.client : reply.code(400).send({ error: r.error });
   });
 
   app.delete<{ Params: { slug: string } }>("/clients/:slug", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    const r = await removeClient(ctx, req.params.slug);
+    const r = await removeClient(ctx, req.params.slug, undefined, true);
     return r.ok ? r : reply.code(400).send({ error: r.error });
   });
 }

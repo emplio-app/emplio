@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns } from "@/lib/api";
 import { runDetails, runName } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
@@ -241,21 +242,16 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
         <div className="grid min-w-0 content-start gap-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{all ? "All runs" : "Going now"}</h3>
-            <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5 text-xs">
-              {[
-                { v: false, label: "Going" },
-                { v: true, label: "All" },
-              ].map((o) => (
-                <button
-                  key={o.label}
-                  type="button"
-                  onClick={() => setAll(o.v)}
-                  className={cn("rounded-md px-2.5 py-1 text-muted-foreground transition-colors", all === o.v && "bg-background font-medium text-foreground shadow-sm")}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
+            <Tabs value={all ? "all" : "going"} onValueChange={(v) => setAll(v === "all")}>
+              <TabsList>
+                <TabsTrigger value="going" className="px-2.5 text-xs">
+                  Going
+                </TabsTrigger>
+                <TabsTrigger value="all" className="px-2.5 text-xs">
+                  All
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           {runs.isPending ? (
             <div className="grid gap-2">
@@ -277,7 +273,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
           ) : (
             <ul className="grid gap-2">
               {rows.map((r) => (
-                <RunCard key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} onEdit={r.status === "active" && r.inputs.length ? () => setEditing(r) : undefined} />
+                <RunCard key={r.id} r={r} onOpenTask={onOpenTask} onStop={admin && r.status === "active" ? () => stop.mutate(r.id) : undefined} onEdit={admin && r.status === "active" && r.inputs.length ? () => setEditing(r) : undefined} />
               ))}
             </ul>
           )}
@@ -328,7 +324,7 @@ function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask:
   const step = r.steps[r.step];
   return (
     <li className={cn("group relative rounded-xl border bg-card transition-colors hover:bg-muted/40", r.status === "stopped" && "opacity-60")}>
-      <button type="button" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="grid w-full gap-2.5 px-4 py-3 pr-12 text-left disabled:cursor-default">
+      <Button variant="ghost" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="h-auto justify-start whitespace-normal font-normal grid w-full gap-2.5 rounded-xl px-4 py-3 pr-12 text-left hover:bg-transparent disabled:opacity-100 dark:hover:bg-transparent">
         <span className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 truncate font-medium">
             {runName(r)}
@@ -366,7 +362,7 @@ function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask:
             {cur.dueAt && <span className={cn(overdue && "font-medium text-destructive")}>· {overdue ? "late, was due" : "due"} {short(cur.dueAt)}</span>}
           </span>
         )}
-      </button>
+      </Button>
       {(onStop || onEdit) && (
         <div className="absolute top-2 right-2">
           <DropdownMenu>

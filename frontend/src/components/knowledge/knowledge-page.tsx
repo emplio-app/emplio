@@ -240,17 +240,17 @@ function Tree({ paths, dir, depth, open, onOpen, titles }: { paths: string[]; di
   const pad = { paddingLeft: `${0.5 + depth * 1}rem` };
   const title = (folder: string) => titles?.get(folder) ?? folder.split("/").pop()!.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase());
   const row = (p: string, label: string, extra = 0) => (
-    <button
+    <Button
       key={p}
-      type="button"
+      variant="ghost"
       onClick={() => onOpen(p)}
       aria-current={open === p}
       style={{ paddingLeft: `${0.5 + depth * 1 + extra}rem` }}
-      className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${open === p ? "bg-accent font-medium" : "hover:bg-accent/60"}`}
+      className={`h-auto justify-start whitespace-normal font-normal flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${open === p ? "bg-accent font-medium" : "hover:bg-accent/60"}`}
     >
       <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="truncate">{label}</span>
-    </button>
+    </Button>
   );
   return (
     <>
