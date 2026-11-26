@@ -394,6 +394,21 @@ export function ThingSheet() {
                   </ul>
                 </section>
               ))}
+              {!!page.data!.meetings.length && (
+                <section className="grid gap-1.5">
+                  <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Meetings</h2>
+                  <ul className="grid gap-0.5">
+                    {page.data!.meetings.map((m) => (
+                      <li key={m.path}>
+                        <Link href={`/knowledge?file=${encodeURIComponent(`company/${m.path}`)}`} className="-mx-2 flex min-h-10 items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none">
+                          <span className="truncate">{m.title}</span>
+                          {m.date && <span className="shrink-0 text-xs text-muted-foreground">{dateText(m.date)}</span>}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
             <SheetFooter className="flex-row items-center border-t">
               <Button variant="outline" size="sm" nativeButton={false} render={<Link href={fileHref(t.path)} />}>

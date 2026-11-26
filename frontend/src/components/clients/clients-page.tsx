@@ -714,7 +714,8 @@ const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, (_, p: str
 function ClientLinked({ slug }: { slug: string }) {
   const page = useThingPage(`clients/${slug}`);
   const from = page.data?.linkedFrom ?? [];
-  return LINKED.map(({ kind, label, sub }) => {
+  const meetings = page.data?.meetings ?? [];
+  const linked = LINKED.map(({ kind, label, sub }) => {
     const items = from.filter((l) => l.kind === kind);
     if (!items.length) return null;
     return (
@@ -733,6 +734,26 @@ function ClientLinked({ slug }: { slug: string }) {
       </section>
     );
   });
+  return (
+    <>
+      {linked}
+      {meetings.length > 0 && (
+        <section className="grid gap-2">
+          <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Meetings</h2>
+          <ul className="grid gap-1">
+            {meetings.map((m) => (
+              <li key={m.path}>
+                <Link href={`/knowledge?file=${encodeURIComponent(`company/${m.path}`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
+                  <span className="text-sm">{m.title}</span>
+                  {m.date && <span className="text-xs text-muted-foreground">{dateText(m.date)}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
 }
 
 function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTask: (id: string) => void }) {

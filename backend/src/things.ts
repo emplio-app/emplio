@@ -18,6 +18,7 @@ import { context } from "./auth";
 import { db } from "./db";
 import { fileIndex, processRuns, tasks } from "./db/schema";
 import { syncFiles } from "./file-index";
+import { linkedFrom } from "./knowledge";
 
 const FILE = new RegExp(`^(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)/index\\.md$`);
 const LINK = /\[\[([a-z]+\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)?)\]\]/g;
@@ -186,11 +187,17 @@ export async function thingPage(workspaceId: string, path: string): Promise<Thin
   const all = await listThings(workspaceId);
   const titles = new Map(all.map((t) => [t.path, t.title]));
   const thing = all.find((t) => t.path === path) ?? null;
+  // a meeting's note: 2026-11-26-northwind-kickoff.md -> 2026-11-26, "Northwind kickoff"
+  const meetings = (await linkedFrom(workspaceId, "company", thingFile(path))).filter((p) => p.startsWith("meetings/")).map((p) => {
+    const [, date = null, name = ""] = /^meetings\/(?:(\d{4}-\d{2}-\d{2})-?)?(.*)\.md$/.exec(p) ?? [];
+    return { path: p, date, title: words(name || "meeting") };
+  });
   return {
     path,
     thing,
     links: (thing?.links ?? []).map((l) => ({ ...l, title: titles.get(l.to) ?? null })),
     linkedFrom: all.flatMap((t) => t.links.filter((l) => l.to === path).map((l) => ({ field: l.field, from: t.path, kind: t.kind, title: t.title, fields: t.fields }))),
+    meetings: meetings.sort((a, b) => b.path.localeCompare(a.path)),
   };
 }
 

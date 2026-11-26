@@ -700,6 +700,8 @@ export type ThingPage = {
   thing: Thing | null;
   links: { field: string; to: string; title: string | null }[];
   linkedFrom: { field: string; from: string; kind: ThingKind; title: string; fields: Record<string, string> }[];
+  // company/meetings/<YYYY-MM-DD>-<name>.md notes that link here, newest first
+  meetings: { path: string; title: string; date: string | null }[];
 };
 // details: only the ones changing; "" or null removes one
 // handlers: each a teammate's user id, email or name, or a team file (team/<name>)
