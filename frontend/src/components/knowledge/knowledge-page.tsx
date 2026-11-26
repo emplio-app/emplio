@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { useAskOpen } from "@/components/chat/composer";
+import { AskFloat, useAskOpen } from "@/components/chat/composer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +87,8 @@ export function KnowledgePage() {
   useAskOpen(open && { kind: "note", title: (thing && thingTitles.get(thing)) || nameOf(open.path), ref: agentPath(open) });
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <AskFloat className="md:left-64" />
       {/* the tabs stay put when a note opens; on a phone a note is its own screen, with the back arrow to return */}
       <header className={`flex h-14 shrink-0 items-center gap-2 border-b px-3 ${open ? "max-md:hidden" : ""}`}>
         <SidebarTrigger />

@@ -292,14 +292,13 @@ const mentionOf = (o: Open): Mention => ({
 // Emplio's message box at the foot of a page, or of a side sheet (sheet): what's sent goes into the main chat, which
 // opens and sends it (chat-view.tsx picks SAY_TEXT up) with a hidden note of where it was sent from. With a thing
 // open, the box starts with its @mention, theirs to delete; that box isn't kept as a draft, the page's own is.
-// className: for a box under a page's panes rather than in its scroll (Memory's notes and database)
 export function PageAsk({ open, sheet }: { open?: Open | null; sheet?: boolean }) {
   const page = usePathname().split("/")[1] ?? "";
   // a fresh box for each thing opened
   return <PageBox key={open ? `${open.kind}:${open.ref}` : page} page={page} open={open ?? undefined} sheet={sheet} />;
 }
 
-// The pages' own box lives once in the app's layout (LayoutAsk); a page with a thing open on it (a process, a note,
+// Each page puts the box over its own foot (AskFloat), centred on what it's about; a page with a thing open on it (a process, a note,
 // a table) says so with useAskOpen, and the box starts with its @mention.
 // ponytail: one page shows at a time, so one value is enough
 let shown: Open | null = null;
@@ -316,32 +315,27 @@ export function useAskOpen(open: Open | null | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- k is open, by value
   }, [k]);
 }
-const ASK_PAGES = ["today", "tasks", "clients", "projects", "contacts", "services", "processes", "knowledge", "database", "files", "team"];
 // the chat's box at its column's foot (chat-view.tsx): what scrolls above fades out under it
 export const ASK_FOOT = "page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]";
-export function LayoutAsk() {
+export function AskFloat({ className }: { className?: string }) {
   const open = useSyncExternalStore(
     (f) => (listeners.add(f), () => void listeners.delete(f)),
     () => shown,
     () => null,
   );
-  const page = usePathname().split("/")[1] ?? "";
   const ref = useRef<HTMLDivElement>(null);
-  const shows = ASK_PAGES.includes(page);
   // its height as --ask-h: a page's lists (.under-tabs, globals.css) end above it, so nothing stays hidden under it
   useEffect(() => {
     const el = ref.current;
     const set = (h: number) => document.documentElement.style.setProperty("--ask-h", `${h}px`);
-    if (!el) return set(0);
+    if (!el) return;
     const ro = new ResizeObserver(() => set(el.offsetHeight));
     ro.observe(el);
     return () => (ro.disconnect(), set(0));
-  }, [shows]);
-  // the chat draws its own, in its column (chat-view.tsx), so its side panels run the full height
-  if (!shows) return null;
+  }, []);
   // floating over the page's foot, nothing behind it: the page keeps its whole height; on a phone, above the tabs
   return (
-    <div ref={ref} className="page-ask pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]">
+    <div ref={ref} className={cn("page-ask pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]", className)}>
       <div id="ask-slot">
         <PageAsk open={open} />
       </div>

@@ -9,7 +9,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { type Open, PageAsk } from "@/components/chat/composer";
+import { AskFloat, type Open, PageAsk } from "@/components/chat/composer";
 import { initials, Monogram } from "@/components/clients/clients-page";
 import { Linked } from "@/components/knowledge/knowledge-page";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,8 @@ const DONE = /^(done|complete|completed|closed|finished|cancell?ed|lost)$/i;
 // A list page's frame, as on Clients: the bar with the menu button, a title with one line under it, then the list.
 function Page({ title, summary, children }: { title: string; summary: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <span className="px-2 font-sans text-sm font-medium tracking-normal">{title}</span>

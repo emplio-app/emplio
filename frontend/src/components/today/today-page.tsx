@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useConversations, useMe, useProcessRuns, useTasks, useThings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { daysAway, dayText, exactDate } from "@/lib/when";
+import { AskFloat } from "@/components/chat/composer";
 
 const FEW = 6;
 const open = (t: Task) => t.status === "todo" || t.status === "doing" || t.status === "waiting";
@@ -75,7 +76,8 @@ export function TodayPage() {
     ) : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <span className="px-2 font-sans text-sm font-medium tracking-normal">Today</span>

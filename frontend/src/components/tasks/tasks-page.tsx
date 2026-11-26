@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { PageAsk } from "@/components/chat/composer";
+import { AskFloat, PageAsk } from "@/components/chat/composer";
 import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -457,7 +457,8 @@ export function TasksPage() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header
         className="flex h-14 shrink-0 items-center gap-2 border-b px-3"
         data-tip="work-page"

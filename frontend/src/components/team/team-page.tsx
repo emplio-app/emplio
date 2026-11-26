@@ -19,6 +19,7 @@ import { api, useMe, useThings } from "@/lib/api";
 import { Avatar, ThingSheet } from "@/components/things/things";
 import { usePathname, useRouter } from "next/navigation";
 import type { Thing } from "@emplio/shared";
+import { AskFloat } from "@/components/chat/composer";
 
 const teamQueryKey = ["team"];
 const initials = (name: string) =>
@@ -110,7 +111,8 @@ export function TeamPage() {
   const canManage = myRole === "owner" || myRole === "admin";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3" data-tip="team-page" data-tip-side="bottom">
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Team</h1>

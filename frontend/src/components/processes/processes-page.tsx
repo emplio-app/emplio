@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useAskOpen } from "@/components/chat/composer";
+import { AskFloat, useAskOpen } from "@/components/chat/composer";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { TaskSheet } from "@/components/tasks/tasks-page";
 import { matches, Search } from "@/components/things/things";
@@ -61,7 +61,8 @@ export function ProcessesPage() {
   const all = processes.data ?? [];
   const list = all.filter((p) => matches(words, p.title, p.about, ...p.steps.map((s) => s.name)));
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Processes</h1>
@@ -120,7 +121,8 @@ export function ProcessPage() {
   const [taskId, setTaskId] = useState<string | null>(null);
   useAskOpen(p && { kind: "process", title: p.title, ref: `company/processes/${p.name}.md` });
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 px-2 text-sm">

@@ -1330,7 +1330,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              {/* at the chat column's foot, as every page has its box (composer.tsx LayoutAsk): a side panel keeps its full height */}
+              {/* at the chat column's foot, as every page has its box (composer.tsx AskFloat): a side panel keeps its full height */}
               <div className={ASK_FOOT}>
               <div className="pointer-events-auto relative mx-auto w-full max-w-3xl px-4">
                 {queue.length > 0 && (

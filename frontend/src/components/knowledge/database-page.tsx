@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, DatabaseIcon, DownloadIcon, FilterIcon, LockIcon, SearchIcon, TableIcon, XIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { toast } from "sonner";
-import { useAskOpen } from "@/components/chat/composer";
+import { AskFloat, useAskOpen } from "@/components/chat/composer";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,7 +109,8 @@ export function DatabasePage() {
   useAskOpen(open ? { kind: "table", title: open, ref: open } : null);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <AskFloat className="md:left-64" />
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         {open && (
