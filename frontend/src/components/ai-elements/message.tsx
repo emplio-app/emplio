@@ -12,9 +12,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import type { CjkPlugin } from "@streamdown/cjk";
+import type { CodeHighlighterPlugin } from "@streamdown/code";
+import type { MathPlugin } from "@streamdown/math";
 import type { DiagramPlugin } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -334,7 +334,63 @@ const mermaid: DiagramPlugin = {
   }),
 };
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+// The other add-ons are fetched the first time a message needs one too, not with every chat (most never do):
+// code colours (Shiki) when a code block draws, maths when a reply has a formula, Chinese/Japanese/Korean
+// text handling when one has those letters.
+let shiki: CodeHighlighterPlugin | undefined;
+let shikiLoading: Promise<CodeHighlighterPlugin> | undefined;
+const code: CodeHighlighterPlugin = {
+  name: "shiki",
+  type: "code-highlighter",
+  // the plugin's own defaults, so a block keeps its colours from first draw to highlighted
+  getThemes: () => shiki?.getThemes() ?? ["github-light", "github-dark"],
+  getSupportedLanguages: () => shiki?.getSupportedLanguages() ?? [],
+  supportsLanguage: (language) => shiki?.supportsLanguage(language) ?? true,
+  // plain until Shiki arrives, then the colours come through the callback, as with any language it loads
+  highlight: (options, done) => {
+    if (shiki) return shiki.highlight(options, done);
+    shikiLoading ??= import("@streamdown/code").then((m) => (shiki = m.code));
+    void shikiLoading.then((plugin) => {
+      const result = plugin.highlight(options, done);
+      if (result) done?.(result);
+    });
+    return null;
+  },
+};
+
+const extras: { math?: MathPlugin; cjk?: CjkPlugin } = {};
+const extraLoading = new Map<"math" | "cjk", Promise<unknown>>();
+const loadExtra = (kind: "math" | "cjk") => {
+  if (!extraLoading.has(kind))
+    extraLoading.set(
+      kind,
+      kind === "math"
+        ? import("@streamdown/math").then((m) => (extras.math = m.math))
+        : import("@streamdown/cjk").then((m) => (extras.cjk = m.cjk)),
+    );
+  return extraLoading.get(kind)!;
+};
+// $$…$$, \(…\) or \[…\]; Chinese, Japanese and Korean letters and punctuation
+const MATH = /\$\$|\\\(|\\\[/;
+const CJK = /[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+// one object per combination, so a message's plugins only change when what it needs does
+const pluginSets = new Map<string, MessageResponseProps["plugins"]>();
+function usePlugins(text: string) {
+  const want = ([MATH.test(text) && "math", CJK.test(text) && "cjk"] as const).filter((k) => k !== false);
+  const [, redraw] = useState(0);
+  const missing = want.filter((k) => !extras[k]).join();
+  useEffect(() => {
+    if (!missing) return;
+    let live = true;
+    void Promise.all(missing.split(",").map((k) => loadExtra(k as "math" | "cjk"))).then(() => live && redraw((n) => n + 1));
+    return () => void (live = false);
+  }, [missing]);
+  const have = want.filter((k) => extras[k]);
+  const key = have.join();
+  if (!pluginSets.has(key))
+    pluginSets.set(key, { code, mermaid, ...(have.includes("math") && { math: extras.math }), ...(have.includes("cjk") && { cjk: extras.cjk }) });
+  return pluginSets.get(key);
+}
 
 // Links in a reply look like the ones in sent messages: highlighted, with a link icon, a bare address cut short.
 // Streamdown's own link stays underneath (it asks before opening a site), except for Emplio's own pages: those go
@@ -392,6 +448,7 @@ export const MessageResponse = memo(
       return () => clearTimeout(t);
     }, [lingering]);
     const animating = props.isAnimating || lingering;
+    const plugins = usePlugins(typeof props.children === "string" ? props.children : "");
     return (
       <Streamdown
         // only while streaming: on a finished reply it would fade in every letter again
@@ -404,7 +461,7 @@ export const MessageResponse = memo(
           "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:whitespace-pre-line [&_hr]:my-8",
           className
         )}
-        plugins={streamdownPlugins}
+        plugins={plugins}
         components={components}
         {...props}
         isAnimating={animating}

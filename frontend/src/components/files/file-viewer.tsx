@@ -34,7 +34,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { Streamdown } from "streamdown";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { fileHref } from "@/components/chat/attachments";
+import { fileHref, imageHref } from "@/components/chat/attachments";
+import { usePinchZoom } from "@/lib/zoom";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -634,7 +635,8 @@ function Preview({ file }: { file: Shown }) {
   });
   const text = { isPending: made.isPending, data: made.data?.text };
 
-  if (kind === "image") return <img src={href} alt={file.name} className="mx-auto max-h-full max-w-full object-contain" />;
+  // as wide as the screen at most: a phone gets a shrunk copy, a big screen the original (imageHref)
+  if (kind === "image") return <img src={imageHref(file.url, window.innerWidth)} alt={file.name} className="mx-auto max-h-full max-w-full object-contain" />;
   if (kind === "pdf") return <PdfFrame href={href} title={file.name} />;
   if (kind === "audio") return <audio src={href} controls className="w-full" />;
   if (kind === "video") return <video src={href} controls className="max-h-full w-full rounded-md bg-black" />;
@@ -783,6 +785,19 @@ export const OpenFileProvider = OpenFile.Provider;
 export const useOpenFile = () => useContext(OpenFile);
 
 // Beside the chat (or the Files list) like the live browser, full screen on phones.
+// Two fingers zoom a picture or PDF within this frame, not the whole screen (lib/zoom.ts); a new file starts
+// unzoomed. data-quotable: text selected in it can be replied to in the chat beside it (chat/quote.tsx)
+function ZoomFrame({ zoomable, className, children }: { zoomable: boolean; className: string; children: React.ReactNode }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const zoomed = useRef<HTMLDivElement>(null);
+  usePinchZoom(frame, zoomed, zoomable);
+  return (
+    <div ref={frame} data-quotable className={`${zoomable ? "touch-pan-x touch-pan-y " : ""}${className}`}>
+      <div ref={zoomed}>{children}</div>
+    </div>
+  );
+}
+
 export function FilePanel({ file: given, onClose }: { file: Shown | null; onClose: () => void }) {
   // one from an older chat has no record yet: made on opening, so it can be shared too (backend made.ts)
   const adopted = useQuery({
@@ -822,9 +837,9 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
           </header>
           {/* the page, not a frame inside it, gets the pointer while the edge is dragged */}
           {/* data-quotable: text selected in it can be replied to in the chat beside it (chat/quote.tsx) */}
-          <div data-quotable className={`min-h-0 flex-1 overflow-auto bg-muted/40 p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
+          <ZoomFrame key={file.url} zoomable={kindOf(file) === "image" || kindOf(file) === "pdf"} className={`min-h-0 flex-1 overflow-auto bg-muted/40 p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
             <Preview file={file} />
-          </div>
+          </ZoomFrame>
         </>
       )}
     </SidePanel>
@@ -841,7 +856,7 @@ export function MadeCards({ files }: { files: { id?: string; url: string; filena
         {shown.map((f, i) =>
           kindOf(f) === "image" ? (
             <button key={f.url} type="button" onClick={() => open?.(f)} className="overflow-hidden rounded-lg border hover:opacity-90" aria-label={`Open ${f.name}`} data-tip={i ? undefined : "made"} data-tip-side="bottom">
-              <img src={fileHref(f.url)} alt={f.name} className="h-40 max-w-64 object-cover" />
+              <img src={imageHref(f.url, 256)} alt={f.name} loading="lazy" decoding="async" className="h-40 max-w-64 object-cover" />
             </button>
           ) : (
             <div key={f.url} className="flex w-72 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 hover:bg-accent/50" data-tip={i ? undefined : "made"} data-tip-side="bottom">

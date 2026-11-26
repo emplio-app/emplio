@@ -40,6 +40,20 @@ export async function storeFile(workspaceId: string, name: string, type: string,
   return { url: path, mediaType: type, filename: name.slice(0, 200) };
 }
 
+// A picture shown small (a list's thumbnail, a photo in a chat on a phone) was the whole original: a 12-megapixel
+// photo for a 36px square. Shrunk here instead, to the next of a few widths (so a browser's cache gets repeats),
+// as WebP, turned upright first. Anything else, or a picture already that small: null, and the original is sent.
+// ponytail: made again for each new phone; keep the copies in storage if that ever shows up on the server
+const THUMB_WIDTHS = [96, 320, 640, 1600];
+export async function thumbnail(path: string, want: number) {
+  if (!/\.(jpe?g|png|webp)$/i.test(path) || !(want > 0)) return null;
+  const width = THUMB_WIDTHS.find((w) => w >= want) ?? THUMB_WIDTHS.at(-1)!;
+  const image = sharp(await readStored(path));
+  const { width: actual = 0 } = await image.metadata();
+  if (actual <= width) return null;
+  return image.rotate().resize({ width, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+}
+
 export const isOwnFile = (url: string, workspaceId: string) => FILE_PATH.exec(url)?.[1] === workspaceId;
 
 // Swap our file paths for something the model can use: images/PDFs inline as data URLs (a link fails
@@ -187,7 +201,7 @@ export async function fileRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get<{ Params: { "*": string }; Querystring: { download?: string; raw?: string } }>("/files/*", async (req, reply) => {
+  app.get<{ Params: { "*": string }; Querystring: { download?: string; raw?: string; w?: string } }>("/files/*", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const path = `/files/${req.params["*"]}`;
@@ -195,6 +209,11 @@ export async function fileRoutes(app: FastifyInstance) {
     // ?raw: the bytes themselves, for the web app to read (the spreadsheet viewer); storage won't hand them to the page
     if (req.query.raw !== undefined)
       return reply.header("cache-control", "private, max-age=300").type("application/octet-stream").send(Buffer.from(await readStored(path)));
+    // ?w=<px>: a picture shrunk to about that width, for a thumbnail or a phone (see thumbnail)
+    if (req.query.w !== undefined) {
+      const small = await thumbnail(path, Number(req.query.w)).catch(() => null);
+      if (small) return reply.header("cache-control", "private, max-age=86400").type("image/webp").send(small);
+    }
     // ponytail: redirect to a short-lived link; proxy the bytes if the bucket ever needs to stay invisible
     // ?download=<name>: under that name (a file renamed on the Files page), else the one it was stored under
     const name = req.query.download !== undefined ? req.query.download.slice(0, 200) || decodeURIComponent(path.split("/").pop()!) : undefined;
