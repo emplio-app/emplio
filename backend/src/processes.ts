@@ -467,7 +467,9 @@ export async function stepFinished(task: { runId: string | null; stepIndex: numb
 const findRun = async (workspaceId: string, id: string) => {
   // the start of its id, nothing else (a % would match any)
   const ok = /^[0-9a-f-]+$/i.test(id.trim());
-  const run = ok ? await db.query.processRuns.findFirst({ where: and(eq(processRuns.workspaceId, workspaceId), sql`${processRuns.id}::text like ${`${id.trim().toLowerCase()}%`}`) }) : undefined;
+  const runs = ok ? await db.query.processRuns.findMany({ where: and(eq(processRuns.workspaceId, workspaceId), sql`${processRuns.id}::text like ${`${id.trim().toLowerCase()}%`}`), limit: 2 }) : [];
+  if (runs.length > 1) throw new ProcessError(`several process runs start with ${id}; give more of its id (emplio processes runs)`);
+  const run = runs[0];
   if (!run) throw new ProcessError(`no process run ${id} (emplio processes runs)`);
   return run;
 };

@@ -81,6 +81,8 @@ export function KnowledgePage() {
   const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\/index\.md$/.test(open.path) ? open.path.slice(0, -"/index.md".length) : "";
   const titles = useThingPage(thing, !!thing).data?.links;
   const backlinks = useQuery({ queryKey: [...KEY, "links", open?.repo, open?.path], queryFn: () => api<string[]>(`/knowledge/links?${new URLSearchParams(open!)}`), enabled: !!open?.path.endsWith(".md") });
+  // a client, contact, teammate, service or project lives in the company's files; any other link, in the note's own folder
+  const linkTo = (p: string) => `/knowledge?file=${encodeURIComponent(agentPath({ repo: p.split("/")[0]! in KIND_ICON ? "company" : open!.repo, path: linkFile(p) }))}`;
   // the tree names a thing's folder by its title (Northwind Traders), not its index.md
   const things = useThings();
   const thingTitles = new Map((things.data ?? []).map((t) => [t.path, t.title]));
@@ -176,14 +178,14 @@ export function KnowledgePage() {
                     <div key={k} className="contents">
                       <dt className="text-muted-foreground">{k}</dt>
                       <dd className="whitespace-pre-line">
-                        <Linked text={v} prefix="company/" titles={titles} />
+                        <Linked text={v} prefix="" titles={titles} hrefOf={linkTo} />
                       </dd>
                     </div>
                   ))}
                 </dl>
               )}
               {/* a tool, script or list: shown as the code it is */}
-              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](/knowledge?file=${encodeURIComponent(agentPath({ repo: "company", path: linkFile(p) }))})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](${linkTo(p)})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
               {!!backlinks.data?.length && (
                 <div className="mt-8 border-t pt-4 text-sm">
                   <p className="mb-2 text-muted-foreground">Linked from</p>
