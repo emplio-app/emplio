@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.15 (2026-11-26)
+
+### What's new
+
+- Agents work faster and cost less: they think a little before each step instead of a lot, and think hard only when saving steps to reuse next time. Emplio's own replies to you think as before.
+
+### For developers
+
+- `chat.ts`: a job's reasoning is `low` whatever the business's Reasoning setting, and `high` for its tool-saving run (the `[Keep tools]` message); Emplio's own chat keeps the setting. Evals (job-report, checklist, skills, two runs each, Haiku): off 74–82% right first try, low 97–100%, medium ~95%; low ~30% quicker and ~25% cheaper per step than medium. `evals/emplio.ts` mirrors it (`EVAL_JOB_REASONING` to try another).
+
 ## 1.4.14 (2026-11-25)
 
 ### What's new

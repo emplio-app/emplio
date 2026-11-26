@@ -20,7 +20,7 @@ import {
 import { readFileSync } from "node:fs";
 import { and, asc, desc, eq, gt, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { type PlanStep, FROM_EMPLIO, MODEL_SETS, modelFor, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
+import { type PlanStep, FROM_EMPLIO, KEEP_TOOLS_PREFIX, MODEL_SETS, modelFor, isReport, RESUMED_PREFIX, SHOWN_PREFIX, type Approval, type AskCard, type ConversationSummary, type NextStep, type UpdateConversationRequest } from "@emplio/shared";
 import { moveOn, outcome, waitingIn } from "./approvals";
 import { listConnections } from "./integrations";
 import { mcpServerList } from "./mcp";
@@ -949,11 +949,15 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     job: !!job,
   });
 
-  // reasoning: thinks before answering and between tool calls (high: better plans, slower and pricier replies)
+  // reasoning: thinks before answering and between tool calls (high: better plans, slower and pricier replies).
+  // Emplio's own chat: the business's setting. A job: low (evals, Nov 26: reports as good as medium, about a third
+  // quicker and a quarter cheaper), but its tool-saving run after the report thinks hard: what it keeps is reused
+  const keeping = !!job && !!lastAsk && textOf(lastAsk).startsWith(FROM_EMPLIO + KEEP_TOOLS_PREFIX);
+  const effort = keeping ? "high" : job ? "low" : settings.reasoning;
   const providerOptions = {
     openrouter: {
       cacheControl: cache,
-      reasoning: settings.reasoning === "off" ? { enabled: false } : { effort: settings.reasoning as "low" | "medium" | "high" },
+      reasoning: effort === "off" ? { enabled: false } : { effort: effort as "low" | "medium" | "high" },
     },
   };
   // When the person last heard from this reply: its start, then each step that wrote to them. A command that
