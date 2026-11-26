@@ -2171,14 +2171,17 @@ export const requestsTrailer = (key: string, more = "") =>
 const afterMark = (key: string) => `AFTER:${key}`;
 // thing pages changed since the last save (things.ts), checked after the command; a member's would be reverted anyway
 const THINGS_CHANGED = `{ git -C ${WORK}/company diff --name-only --no-renames HEAD -- clients contacts team services projects; git -C ${WORK}/company ls-files -o --exclude-standard -- clients contacts team services projects; } 2>/dev/null | grep '/index\\.md$'`;
+// notes changed since the last save that link nothing yet: Emplio hears it, to link what they're about
+const UNLINKED = `{ git -C ${WORK}/company diff --name-only --no-renames HEAD -- knowledge clients contacts team services projects; git -C ${WORK}/company ls-files -o --exclude-standard -- knowledge clients contacts team services projects; } 2>/dev/null | grep '\\.md$' | while IFS= read -r f; do [ -f "${WORK}/company/$f" ] && ! grep -qF '[[' "${WORK}/company/$f" && echo "UNLINKED:$f"; done`;
 export const afterTrailer = (key: string, member: boolean) =>
   `printf '\\n%s\\n' '${afterMark(key)}'; cat ${OUT_SEEN} 2>/dev/null || true; echo '${SEP}'; ${LIST_OUT} || true; echo '${SEP}'; ${OPEN_OUT} || true; echo '${SEP}'; ` +
-  (member ? `echo '${SEP}'; (${scopeScript}) || true; ` : `${THINGS_CHANGED} || true; `);
-export function splitAfter(output: string, key: string): { output: string; listed?: string; things?: string[]; rejected?: string[] } {
+  (member ? `echo '${SEP}'; (${scopeScript}) || true; ` : `${THINGS_CHANGED} || true; ${UNLINKED} || true; `);
+export function splitAfter(output: string, key: string): { output: string; listed?: string; things?: string[]; unlinked?: string[]; rejected?: string[] } {
   const at = output.lastIndexOf(`\n${afterMark(key)}\n`);
   if (at < 0) return { output };
   const [seen = "", now = "", open = "", things = "", checked] = output.slice(at + afterMark(key).length + 2).split(SEP);
-  return { output: output.slice(0, at), listed: [seen, now, open].join(SEP), things: things.split("\n").filter(Boolean), rejected: checked === undefined ? undefined : tagged(checked, "REJECTED") };
+  const lines = things.split("\n").filter(Boolean);
+  return { output: output.slice(0, at), listed: [seen, now, open].join(SEP), things: lines.filter((l) => !l.startsWith("UNLINKED:")), unlinked: lines.filter((l) => l.startsWith("UNLINKED:")).map((l) => `company/${l.slice(9)}`), rejected: checked === undefined ? undefined : tagged(checked, "REJECTED") };
 }
 
 // Puts each request's contents back in place of its marker. A marker a pipe dropped or cut short
@@ -2886,6 +2889,11 @@ async function runInBox(s: Session, command: string, background: boolean, signal
       const linked = await linkedNotes(s, `${command}\n${out.output ?? ""}`);
       if (Object.keys(linked).length) out.linkedFrom = linked;
     });
+    const unlinked = ended?.unlinked?.filter((p) => !toldLinks.get(s)?.has(`unlinked:${p}`)) ?? [];
+    if (unlinked.length) {
+      unlinked.forEach((p) => (toldLinks.get(s) ?? toldLinks.set(s, new Set()).get(s)!).add(`unlinked:${p}`));
+      out.notesWithoutLinks = { paths: unlinked, note: "these link to nothing yet: add [[ ]] links to the clients, services, projects, people and notes each is about (none fits: leave it)" };
+    }
     // Emplio hears it: the command ran, so it isn't one to repeat
     if (notDone.length) out.notDoneAfterCommand = notDone;
     used.add(boxKey(s));
