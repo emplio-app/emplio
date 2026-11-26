@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, DatabaseIcon, DownloadIcon, FilterIcon, LockIcon, SearchIcon, TableIcon, XIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { toast } from "sonner";
+import { PageAsk } from "@/components/chat/composer";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -120,7 +121,7 @@ export function DatabasePage() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav className={`under-tabs w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Tables">
+        <nav className={`w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Tables">
           {tables.isPending && <Skeleton className="h-40 rounded-xl" />}
           {tables.error && <p className="p-2 text-sm text-destructive">{tables.error.message}</p>}
           {tables.data?.length === 0 && <p className="p-2 text-sm text-muted-foreground">No tables yet.</p>}
@@ -194,7 +195,7 @@ export function DatabasePage() {
                 <p className="p-6 text-sm text-destructive">{page.error.message}</p>
               ) : (
                 <>
-                  <div className="under-tabs min-h-0 flex-1 overflow-auto">
+                  <div className="min-h-0 flex-1 overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -276,6 +277,8 @@ export function DatabasePage() {
           )}
         </main>
       </div>
+      {/* under both panes, as on Memory's notes (knowledge-page.tsx) */}
+      <PageAsk className="border-t pt-3" open={open ? { kind: "table", title: open, ref: open } : null} />
     </div>
   );
 }

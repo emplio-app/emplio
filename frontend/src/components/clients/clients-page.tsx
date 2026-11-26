@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { PageAsk } from "@/components/chat/composer";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks, useThingPage } from "@/lib/api";
@@ -208,7 +209,7 @@ export function ClientsPage() {
         <span className="px-2 font-sans text-sm font-medium tracking-normal">Clients</span>
       </header>
 
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-5 px-4 py-5 sm:gap-6 sm:py-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="grid gap-1">
@@ -352,6 +353,7 @@ export function ClientsPage() {
             </ul>
           )}
         </div>
+        <PageAsk />
       </div>
 
       <Sheet
@@ -653,6 +655,7 @@ function ClientDetails({
           Their tasks
         </Button>
       </SheetFooter>
+      <PageAsk sheet open={{ kind: "client", title: c.name, ref: `company/clients/${c.slug}/index.md` }} />
     </>
   );
 }

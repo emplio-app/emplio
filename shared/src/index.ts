@@ -107,6 +107,12 @@ export type ActionDetail = ActionInfo & {
 // message as a part { type: "data-mentions", data: Mention[] }.
 export type MentionKind = "person" | "agent" | "record" | "task" | "file" | "chat" | "app" | "table";
 export type Mention = { kind: MentionKind; id: string; label: string; detail?: string; logo?: string };
+// A message sent from one of the app's pages (Today, Clients, …) rather than the chat: which page, and what was open on
+// it. Goes in the message as a part { type: "data-sent-from", data: SentFrom }; the server words the note the model gets.
+export type SentFrom = {
+  page: string;
+  open?: { kind: "client" | "project" | "contact" | "teammate" | "task" | "process" | "note" | "table"; title: string; ref: string };
+};
 
 // GET /commands?q=: what the chat box's / menu offers. A skill or app is put in the message as /name; an
 // automation runs right away. Searched on the server, so a thousand apps don't all come to the page.

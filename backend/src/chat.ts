@@ -457,6 +457,21 @@ const fromNote = (p: { type: string; data: unknown }) =>
         ? { type: "text" as const, text: (p.data as string[]).join("\n\n") }
         : undefined;
 // report_problem: a tool from before `emplio report`, still in saved chats, and one the model no longer has
+// A message sent from one of the app's pages rather than the chat (frontend composer.tsx PageAsk): one line on where they
+// were and what they had open, so "this one" makes sense. Worded here; the page only says which page and thing.
+const PAGES: Record<string, string> = { today: "Today", tasks: "Work", clients: "Clients", projects: "Projects", contacts: "Contacts", processes: "Processes", knowledge: "Memory", files: "Files", database: "Database", team: "Team" };
+const OPEN_KINDS = new Set(["client", "project", "contact", "teammate", "task", "process", "note", "table"]);
+export function sentFromNote(data: unknown): string | null {
+  const d = (data ?? {}) as { page?: unknown; open?: { kind?: unknown; title?: unknown; ref?: unknown } };
+  const page = typeof d.page === "string" && Object.hasOwn(PAGES, d.page) ? PAGES[d.page] : null;
+  if (!page) return null;
+  const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "");
+  const o = d.open;
+  const title = clean(o?.title, 120);
+  const ref = clean(o?.ref, 200);
+  const open = o && OPEN_KINDS.has(o.kind as string) && title ? `, with the ${o.kind} ${title} open${ref ? ` (${ref})` : ""}` : "";
+  return `Sent from the ${page} page${open}.`;
+}
 const toModelMessages = (ui: UIMessage[]) =>
   convertToModelMessages(ui.map((m) => closeToolCalls({ ...m, parts: m.parts.filter((p) => p.type !== "tool-report_problem") })), { convertDataPart: fromNote });
 // For taking notes: they only use a file's name, and its /files/... address isn't a full URL, which the conversion needs
@@ -821,6 +836,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   // so the next message's history is the same as this one's and the provider's cache keeps covering it.
   const extras = (
     await Promise.all([
+      sentFromNote((message.parts.find((p) => p.type === "data-sent-from") as { data?: unknown } | undefined)?.data),
       slashCommand(ctx, textOf(message)).catch((error) => (log.error(error, "loading skill failed"), null)),
       describeMentions(ctx, (message.parts.find((p) => p.type === "data-mentions") as { data?: unknown } | undefined)?.data).catch((error) => (log.error(error, "reading mentions failed"), null)),
       // what its jobs did for the person in their own chats, which it wasn't woken for

@@ -3,7 +3,7 @@
 import { FUZZY, matchScore, NO_MATCH, type Mention, type MentionKind } from "@emplio/shared";
 import { keepPreviousData, type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BotIcon, Building2Icon, ClipboardListIcon, FileTextIcon, MessageSquareIcon, TableIcon } from "lucide-react";
-import { type KeyboardEvent, type SyntheticEvent, useEffect, useState } from "react";
+import { type KeyboardEvent, type RefObject, type SyntheticEvent, useEffect, useState } from "react";
 import { AppLogo } from "@/components/chat/connect-card";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,8 @@ export function MentionIcon({ m, className }: { m: Pick<Mention, "kind" | "label
 // Typing @ offers teammates, files, clients and suppliers, tasks, chats, connected apps and tables (searched on the
 // server, backend/src/mentions.ts). A pick puts "@Name" in the text (coloured in) and links it; the linked ones still in the
 // text go with the message, so the agent knows exactly who or what was meant.
-export function useMentionMenu(input: string, setInput: (text: string) => void) {
+// box: the message box it belongs to, when a page has more than one (a side sheet's over the page's)
+export function useMentionMenu(input: string, setInput: (text: string) => void, box?: RefObject<HTMLTextAreaElement | null>) {
   const [caret, setCaret] = useState(0);
   const [picked, setPicked] = useState<Mention[]>([]);
   const [active, setActive] = useState(0);
@@ -145,9 +146,9 @@ export function useMentionMenu(input: string, setInput: (text: string) => void) 
     setCaret(end);
     // after React puts the new text in, put the cursor after the name
     requestAnimationFrame(() => {
-      const box = document.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
-      box?.focus();
-      box?.setSelectionRange(end, end);
+      const el = box?.current ?? document.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+      el?.focus();
+      el?.setSelectionRange(end, end);
     });
   };
 

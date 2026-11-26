@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PageAsk } from "@/components/chat/composer";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { TaskSheet } from "@/components/tasks/tasks-page";
 import { Button } from "@/components/ui/button";
@@ -56,21 +57,21 @@ export function ProcessesPage() {
   const processes = useProcesses();
   const list = processes.data ?? [];
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <h1 className="px-2 font-sans text-sm font-medium tracking-normal">Processes</h1>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         {processes.isPending ? (
-          <div className="mx-auto grid max-w-3xl gap-2 px-4 py-6 md:px-6">
+          <div className="mx-auto grid w-full max-w-3xl gap-2 px-4 py-6 md:px-6">
             <Skeleton className="h-20 w-full rounded-xl" />
             <Skeleton className="h-20 w-full rounded-xl" />
           </div>
         ) : !list.length ? (
           <Empty />
         ) : (
-          <ul className="mx-auto grid max-w-3xl gap-2 px-4 py-6 md:px-6">
+          <ul className="mx-auto grid w-full max-w-3xl gap-2 px-4 py-6 md:px-6">
             {list.map((p) => (
               <li key={p.name}>
                 <Link
@@ -95,6 +96,7 @@ export function ProcessesPage() {
             ))}
           </ul>
         )}
+        <PageAsk />
       </div>
     </div>
   );
@@ -110,7 +112,7 @@ export function ProcessPage() {
   const [all, setAll] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 px-2 text-sm">
@@ -121,8 +123,8 @@ export function ProcessPage() {
           <span className="truncate font-medium">{p?.title ?? ""}</span>
         </nav>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl px-4 py-6 md:px-6">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 md:px-6">
           {processes.isPending ? (
             <div className="grid gap-3">
               <Skeleton className="h-8 w-48" />
@@ -139,6 +141,7 @@ export function ProcessPage() {
             <Board p={p} all={all} setAll={setAll} admin={admin} onOpenTask={setTaskId} />
           )}
         </div>
+        <PageAsk open={p && { kind: "process", title: p.title, ref: `company/processes/${p.name}.md` }} />
       </div>
       <TaskSheet id={taskId} onClose={() => setTaskId(null)} />
     </div>

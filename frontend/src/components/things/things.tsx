@@ -9,6 +9,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { type Open, PageAsk } from "@/components/chat/composer";
 import { initials, Monogram } from "@/components/clients/clients-page";
 import { Linked } from "@/components/knowledge/knowledge-page";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ function Page({ title, summary, children }: { title: string; summary: string; ch
         <SidebarTrigger />
         <span className="px-2 font-sans text-sm font-medium tracking-normal">{title}</span>
       </header>
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-5 px-4 py-5 sm:gap-6 sm:py-8">
           <div className="grid gap-1">
             <h1 className="font-heading text-xl font-semibold tracking-tight">{title}</h1>
@@ -51,6 +52,7 @@ function Page({ title, summary, children }: { title: string; summary: string; ch
           </div>
           {children}
         </div>
+        <PageAsk />
       </div>
       <ThingSheet />
     </div>
@@ -283,6 +285,8 @@ export function ContactsPage() {
 const AS: Record<string, string> = { handler: "Handles", lead: "Leads", team: "On the team", approver: "Approves", client: "", text: "Mentioned" };
 const KIND_LABEL: Record<ThingKind, string> = { clients: "Clients", contacts: "Contacts", team: "Team", services: "Services", projects: "Projects" };
 const ONE: Record<ThingKind, string> = { clients: "Client", contacts: "Contact", team: "Team member", services: "Service", projects: "Project" };
+// what the message box calls one that's open (composer.tsx Open)
+const OPEN_KIND: Partial<Record<ThingKind, Open["kind"]>> = { clients: "client", contacts: "contact", team: "teammate", projects: "project" };
 
 // One thing, opened from a list (?open=projects/x): its fields (links as chips that open what they name), its notes,
 // and what names it. Changes go through Emplio: Notes opens the file in Memory, with Suggest a change there.
@@ -365,6 +369,7 @@ export function ThingSheet() {
                 </Button>
               )}
             </SheetFooter>
+            <PageAsk sheet open={OPEN_KIND[t.kind] && { kind: OPEN_KIND[t.kind]!, title: t.title, ref: `company/${t.path}/index.md` }} />
           </>
         )}
       </SheetContent>

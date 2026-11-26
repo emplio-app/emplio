@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { PageAsk } from "@/components/chat/composer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +89,7 @@ export function KnowledgePage() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav className={`under-tabs w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Notes">
+        <nav className={`w-full shrink-0 overflow-y-auto border-r p-3 md:block md:w-64 ${open ? "hidden" : ""}`} aria-label="Notes">
           <div className="relative mb-3">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes" aria-label="Search notes" className="h-8 pl-8 text-sm" />
@@ -128,7 +129,7 @@ export function KnowledgePage() {
           ))}
         </nav>
 
-        <main className={`under-tabs min-w-0 flex-1 overflow-y-auto ${open ? "" : "hidden md:block"}`}>
+        <main className={`min-w-0 flex-1 overflow-y-auto ${open ? "" : "hidden md:block"}`}>
           {open && (
             <div className="material sticky top-0 z-10 flex h-14 items-center gap-2 border-b px-3 md:h-11">
               <Button size="icon" variant="ghost" className="size-8 md:hidden" aria-label="All notes" onClick={() => setOpen(null)}>
@@ -179,6 +180,8 @@ export function KnowledgePage() {
           )}
         </main>
       </div>
+      {/* under both panes, not in either: on a phone only one shows. The page clears the bottom tabs itself (no under-tabs) */}
+      <PageAsk className="border-t pt-3" open={open && { kind: "note", title: (thing && thingTitles.get(thing)) || nameOf(open.path), ref: agentPath(open) }} />
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { api, useMe, useThings } from "@/lib/api";
 import { Avatar, ThingSheet } from "@/components/things/things";
+import { PageAsk } from "@/components/chat/composer";
 import { usePathname, useRouter } from "next/navigation";
 import type { Thing } from "@emplio/shared";
 
@@ -122,7 +123,7 @@ export function TeamPage() {
           )}
         </div>
       </header>
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-10 px-4 py-6 sm:py-8">
           <div className="-mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
             <nav className="flex flex-wrap items-center gap-1" aria-label="Show">
@@ -317,6 +318,7 @@ export function TeamPage() {
             </section>
           )}
         </div>
+        <PageAsk />
       </div>
 
       <Dialog open={adding} onOpenChange={setAdding}>

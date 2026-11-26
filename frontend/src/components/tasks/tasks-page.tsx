@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { PageAsk } from "@/components/chat/composer";
 import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -501,7 +502,7 @@ export function TasksPage() {
         </div>
       </header>
 
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-4 px-4 py-4 sm:gap-6 sm:py-6">
           <QuickAdd people={people} clientId={client === "all" ? null : client} />
 
@@ -605,6 +606,7 @@ export function TasksPage() {
             </div>
           )}
         </div>
+        <PageAsk />
       </div>
 
       <TaskSheet id={openId} onClose={() => setOpenId(null)} />
@@ -679,6 +681,7 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
           onSendBack={(note) => sendBack.mutate({ runId: current.process!.runId, note })}
         />
       )}
+      {current && <PageAsk sheet open={{ kind: "task", title: current.title, ref: current.id }} />}
       {confirmDialog}
     </>
   );

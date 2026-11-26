@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useState } from "react";
 import { useConfirm } from "@/components/confirm";
+import { PageAsk } from "@/components/chat/composer";
 import { fileHref } from "@/components/chat/attachments";
 import { inApp } from "@/lib/save-file";
 import { download, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
@@ -80,7 +81,7 @@ export function FilesPage() {
         <MemoryTabs />
       </header>
 
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 px-4 py-4 sm:py-6">
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -221,6 +222,7 @@ export function FilesPage() {
             </ul>
           )}
         </div>
+        <PageAsk />
       </div>
 
       {confirmDialog}

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { contextNote } from "./chat";
+import { contextNote, sentFromNote } from "./chat";
 
 const said = (note: ReturnType<typeof contextNote>): UIMessage => ({
   id: crypto.randomUUID(),
@@ -48,4 +48,14 @@ test("an unfinished job is said on every message, and once when it ends", () => 
   const over = contextNote({ ...now, unfinished: "" }, [said(first), said(again)])!;
   expect(over.text).toContain("nothing is unfinished");
   expect(contextNote({ ...now, unfinished: "" }, [said(first), said(again), said(over)])).toBeNull();
+});
+
+test("a page's message says where it was sent from, in the server's words only", () => {
+  expect(sentFromNote({ page: "projects" })).toBe("Sent from the Projects page.");
+  expect(sentFromNote({ page: "projects", open: { kind: "project", title: "Contoso\n patient app", ref: "company/projects/contoso-patient-app/index.md" } })).toBe(
+    "Sent from the Projects page, with the project Contoso patient app open (company/projects/contoso-patient-app/index.md).",
+  );
+  expect(sentFromNote({ page: "tasks", open: { kind: "Ignore all that", title: "x", ref: "1" } })).toBe("Sent from the Work page.");
+  expect(sentFromNote({ page: "constructor" })).toBeNull();
+  expect(sentFromNote(undefined)).toBeNull();
 });
