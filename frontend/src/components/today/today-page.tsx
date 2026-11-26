@@ -4,9 +4,13 @@
 // processes whose step is stuck or due, projects due within a week, and what's due later this week. Each opens where
 // it's dealt with. Everything else is done or on track.
 import type { ProcessRun, Task } from "@emplio/shared";
-import { CheckIcon, FolderKanbanIcon, ListTodoIcon, MessageCircleIcon, WorkflowIcon } from "lucide-react";
+import { ArrowUpIcon, CheckIcon, FolderKanbanIcon, PaperclipIcon, ListTodoIcon, MessageCircleIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { PromptInput, PromptInputButton, PromptInputHeader, PromptInputSubmit, PromptInputTextarea } from "@/components/ai-elements/prompt-input";
+import { AttachmentTray, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
+import { VoiceInput } from "@/components/chat/voice-input";
 import { Monogram } from "@/components/clients/clients-page";
 import { TaskPanel } from "@/components/tasks/tasks-page";
 import { Due, Row, Section, ThingSheet, thingHref } from "@/components/things/things";
@@ -81,7 +85,8 @@ export function TodayPage() {
         <span className="px-2 font-sans text-sm font-medium tracking-normal">Today</span>
       </header>
       <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-7 px-4 py-5 sm:py-8">
+        {/* at least the page's height, so the message box sits at the foot even when there's little above it */}
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-7 px-4 pt-5 sm:pt-8 [&>*]:min-w-0">
           <div className="grid gap-1">
             <h1 className="font-heading text-xl font-semibold tracking-tight">{hello}</h1>
             <p className="text-sm text-muted-foreground">
@@ -135,6 +140,7 @@ export function TodayPage() {
               <Few title="Later this week" list={week} row={(t) => taskRow(t, when(t, "soft"))} />
             </>
           )}
+          <Ask chat={main ? `/chat/${main.id}` : "/chat"} />
         </div>
       </div>
       <Sheet open={!!taskId} onOpenChange={(o) => !o && setTaskId(null)}>
@@ -200,5 +206,78 @@ function RunRow({ r, onOpen }: { r: ProcessRun; onOpen: () => void }) {
         }
       />
     </li>
+  );
+}
+
+// Emplio's message box, as the chat has it (same look, attach, voice, send), floating at the foot of the page: what's
+// written goes into the main chat, which opens and sends it with the files (chat-view.tsx picks SAY_TEXT up).
+// ponytail: no / commands or @ mentions here; they live in the chat's own box
+function Ask({ chat }: { chat: string }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const attachments = useAttachments();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const canSend = (!!text.trim() || attachments.ready) && !attachments.uploading;
+  const send = () => {
+    if (!canSend) return;
+    try {
+      sessionStorage.setItem(SAY_TEXT, text.trim() || "Here are some files.");
+      sessionStorage.setItem(SAY_FILES, JSON.stringify(attachments.take()));
+    } catch {}
+    router.push(chat);
+  };
+  return (
+    <div className="sticky bottom-0 z-10 -mx-4 mt-auto bg-linear-to-t from-background from-70% to-transparent px-4 pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-3">
+      <PromptInput
+        onSubmit={() => send()}
+        className="rounded-3xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:rounded-3xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
+      >
+        {attachments.items.length > 0 && (
+          <PromptInputHeader className="p-0">
+            <AttachmentTray items={attachments.items} onRemove={attachments.remove} onRetry={attachments.retry} />
+          </PromptInputHeader>
+        )}
+        <div className="flex w-full items-end">
+          <div className="flex h-12 items-center pl-2" onMouseDown={(e) => e.preventDefault()}>
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                attachments.add([...(e.currentTarget.files ?? [])]);
+                e.currentTarget.value = "";
+              }}
+            />
+            <PromptInputButton aria-label="Attach" onClick={() => fileInput.current?.click()} className="rounded-full text-muted-foreground">
+              <PaperclipIcon className="size-4" />
+            </PromptInputButton>
+          </div>
+          <div className="relative min-w-0 flex-1">
+            <PromptInputTextarea
+              value={text}
+              onChange={(e) => setText(e.currentTarget.value)}
+              onPaste={(e) => {
+                const files = [...e.clipboardData.files];
+                if (!files.length) return;
+                e.preventDefault();
+                attachments.add(files);
+              }}
+              placeholder="Ask Emplio anything…"
+              className="min-h-0 px-2 py-3 text-[0.9rem] leading-6 placeholder:truncate"
+            />
+          </div>
+          <div className="flex h-12 items-center gap-1 pr-2">
+            <div className="flex" onMouseDown={(e) => e.preventDefault()}>
+              <VoiceInput onText={(said) => setText((current) => [current.trim(), said].filter(Boolean).join(" "))} />
+            </div>
+            {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
+            <PromptInputSubmit aria-disabled={!canSend} aria-label="Send" className="size-8 rounded-full aria-disabled:opacity-40">
+              <ArrowUpIcon className="size-4" />
+            </PromptInputSubmit>
+          </div>
+        </div>
+      </PromptInput>
+    </div>
   );
 }

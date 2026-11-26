@@ -493,9 +493,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     else sendMessage(text ? { text, files } : { files });
   };
 
-  // A new chat that starts with what one of our pages left for it (Settings' "Brief your AI employee"; the welcome page)
+  // What one of our pages left for the chat to send as it opens (Settings' "Brief your AI employee", the welcome page:
+  // a new chat; Today's message box: the main chat)
   useEffect(() => {
-    if (!isNew || messages.length) return;
+    if (isNew && messages.length) return;
     // a tick later, and called off if the chat closes first: in development React opens every page twice, and
     // the first close stops (stopRef) the send it had just started, so nothing went out
     const later = setTimeout(() => {

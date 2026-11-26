@@ -657,7 +657,11 @@ export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () =
           t={current}
           people={people}
           clients={(clients.data ?? []).map((c) => ({ value: c.slug, label: c.name }))}
-          onChange={(body) => update.mutate({ id: current.id, ...body })}
+          onChange={(body) => {
+            update.mutate({ id: current.id, ...body });
+            // done: nothing left to do here, so the panel closes
+            if (body.status === "done") onRemoved();
+          }}
           onRemove={() =>
             confirm({
               title: "Delete this task?",
