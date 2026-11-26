@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Client, ClientInput, ClientStage, Process, ProcessRun, Task, TeamMember } from "@emplio/shared";
+import { isWorking, type Client, type ClientInput, type ClientStage, type Process, ProcessRun, Task, TeamMember } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRightIcon,
@@ -52,13 +52,14 @@ import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 import { dateText } from "@/lib/when";
 
-const STAGES: { value: ClientStage; label: string; hint: string }[] = [
+const KNOWN: { value: ClientStage; label: string; hint: string }[] = [
   { value: "active", label: "Active", hint: "Working with them now" },
   { value: "prospect", label: "Prospect", hint: "Not won yet" },
   { value: "past", label: "Past", hint: "No longer working together" },
 ];
-const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.value, s.label])) as Record<ClientStage, string>;
-const FILTERS = [{ value: "all", label: "All" }, ...STAGES.map((s) => ({ value: s.value, label: s.label === "Prospect" ? "Prospects" : s.label }))];
+// a stage is the business's own word (Emplio picks it): the three above, then any others its clients are at
+const stageLabel = (s: string) => KNOWN.find((k) => k.value === s)?.label ?? s.charAt(0).toUpperCase() + s.slice(1);
+const stagesOf = (all: Client[]) => [...KNOWN, ...[...new Set(all.map((c) => c.stage))].filter((s) => !KNOWN.some((k) => k.value === s)).sort().map((s) => ({ value: s, label: stageLabel(s), hint: "" }))];
 
 export const initials = (name: string) =>
   name
@@ -106,6 +107,7 @@ function StagePill({ stage }: { stage: ClientStage }) {
         stage === "active" && "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
         stage === "prospect" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
         stage === "past" && "bg-muted text-muted-foreground",
+        !KNOWN.some((k) => k.value === stage) && "bg-violet-500/12 text-violet-700 dark:text-violet-300",
       )}
     >
       <span
@@ -114,9 +116,10 @@ function StagePill({ stage }: { stage: ClientStage }) {
           stage === "active" && "bg-emerald-500",
           stage === "prospect" && "bg-blue-500",
           stage === "past" && "bg-muted-foreground/50",
+          !KNOWN.some((k) => k.value === stage) && "bg-violet-500",
         )}
       />
-      {STAGE_LABEL[stage]}
+      {stageLabel(stage)}
     </span>
   );
 }
@@ -193,13 +196,14 @@ export function ClientsPage() {
   });
 
   const all = clients.data ?? [];
+  const FILTERS = [{ value: "all", label: "All" }, ...stagesOf(all).map((s) => ({ value: s.value, label: s.value === "prospect" ? "Prospects" : s.label }))];
   const counts = Object.fromEntries(FILTERS.map((f) => [f.value, f.value === "all" ? all.length : all.filter((c) => c.stage === f.value).length]));
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = all
-    .filter((c) => (filter === "unhandled" ? c.stage === "active" && !c.handlers.length : filter === "all" || c.stage === filter))
+    .filter((c) => (filter === "unhandled" ? isWorking(c.stage) && !c.handlers.length : filter === "all" || c.stage === filter))
     .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name), ...c.details.map((d) => d.value)].join(" ").toLowerCase().includes(w)));
   const current = all.find((c) => c.slug === openId) ?? null;
-  const unhandled = all.filter((c) => c.stage === "active" && !c.handlers.length).length;
+  const unhandled = all.filter((c) => isWorking(c.stage) && !c.handlers.length).length;
   const waiting = all.reduce((n, c) => n + c.waitingTasks, 0);
 
   return (
@@ -241,7 +245,7 @@ export function ClientsPage() {
               <UserPlusIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
               <p className="min-w-0 flex-1 text-pretty">
                 <span className="font-medium">
-                  {unhandled} active client{unhandled === 1 ? " has" : "s have"} nobody looking after {unhandled === 1 ? "it" : "them"}.
+                  {unhandled} client{unhandled === 1 ? " has" : "s have"} nobody looking after {unhandled === 1 ? "it" : "them"}.
                 </span>{" "}
                 <span className="text-muted-foreground">Pick who handles each, so their work and reminders go to the right person.</span>
               </p>
@@ -393,6 +397,7 @@ function AddClient({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [stage, setStage] = useState<ClientStage>("active");
+  const STAGES = stagesOf(useClients().data ?? []);
   const add = useMutation({
     mutationFn: (body: ClientInput) => api<Client>("/clients", body),
     onSuccess: (c) => {
@@ -537,6 +542,7 @@ function ClientDetails({
   onChange: (body: ClientInput) => void;
   onOpenTask: (id: string) => void;
 }) {
+  const STAGES = stagesOf(useClients().data ?? []);
   const [name, setName] = useState(c.name);
   const open = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
   // a handler with a team file but not on the team (a freelancer) is picked by their file
@@ -581,7 +587,7 @@ function ClientDetails({
                 <SelectItem key={s.value} value={s.value}>
                   <span className="grid">
                     <span>{s.label}</span>
-                    <span className="text-xs text-muted-foreground">{s.hint}</span>
+                    {s.hint && <span className="text-xs text-muted-foreground">{s.hint}</span>}
                   </span>
                 </SelectItem>
               ))}

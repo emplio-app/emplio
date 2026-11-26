@@ -3,6 +3,7 @@
 // blob sha changed; a repo never indexed is filled on its first search. Text files only (TEXT below), up to MAX_BYTES each. Who may search which repo is the
 // caller's to decide. The agent's own chats search the files on their computer instead (emplio search); this is
 // for what has no computer, like the chat review.
+import { isWorking } from "@emplio/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import { fileIndex } from "./db/schema";
@@ -43,7 +44,7 @@ export function syncFiles(workspaceId: string, repo: string) {
       await db.insert(fileIndex).values(values).onConflictDoUpdate({ target: [fileIndex.workspaceId, fileIndex.repo, fileIndex.path], set: values });
       const slug = repo === "company" && rows.length ? CLIENT_FILE.exec(f.path)?.[1] : undefined;
       const old = rows.find((r) => r.path === f.path) ?? rows.find((r) => WAS_CLIENT.exec(r.path)?.[1] === slug);
-      if (slug && stageOf(text) === "active" && (!old || stageOf(old.text ?? "") === "prospect")) won.push(slug);
+      if (slug && isWorking(stageOf(text)) && (!old || stageOf(old.text ?? "") === "prospect")) won.push(slug);
     }
   });
   syncing.set(key, run.catch(() => {}));

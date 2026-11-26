@@ -13,7 +13,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { isMap, isSeq, LineCounter, parseDocument, type Node } from "yaml";
-import { CLIENT_STAGES, THING_KINDS, type Thing, type ThingKind, type ThingPage, type ThingProblem } from "@emplio/shared";
+import { STAGE_RULE, THING_KINDS, type Thing, type ThingKind, type ThingPage, type ThingProblem } from "@emplio/shared";
 import { context } from "./auth";
 import { db } from "./db";
 import { fileIndex, processRuns, tasks } from "./db/schema";
@@ -26,7 +26,7 @@ export const TOP = /^---\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // the few fields the app reads, and what they must be
 const BUILT_IN: Record<string, (v: unknown, kind: ThingKind) => string | null> = {
-  stage: (v, kind) => (kind !== "clients" || CLIENT_STAGES.includes(v as never) ? null : `stage is one of ${CLIENT_STAGES.join(", ")}`),
+  stage: (v, kind) => (kind !== "clients" || STAGE_RULE.test(String(v)) ? null : "stage is a word or two in lowercase: prospect, active, past, or the business's own (onboarding, on hold)"),
   due: (v) => (typeof v === "string" && DATE.test(v) ? null : "due is a date: YYYY-MM-DD"),
   start: (v) => (typeof v === "string" && DATE.test(v) ? null : "start is a date: YYYY-MM-DD"),
 };

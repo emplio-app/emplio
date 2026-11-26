@@ -670,8 +670,12 @@ export type ProcessRun = {
 
 // A client of the business (backend clients.ts): the Clients page and `emplio clients`. All of it is the file
 // company/clients/<slug>/index.md: name, stage, handler and details at its top, their notes below.
+// A stage is the business's own word for where a client is (lead, onboarding, on hold…), lowercase; prospect (not won
+// yet) and past (no longer working together) keep their meaning, every other stage is a client being worked for.
 export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
-export type ClientStage = (typeof CLIENT_STAGES)[number];
+export type ClientStage = string;
+export const STAGE_RULE = /^[a-z][a-z0-9 -]{0,29}$/;
+export const isWorking = (stage: string) => stage !== "prospect" && stage !== "past";
 export type Client = {
   slug: string;
   name: string;

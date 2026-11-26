@@ -5,7 +5,7 @@
 // Everyone on the team sees them and may add one; changing or removing is for the owner and admins (details: anyone).
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { CLIENT_STAGES, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role, type TeamMember, type Thing } from "@emplio/shared";
+import { isWorking, STAGE_RULE, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role, type TeamMember, type Thing } from "@emplio/shared";
 import { record } from "./activity";
 import { context } from "./auth";
 import { db } from "./db";
@@ -65,12 +65,12 @@ export function mergeDetails(old: ClientDetail[], given: Record<string, string |
 // A schedule's clients: list: all (*), names, and Detail=value (every active client with that detail, any case)
 export function pickClients<T extends { slug: string; name: string; stage: string; details: ClientDetail[] }>(all: T[], list: string[]): T[] {
   const wanted = list.map((c) => c.trim().toLowerCase());
-  if (wanted.includes("*")) return all.filter((c) => c.stage === "active");
+  if (wanted.includes("*")) return all.filter((c) => isWorking(c.stage));
   const byDetail = wanted.flatMap((w) => (w.includes("=") ? [w.split("=").map((s) => s.trim()) as [string, string]] : []));
   return all.filter(
     (c) =>
       (c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name)))) ||
-      (c.stage === "active" && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
+      (isWorking(c.stage) && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
   );
 }
 
@@ -96,11 +96,11 @@ const memberOf = (file: Thing | undefined, team: TeamMember[]) =>
 
 const toClient = (t: Thing, things: Thing[], team: TeamMember[], counts: Map<string | null, { open: number; waiting: number }>): Client => {
   const slug = t.path.slice(FOLDER.length + 1);
-  const stage = t.fields.stage?.toLowerCase() as ClientStage;
+  const stage = t.fields.stage?.toLowerCase() ?? "";
   return {
     slug,
     name: t.title,
-    stage: CLIENT_STAGES.includes(stage) ? stage : "active",
+    stage: STAGE_RULE.test(stage) ? stage : "active",
     handlers: t.links
       .filter((l) => l.field === "handler" && l.to.startsWith("team/"))
       .map((l) => {
@@ -199,7 +199,8 @@ async function commit(w: Who, files: { path: string; content: string | null }[],
 // The file's top lines for what's asked; a string is what's wrong.
 async function changes(w: Who, input: ClientInput, old: Client | null): Promise<{ set: Record<string, unknown>; files: File[] } | string> {
   if (input.name !== undefined && !slugOf(input.name)) return "a client needs a name";
-  if (input.stage !== undefined && !CLIENT_STAGES.includes(input.stage)) return `stage is one of ${CLIENT_STAGES.join(", ")}`;
+  if (input.stage !== undefined) input = { ...input, stage: input.stage.trim().toLowerCase().replace(/\s+/g, " ") };
+  if (input.stage !== undefined && !STAGE_RULE.test(input.stage)) return "stage is a word or two: prospect, active, past, or the business's own (onboarding, on hold)";
   const set: Record<string, unknown> = {};
   let files: File[] = [];
   if (input.name !== undefined) set.name = input.name.replace(/\s+/g, " ").trim();
@@ -290,12 +291,12 @@ export const clientNoteText = (c: Client) =>
 
 // --- `emplio clients` ---
 
-export const USAGE = `usage: emplio clients list [--stage prospect|active|past]   every client: stage, who handles them, open tasks
+export const USAGE = `usage: emplio clients list [--stage <stage>]   every client: stage, who handles them, open tasks
        emplio clients show <name>                         one client: who handles them, their details, open tasks, their file
        emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone): their page company/${FOLDER}/<slug>/index.md
        emplio clients update <name> [options] ["Detail=value"]...   change one (owner and admins; details: anyone)
        emplio clients remove <name>                       delete one added by mistake (owner and admins); otherwise --stage past
-options: --stage prospect|active|past   prospect: not won yet; past: no longer working with them (default: active)
+options: --stage <stage>   a word or two for where they are, your own (onboarding, on hold) or prospect (not won yet), active (the default), past (no longer working with them)
          --handler <names or emails>    who on the team looks after them, comma-separated; "none" clears it
          --name <new name>              update only; the file keeps its name
 Name, stage, handler ("[[team/<name>]]") and details are the YAML at the top of their page, their notes below;
@@ -335,8 +336,7 @@ export async function clientsCommand(w: Who, conversationId: string, args: strin
   };
 
   if (sub === "list") {
-    if (opts.stage && !CLIENT_STAGES.includes(opts.stage as ClientStage)) return `error: stage is one of ${CLIENT_STAGES.join(", ")}`;
-    const list = await listClients(w, { stage: opts.stage as ClientStage | undefined });
+    const list = await listClients(w, { stage: opts.stage?.trim().toLowerCase() || undefined });
     if (data) return JSON.stringify(list.map(asData));
     if (!list.length) return "No clients yet. Add them with emplio clients add <name>.";
     return [...list.map(line), "", "In full: emplio clients show <name>."].join("\n");
@@ -389,7 +389,7 @@ const BODY = {
   type: "object",
   properties: {
     name: { type: "string", maxLength: 200 },
-    stage: { type: "string", enum: [...CLIENT_STAGES] },
+    stage: { type: "string", maxLength: 30 },
     handlers: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 20 },
     details: { type: "object", maxProperties: 50, additionalProperties: { type: ["string", "null"], maxLength: 500 } },
   },
