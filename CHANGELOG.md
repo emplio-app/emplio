@@ -2,6 +2,25 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.17 (2026-11-26)
+
+### What's new
+
+- The phone app feels smoother: the keyboard opens without a delay and the screen glides up with it (no more black corners above it), the sign-in page moves up so you can see what you type, and closing the keyboard no longer flickers.
+- The send button in the chat sends your message and then closes the keyboard, instead of only closing the keyboard.
+- Pull down on a list to refresh it, small vibrations when you tap tabs or open the menu, and Android's back button closes what's open before going back.
+- Pictures load faster on phones: Emplio sends a smaller copy sized for the screen instead of the full photo.
+- Chats open faster: code highlighting and maths are loaded only when a message has them.
+- The app no longer zooms the whole screen when you pinch; pictures and PDFs zoom inside their own frame.
+- The splash screen stays until the app is ready, so you don't see a blank screen first.
+
+### For developers
+
+- `providers.tsx` `useFitToScreen` (moved from `(app)/layout.tsx`, now on every page): with the iPhone app's keyboard resize `none` (`mobile/capacitor.config.js`), `keyboardWillShow`/`keyboardWillHide` size the page at once (`--app-h`, `--keyboard`, `html[data-keyboard-app]` glide) and drive `data-typing`; older app builds keep the visualViewport path.
+- Native iOS tab bar (`AppDelegate.swift` `TabBarPlugin`, registered by `MainViewController`) used by `bottom-tabs.tsx` when the plugin exists; `ZoomPlugin` takes back the web view's scroll delegate so the page never pinch-zooms. Both need a new iPhone build; older builds keep the web tab bar.
+- `GET /files/*?w=<px>` (`files.ts` `thumbnail`): JPEG/PNG/WebP shrunk to 96/320/640/1600 wide WebP; `attachments.tsx` `imageHref`.
+- `message.tsx`: `@streamdown/code`, math and CJK plugins loaded on demand; `lib/zoom.ts` `usePinchZoom` for image/PDF viewers; `lib/splash.ts`; pull-to-refresh and Android back in `(app)/layout.tsx`; query `staleTime` 30s.
+
 ## 1.4.16 (2026-11-26)
 
 ### What's new

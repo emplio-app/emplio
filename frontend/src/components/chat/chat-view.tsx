@@ -734,7 +734,6 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
   // The latest turn is made at least one viewport tall so there's room to scroll it up.
   const scrollRef = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
-  const [viewportHeight, setViewportHeight] = useState(0);
   // when a just-sent prompt was scrolled to the top: for a moment after, size changes keep it there
   const pinnedAt = useRef(0);
   const lastUserIdx = messages.findLastIndex((m) => m.role === "user" && !isHidden(m));
@@ -766,7 +765,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       else if (el.clientHeight !== height) el.scrollTop = el.scrollHeight - el.clientHeight - below;
       height = viewHeight.current = el.clientHeight;
       keep();
-      setViewportHeight(height);
+      // a CSS value, not React state: redrawing every message on each step of the keyboard rising lagged it
+      el.style.setProperty("--chat-h", `${height}px`);
     });
     observer.observe(el);
     if (contentRef.current) observer.observe(contentRef.current);
@@ -1107,7 +1107,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
             // not content-visibility: heights guessed until scrolled near move the text on iPhones, which don't
             // keep the place when something above changes size (TURNS_SHOWN keeps what's drawn small)
             className="flex flex-col gap-6"
-            style={latest && pinLatest ? { minHeight: viewportHeight - PIN_GAP - LIST_PADDING } : undefined}
+            style={latest && pinLatest ? { minHeight: `calc(var(--chat-h, 0px) - ${PIN_GAP + LIST_PADDING}px)` } : undefined}
           >
             {turn.items.map((m, n) => row(m, turn.start + n))}
             {latest && (
@@ -1142,7 +1142,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- everything else it reads follows from these
-    [id, messages, status, error, reconnecting, paused, editing, editText, summarizing, onTelegram, pinLatest, viewportHeight, shown],
+    [id, messages, status, error, reconnecting, paused, editing, editText, summarizing, onTelegram, pinLatest, shown],
   );
 
   const composer = (
@@ -1203,7 +1203,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       {/* one line, send at its end; the tools sit under the box */}
       <div className="flex w-full items-end">
       {/* on a phone a row under the box is wasted height: attach, skill and mention fold into one + in it */}
-      <div className="hidden h-12 items-center pl-2 pointer-coarse:flex" onMouseDown={(e) => e.preventDefault()}>
+      {/* by the first line, not floating under a new chat's taller box */}
+      <div className={cn("hidden h-12 items-center pl-2 pointer-coarse:flex", empty && "self-start")} onMouseDown={(e) => e.preventDefault()}>
         <DropdownMenu>
           <DropdownMenuTrigger render={<PromptInputButton aria-label="More" className="rounded-full text-muted-foreground" />}>
             <PlusIcon className="size-5" />
@@ -1251,9 +1252,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         />
       </div>
         {/* mic and send share one row, centred on each other and on the first line of text */}
-        <div className="flex h-12 items-center gap-1 pr-2">
-        {/* a press keeps the focus in the box */}
-        <div className="flex" onMouseDown={(e) => e.preventDefault()}>
+        {/* a press keeps the focus in the box: losing it dropped the keyboard and moved send from under the finger
+            before it lifted, so a tap closed the keyboard without sending; the keyboard goes once it's sent */}
+        <div className="flex h-12 items-center gap-1 pr-2" onMouseDown={(e) => e.preventDefault()}>
+        <div className="flex">
           <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
         </div>
         {/* not `disabled`: the input group fades itself out when anything inside is disabled */}

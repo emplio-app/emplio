@@ -13,8 +13,11 @@ module.exports = {
   // screen) and hands Capacitor the rest
   ios: { contentInset: "never", allowsLinkPreview: false, scrollEnabled: false, handleApplicationNotifications: false },
   plugins: {
-    // the keyboard shrinks the app to the space above it, like a native app, instead of covering the page
-    Keyboard: { resize: "native", resizeOnFullScreen: true },
-    SplashScreen: { launchAutoHide: true, launchShowDuration: 800, backgroundColor: "#1a613f" },
+    // iPhone: the app runs on under the keyboard and the page makes room the moment it starts to rise
+    // ((app)/layout.tsx useFitToScreen). "native" shrank the app only once the keyboard was up plus 0.2s, with
+    // black behind its rounded corners. Android: resizeOnFullScreen shrinks the app to the space above it.
+    Keyboard: { resize: "none", resizeOnFullScreen: true },
+    // hidden by the site once its first screen is drawn (frontend/src/lib/splash.ts); 3s at most, for a site without that
+    SplashScreen: { launchAutoHide: true, launchShowDuration: 3000, backgroundColor: "#1a613f" },
   },
 };

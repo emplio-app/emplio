@@ -40,6 +40,13 @@ export const SAY_TEXT = "emplio-say-text";
 export const SAY_FILES = "emplio-say-files";
 
 export const fileHref = (url: string) => (url.startsWith("/") ? `${API_URL}${url}` : url);
+// A picture to show at about this many CSS pixels wide: the server sends one shrunk to fit a sharp screen (backend
+// files.ts thumbnail), not the whole original. Opening or saving it still gets the original (fileHref).
+// Wider than the server's biggest size (1600px, a big screen): the original, so it stays sharp there.
+export const imageHref = (url: string, width: number) => {
+  const px = Math.round(width * Math.min(3, globalThis.devicePixelRatio || 2));
+  return url.startsWith("/files/") && px <= 1600 ? `${fileHref(url)}?w=${px}` : fileHref(url);
+};
 
 type Attachment = {
   id: string;
@@ -195,7 +202,7 @@ export function AttachmentTray({
           >
             {image ? (
               // eslint-disable-next-line @next/next/no-img-element -- local blob / API redirect, not optimizable
-              <img src={a.preview ?? fileHref(a.part!.url)} alt={a.name} className="size-full object-cover" />
+              <img src={a.preview ?? imageHref(a.part!.url, 56)} alt={a.name} className="size-full object-cover" />
             ) : (
               <>
                 <div
@@ -277,7 +284,7 @@ export function MessageAttachments({ parts }: { parts: FileUIPart[] }) {
         p.mediaType.startsWith("image/") ? (
           <button key={i} type="button" onClick={() => show(p)} className="block overflow-hidden rounded-xl border" aria-label={`Open ${p.filename ?? "image"}`}>
             {/* eslint-disable-next-line @next/next/no-img-element -- served via an authenticated redirect */}
-            <img src={fileHref(p.url)} alt={p.filename ?? "image"} className="h-40 w-auto max-w-72 object-cover" />
+            <img src={imageHref(p.url, 288)} alt={p.filename ?? "image"} loading="lazy" decoding="async" className="h-40 w-auto max-w-72 object-cover" />
           </button>
         ) : (
           <button
