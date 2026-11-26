@@ -275,10 +275,17 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
 body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]):focus, textarea:focus, select:focus, [contenteditable="true"]:focus) .bottom-tabs {
   display: none;
 }
-/* side panels slide in (sheet.tsx); for people who asked for less motion they only fade */
-@media (prefers-reduced-motion: reduce) {
+/* a side panel slides in from its edge (sheet.tsx), above the motion everything else gets (:where([data-slot]),
+   which would otherwise win over the utility classes); a phone's rises from the bottom instead (below) */
+@media (min-width: 640px) and (prefers-reduced-motion: no-preference) {
   [data-slot="sheet-content"] {
-    translate: none !important;
+    transition-property: translate, opacity;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-slot="sheet-content"][data-ending-style] {
+    transition-duration: 200ms;
+    transition-timing-function: ease-in;
   }
 }
 /* an empty chat keeps its box in the middle, with its greeting: nothing at the foot */
