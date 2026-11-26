@@ -28,7 +28,6 @@ const BUILT_IN: Record<string, (v: unknown, kind: ThingKind) => string | null> =
   stage: (v, kind) => (kind !== "clients" || CLIENT_STAGES.includes(v as never) ? null : `stage is one of ${CLIENT_STAGES.join(", ")}`),
   due: (v) => (typeof v === "string" && DATE.test(v) ? null : "due is a date: YYYY-MM-DD"),
   start: (v) => (typeof v === "string" && DATE.test(v) ? null : "start is a date: YYYY-MM-DD"),
-  fee: (v) => (typeof v === "number" ? null : "fee is a number, no currency or commas: 18000"),
 };
 
 // "sarah-lee" -> "Sarah Lee"

@@ -49,12 +49,11 @@ describe("parseThing", () => {
   });
 
   test("a nested object and wrong built-in fields are problems; the rest is read", () => {
-    const t = read("clients/acme/index.md", "---\nname: Acme\nstage: won\naddress:\n  city: Pune\nfee: 18,000\n---\n");
+    const t = read("clients/acme/index.md", "---\nname: Acme\nstage: won\naddress:\n  city: Seattle\nfee: 18,000 + VAT\n---\n");
     expect(t.fields.name).toBe("Acme");
     expect(t.problems).toEqual([
       { line: 4, text: "address has fields inside it; keep it flat: one value or a list" },
       { line: 3, text: "stage is one of prospect, active, past" },
-      { line: 6, text: "fee is a number, no currency or commas: 18000" },
     ]);
   });
 
