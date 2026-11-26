@@ -10,13 +10,13 @@
 // is still read (what could be), with its problems listed: Emplio fixes them, nothing is refused.
 // ponytail: parsed from the search copy (file_index) on every call; a table of its own when lists get long. That copy
 // follows every commit (gitea.ts indexLater), so it's read as it is; only a repo never indexed is filled first.
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { isMap, isSeq, LineCounter, parseDocument, type Node } from "yaml";
 import { CLIENT_STAGES, THING_KINDS, type Thing, type ThingKind, type ThingPage, type ThingProblem } from "@emplio/shared";
 import { context } from "./auth";
 import { db } from "./db";
-import { fileIndex } from "./db/schema";
+import { fileIndex, processRuns, tasks } from "./db/schema";
 import { syncFiles } from "./file-index";
 
 const FILE = new RegExp(`^(${THING_KINDS.join("|")})/([a-z0-9][a-z0-9-]*)/index\\.md$`);
@@ -148,18 +148,36 @@ export async function listThings(workspaceId: string, kind?: ThingKind): Promise
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
-// What's wrong in a computer's changed thing pages (company/ paths and their text), checked with the saved others, as
-// lines for Emplio: errors only, warnings are for the app.
-export async function thingProblems(workspaceId: string, changed: { path: string; text: string }[]) {
-  const mine = changed.flatMap((f) => parseThing(f.path, f.text) ?? []);
-  if (!mine.length) return [];
+// A client's folder removed (or renamed: its old name removed) while open tasks or running processes still point at
+// its name: what to do about it, a line each.
+export async function removedClients(workspaceId: string, paths: string[]) {
+  const slugs = paths.flatMap((p) => /^clients\/([a-z0-9][a-z0-9-]*)\/index\.md$/.exec(p)?.[1] ?? []);
+  if (!slugs.length) return [];
+  const count = (t: typeof tasks | typeof processRuns, open: ReturnType<typeof sql>) =>
+    db.select({ client: t.client, n: sql<number>`count(*)`.mapWith(Number) }).from(t).where(and(eq(t.workspaceId, workspaceId), inArray(t.client, slugs), open)).groupBy(t.client);
+  const [open, runs] = await Promise.all([count(tasks, sql`${tasks.status} in ('todo', 'doing', 'waiting')`), count(processRuns, sql`${processRuns.status} = 'active'`)]);
+  return slugs.flatMap((slug) => {
+    const n = open.find((r) => r.client === slug)?.n ?? 0;
+    const r = runs.find((x) => x.client === slug)?.n ?? 0;
+    if (!n && !r) return [];
+    const what = [n && `${n} open task${n === 1 ? "" : "s"}`, r && `${r} running process${r === 1 ? "" : "es"}`].filter(Boolean).join(" and ");
+    return [`company/clients/${slug} was removed but ${what} ${n + r === 1 ? "points" : "point"} at it — put it back (git -C /work/company checkout HEAD -- clients/${slug}), or if they're really gone: emplio clients remove ${slug}`];
+  });
+}
+
+// What's wrong in a computer's changed thing pages (company/ paths and their text; null: removed), checked with the
+// saved others, as lines for Emplio: errors only, warnings are for the app.
+export async function thingProblems(workspaceId: string, changed: { path: string; text: string | null }[]) {
+  const gone = await removedClients(workspaceId, changed.filter((f) => f.text === null).map((f) => f.path));
+  const mine = changed.flatMap((f) => (f.text === null ? [] : (parseThing(f.path, f.text) ?? [])));
+  if (!mine.length) return gone;
   const rows = await db
     .select({ path: fileIndex.path, text: fileIndex.text })
     .from(fileIndex)
     .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, "company"), sql`${fileIndex.path} ~ ${FILE.source}`));
   const others = rows.filter((r) => !changed.some((f) => f.path === r.path)).flatMap((r) => parseThing(r.path, r.text) ?? []);
   checkThings([...mine, ...others]);
-  return mine.flatMap((t) => t.problems.filter((p) => !p.warning).map((p) => `company/${thingFile(t.path)}${p.line ? ` line ${p.line}` : ""}: ${p.text} — fix it`));
+  return [...gone, ...mine.flatMap((t) => t.problems.filter((p) => !p.warning).map((p) => `company/${thingFile(t.path)}${p.line ? ` line ${p.line}` : ""}: ${p.text} — fix it`))];
 }
 
 // One thing (null when its file isn't there yet), with the title of each it links to (null: nothing there, a broken

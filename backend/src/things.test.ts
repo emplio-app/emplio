@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { checkThings, parseThing } from "./things";
+import { eq } from "drizzle-orm";
+import { db } from "./db";
+import { tasks, workspaces } from "./db/schema";
+import { checkThings, parseThing, thingProblems } from "./things";
 
 const read = (file: string, text: string) => parseThing(file, text)!;
 
@@ -86,4 +89,20 @@ describe("checkThings", () => {
     const [t] = checkThings([read("contacts/emma/index.md", '---\nclient: "[[clients/nobody]]"\n---\n')]);
     expect(t!.problems).toEqual([{ line: 2, text: "[[clients/nobody]] links to nothing yet", warning: true }]);
   });
+});
+
+test("a client's folder removed while open tasks point at it: Emplio is told what to do", async () => {
+  const [ws] = await db.insert(workspaces).values({ name: `things-test-${crypto.randomUUID().slice(0, 8)}` }).returning();
+  try {
+    await db.insert(tasks).values([
+      { workspaceId: ws!.id, title: "a", client: "acme" },
+      { workspaceId: ws!.id, title: "b", client: "acme", status: "done" },
+    ]);
+    const said = await thingProblems(ws!.id, [{ path: "clients/acme/index.md", text: null }, { path: "clients/other/index.md", text: null }]);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("company/clients/acme was removed but 1 open task points at it");
+    expect(said[0]).toContain("emplio clients remove acme");
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+  }
 });

@@ -2876,7 +2876,7 @@ async function runInBox(s: Session, command: string, background: boolean, signal
     // a client's, contact's… page with broken YAML or a wrong field: Emplio hears it now and fixes it (nothing is refused)
     if (ended?.things?.length)
       await after("checking company pages", async () => {
-        const files = await Promise.all(ended!.things!.map(async (path) => ({ path, text: new TextDecoder().decode(await download(box, `${WORK}/company/${path}`).catch(() => new Uint8Array())) })));
+        const files = await Promise.all(ended!.things!.map(async (path) => ({ path, text: await download(box, `${WORK}/company/${path}`).then((b) => new TextDecoder().decode(b), () => null) })));
         const problems = await thingProblems(s.workspaceId, files);
         if (problems.length) out.fileProblems = problems;
       });
