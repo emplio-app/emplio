@@ -15,7 +15,10 @@ import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { api, useMe } from "@/lib/api";
+import { api, useMe, useThings } from "@/lib/api";
+import { Avatar, ThingSheet } from "@/components/things/things";
+import { usePathname, useRouter } from "next/navigation";
+import type { Thing } from "@emplio/shared";
 
 const teamQueryKey = ["team"];
 const initials = (name: string) =>
@@ -87,6 +90,22 @@ export function TeamPage() {
     return id === me?.user.id ? "you" : m && label(m);
   };
 
+  // each person's team file (company/team/<name>/index.md: role, skills, hours…), matched by email, else by name; and
+  // what names them: the clients they handle, the projects they lead
+  const things = useThings();
+  const router = useRouter();
+  const pathname = usePathname();
+  const files = (things.data ?? []).filter((t) => t.kind === "team");
+  const fileOf = (m: TeamMember) => files.find((f) => f.fields.email?.toLowerCase() === m.email.toLowerCase()) ?? files.find((f) => !f.fields.email && f.title.toLowerCase() === m.name?.toLowerCase());
+  const notHere = files.filter((f) => !(team.data ?? []).some((m) => fileOf(m) === f) && (!q || `${f.title} ${f.fields.role ?? ""}`.toLowerCase().includes(q)));
+  const doesFor = (f: Thing) => {
+    const naming = (field: string, kind: string) => (things.data ?? []).filter((t) => t.kind === kind && t.links.some((l) => l.to === f.path && l.field === field)).map((t) => t.title);
+    const handles = naming("handler", "clients");
+    const leads = naming("lead", "projects");
+    return [handles.length && `Handles ${handles.join(", ")}`, leads.length && `Leads ${leads.join(", ")}`].filter(Boolean).join(" · ");
+  };
+  const openFile = (f: Thing) => router.push(`${pathname}?open=${encodeURIComponent(f.path)}`, { scroll: false });
+
   const myRole = me?.workspaces[0]?.role;
   const canManage = myRole === "owner" || myRole === "admin";
 
@@ -155,6 +174,7 @@ export function TeamPage() {
                   {shown.slice(0, limit(shown.length)).map((m) => (
                     <li key={m.id} className="px-4 py-3">
                       <div className="flex items-center gap-3">
+                        <Person file={fileOf(m)} onOpen={openFile}>
                         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                           {initials(label(m))}
                         </span>
@@ -165,7 +185,8 @@ export function TeamPage() {
                           </div>
                           <div className="truncate text-xs text-muted-foreground">
                             {[
-                              m.name && m.email,
+                              fileOf(m)?.fields.role ?? (m.name && m.email),
+                              fileOf(m)?.fields.capacity,
                               m.reportsTo &&
                                 `reports to ${(() => {
                                   const l = team.data?.find((x) => x.id === m.reportsTo);
@@ -175,7 +196,9 @@ export function TeamPage() {
                               .filter(Boolean)
                               .join(" · ")}
                           </div>
+                          {fileOf(m) && doesFor(fileOf(m)!) && <div className="truncate text-xs text-muted-foreground/80">{doesFor(fileOf(m)!)}</div>}
                         </div>
+                        </Person>
                         <Badge variant={m.role === "member" ? "outline" : "secondary"}>{ROLE_LABEL[m.role]}</Badge>
                         {canManage && m.role !== "owner" && m.id !== me?.user.id && (
                           <DropdownMenu>
@@ -250,6 +273,22 @@ export function TeamPage() {
                       )}
                     </li>
                   ))}
+                  {/* someone with a team file who doesn't sign in (a freelancer): shown, not managed here */}
+                  {(view === "people" || shown.length <= FEW) &&
+                    notHere.map((f) => (
+                      <li key={f.path} className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Person file={f} onOpen={openFile}>
+                            <Avatar name={f.title} />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium">{f.title}</div>
+                              <FileLine f={f} does={doesFor(f)} />
+                            </div>
+                          </Person>
+                          <Badge variant="outline" className="text-muted-foreground">Not on Emplio</Badge>
+                        </div>
+                      </li>
+                    ))}
                 </ul>
               )}
               {shown.length > limit(shown.length) && (
@@ -322,7 +361,30 @@ export function TeamPage() {
         </DialogContent>
       </Dialog>
       {confirmDialog}
+      <ThingSheet />
     </div>
+  );
+}
+
+// a person, opening their team file when they have one
+function Person({ file, onOpen, children }: { file?: Thing; onOpen: (f: Thing) => void; children: React.ReactNode }) {
+  return file ? (
+    <button type="button" onClick={() => onOpen(file)} className="-my-1.5 -ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1.5 pl-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50">
+      {children}
+    </button>
+  ) : (
+    <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
+  );
+}
+
+// what their team file says (role, how much they can take on) and what they look after
+function FileLine({ f, does }: { f: Thing; does: string }) {
+  const about = [f.fields.role, f.fields.capacity ?? f.fields.hours].filter(Boolean).join(" · ");
+  return (
+    <>
+      {about && <div className="truncate text-xs text-muted-foreground">{about}</div>}
+      {does && <div className="truncate text-xs text-muted-foreground/80">{does}</div>}
+    </>
   );
 }
 

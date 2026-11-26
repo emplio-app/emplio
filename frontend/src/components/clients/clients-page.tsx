@@ -18,9 +18,11 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { TaskPanel } from "@/components/tasks/tasks-page";
+import { thingHref } from "@/components/things/things";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -47,6 +49,7 @@ import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQuer
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
+import { dateText } from "@/lib/when";
 
 const STAGES: { value: ClientStage; label: string; hint: string }[] = [
   { value: "active", label: "Active", hint: "Working with them now" },
@@ -56,7 +59,7 @@ const STAGES: { value: ClientStage; label: string; hint: string }[] = [
 const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.value, s.label])) as Record<ClientStage, string>;
 const FILTERS = [{ value: "all", label: "All" }, ...STAGES.map((s) => ({ value: s.value, label: s.label === "Prospect" ? "Prospects" : s.label }))];
 
-const initials = (name: string) =>
+export const initials = (name: string) =>
   name
     .replace(/[^\p{L}\p{N} ]/gu, "")
     .split(" ")
@@ -79,12 +82,12 @@ const tint = (slug: string) => TINTS[[...slug].reduce((n, c) => n + c.charCodeAt
 
 const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/clients/${c.slug}/index.md`)}`;
 
-function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">; size?: "md" | "lg" }) {
+export function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">; size?: "sm" | "md" | "lg" }) {
   return (
     <span
       className={cn(
         "grid shrink-0 place-items-center rounded-xl font-semibold",
-        size === "lg" ? "size-12 text-base" : "size-10 text-sm",
+        size === "lg" ? "size-12 text-base" : size === "sm" ? "size-9 rounded-lg text-xs" : "size-10 text-sm",
         tint(c.slug),
       )}
       aria-hidden
@@ -158,7 +161,10 @@ export function ClientsPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState("active");
   const [query, setQuery] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  // /clients?client=northwind (a client's chip elsewhere) opens theirs
+  const asked = useSearchParams().get("client");
+  const [openId, setOpenId] = useState<string | null>(asked);
+  useEffect(() => void (asked && setOpenId(asked)), [asked]);
   const [adding, setAdding] = useState(false);
 
   const update = useMutation({
@@ -699,7 +705,7 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
 // The files that name this client (company/contacts/, projects/): their people and their projects, each opening its file.
 const LINKED = [
   { kind: "contacts", label: "Contacts", sub: (f: Record<string, string>) => [f.role, f.email] },
-  { kind: "projects", label: "Projects", sub: (f: Record<string, string>) => [f.due ? `due ${f.due}` : f.start ? "ongoing" : "", f.fee] },
+  { kind: "projects", label: "Projects", sub: (f: Record<string, string>) => [f.due ? `due ${dateText(f.due)}` : f.start ? "ongoing" : "", f.fee] },
 ] as const;
 const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, (_, p: string) => p.split("/")[0]!);
 
@@ -715,7 +721,7 @@ function ClientLinked({ slug }: { slug: string }) {
         <ul className="grid gap-1">
           {items.map((l) => (
             <li key={l.from}>
-              <Link href={`/knowledge?file=${encodeURIComponent(`company/${l.from}/index.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
+              <Link href={thingHref(l.from) ?? `/knowledge?file=${encodeURIComponent(`company/${l.from}/index.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
                 <span className="text-sm">{l.title}</span>
                 <span className="text-xs text-muted-foreground">{sub(l.fields).map(plain).filter(Boolean).join(" · ")}</span>
               </Link>

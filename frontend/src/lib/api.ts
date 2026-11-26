@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Client, ConversationSummary, MeResponse, Process, ProcessRun, Task, ThingPage } from "@emplio/shared";
+import type { Client, ConversationSummary, MeResponse, Process, ProcessRun, Task, Thing, ThingKind, ThingPage } from "@emplio/shared";
 import { WebSocketChatTransport } from "ai";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -53,6 +53,10 @@ export function useProcesses() {
 // A thing (clients/northwind) with what links to it: a client's contacts and projects
 export function useThingPage(path: string, enabled = true) {
   return useQuery({ queryKey: ["things", path], queryFn: () => api<ThingPage>(`/things/page?path=${encodeURIComponent(path)}`), enabled });
+}
+// Every thing of a kind (projects, contacts, team), or all of them, with their fields and links
+export function useThings(kind?: ThingKind) {
+  return useQuery({ queryKey: ["things", "list", kind ?? "all"], queryFn: () => api<Thing[]>(`/things${kind ? `?kind=${kind}` : ""}`) });
 }
 export function useProcessRuns(f: { process?: string; client?: string; all?: boolean } = {}) {
   const q = new URLSearchParams({ ...(f.process && { process: f.process }), ...(f.client && { client: f.client }), ...(f.all && { all: "1" }) });

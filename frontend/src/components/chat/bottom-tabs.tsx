@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenIcon, ClipboardListIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
+import { Building2Icon, ClipboardListIcon, MessageCircleIcon, SunIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -52,6 +52,7 @@ export function BottomTabs() {
   return (
     <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-(--safe-bottom) md:hidden">
       <div className="grid h-14 grid-cols-4">
+        {tab("/today", "Today", <SunIcon />, pathname.startsWith("/today"))}
         {tab(
           main ? `/chat/${main.id}` : "/home",
           "Chat",
@@ -74,8 +75,8 @@ export function BottomTabs() {
           ) : undefined,
           "work",
         )}
-        {tab("/knowledge", "Memory", <BookOpenIcon />, pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database"), undefined, "memory")}
-        {tab("/team", "Team", <UsersIcon />, pathname.startsWith("/team"), undefined, "team")}
+        {/* the rest (Projects, Memory, Team…) is under More in the side menu */}
+        {tab("/clients", "Clients", <Building2Icon />, pathname.startsWith("/clients"))}
       </div>
     </nav>
   );

@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { JobSummary } from "@emplio/shared";
 import {
   BlocksIcon,
+  ContactIcon,
+  FolderKanbanIcon,
+  SunIcon,
   Building2Icon,
   BookOpenIcon,
   CheckIcon,
@@ -179,6 +182,17 @@ export function AppSidebar() {
           <Logo href={main ? `/chat/${main.id}` : "/home"} onClick={() => setOpenMobile(false)} />
         </div>
         <SidebarMenu>
+          {/* what needs a look today, across every client */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/today")}
+              render={<Link href="/today" onClick={() => setOpenMobile(false)} />}
+              className="h-9 font-medium"
+            >
+              <SunIcon />
+              Today
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={!!main && pathname === `/chat/${main.id}`}
@@ -263,46 +277,8 @@ export function AppSidebar() {
               Clients
             </SidebarMenuButton>
           </SidebarMenuItem>
-          {/* work done the same steps every time, and where each client stands in it */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={pathname.startsWith("/processes")}
-              data-tip="processes"
-              data-tip-side="right"
-              render={<Link href="/processes" onClick={() => setOpenMobile(false)} />}
-              className="h-9 font-medium"
-            >
-              <WorkflowIcon />
-              Processes
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}
-              data-tip="memory"
-              data-tip-side="right"
-              render={
-                <Link href="/knowledge" onClick={() => setOpenMobile(false)} />
-              }
-              className="h-9 font-medium"
-            >
-              <BookOpenIcon />
-              Memory
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          {/* the people here and Emplio's agents: who does the work */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={pathname.startsWith("/team")}
-              data-tip="team"
-              data-tip-side="right"
-              render={<Link href="/team" onClick={() => setOpenMobile(false)} />}
-              className="h-9 font-medium"
-            >
-              <UsersIcon />
-              Team
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          {/* the rest, folded away so the menu stays short; open while one of them is the page */}
+          <MoreItems pathname={pathname} onOpen={() => setOpenMobile(false)} />
         </SidebarMenu>
       </SidebarHeader>
 
@@ -498,6 +474,52 @@ export function AppSidebar() {
       <SidebarRail />
       {confirmDialog}
     </Sidebar>
+  );
+}
+
+// Everything past the few in front, behind one More that opens in place. Remembered on this device; open by itself
+// while one of them is the page, so where you are is always showing.
+const MORE = [
+  { href: "/projects", label: "Projects", icon: FolderKanbanIcon, tip: undefined },
+  { href: "/contacts", label: "Contacts", icon: ContactIcon, tip: undefined },
+  { href: "/processes", label: "Processes", icon: WorkflowIcon, tip: "processes" },
+  { href: "/knowledge", label: "Memory", icon: BookOpenIcon, tip: "memory", also: ["/files", "/database"] },
+  { href: "/team", label: "Team", icon: UsersIcon, tip: "team" },
+];
+function MoreItems({ pathname, onOpen }: { pathname: string; onOpen: () => void }) {
+  const here = MORE.some((m) => [m.href, ...(m.also ?? [])].some((p) => pathname.startsWith(p)));
+  const [open, setOpen] = useState(() => typeof localStorage !== "undefined" && localStorage.getItem("emplio-more") === "1");
+  const toggle = () => {
+    localStorage.setItem("emplio-more", open ? "0" : "1");
+    setOpen(!open);
+  };
+  const shown = open || here;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton onClick={toggle} aria-expanded={shown} className="h-9 font-medium text-muted-foreground hover:text-sidebar-foreground">
+        <MoreHorizontalIcon />
+        More
+        <ChevronDownIcon className={cn("ml-auto transition-transform duration-200", !shown && "-rotate-90")} />
+      </SidebarMenuButton>
+      {shown && (
+        <SidebarMenuSub className="mt-0.5 duration-200 animate-in fade-in-0 slide-in-from-top-1 motion-reduce:animate-none">
+          {MORE.map((m) => (
+            <SidebarMenuSubItem key={m.href}>
+              <SidebarMenuSubButton
+                isActive={[m.href, ...(m.also ?? [])].some((p) => pathname.startsWith(p))}
+                data-tip={m.tip}
+                data-tip-side="right"
+                render={<Link href={m.href} onClick={onOpen} />}
+                className="h-8"
+              >
+                <m.icon />
+                {m.label}
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
   );
 }
 

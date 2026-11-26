@@ -12,12 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, useThingPage } from "@/lib/api";
+import { api, useThingPage, useThings } from "@/lib/api";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 
 const KEY = ["knowledge"];
 type Open = { repo: string; path: string };
-const nameOf = (path: string) => path.split("/").pop()!.replace(/\.md$/, "");
+// a thing's page (clients/northwind/index.md) by its folder's name
+const nameOf = (path: string) => path.replace(/\/index\.md$/, "").split("/").pop()!.replace(/\.md$/, "");
 const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
 // where the AI employee finds the file on its computer
 const agentPath = (o: Open) => `${o.repo.startsWith("me-") ? "me" : o.repo}/${o.path}`;
@@ -73,6 +74,9 @@ export function KnowledgePage() {
   // a client's, contact's, project's… page (<kind>/<name>/index.md): its [[folder/name]] links get their titles
   const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\/index\.md$/.test(open.path) ? open.path.slice(0, -"/index.md".length) : "";
   const titles = useThingPage(thing, !!thing).data?.links;
+  // the tree names a thing's folder by its title (Northwind Traders), not its index.md
+  const things = useThings();
+  const thingTitles = new Map((things.data ?? []).map((t) => [t.path, t.title]));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -116,7 +120,7 @@ export function KnowledgePage() {
             <section key={f.repo} className="mb-4">
               <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">{f.label}</div>
               {f.files.length ? (
-                <Tree paths={f.files} dir="" depth={0} open={open?.repo === f.repo ? open.path : null} onOpen={(path) => setOpen({ repo: f.repo, path })} />
+                <Tree paths={f.files} dir="" depth={0} open={open?.repo === f.repo ? open.path : null} onOpen={(path) => setOpen({ repo: f.repo, path })} titles={f.repo === "company" ? thingTitles : undefined} />
               ) : (
                 <p className="px-2 text-xs text-muted-foreground">No notes yet.</p>
               )}
@@ -132,9 +136,9 @@ export function KnowledgePage() {
               </Button>
               <h2 className="min-w-0 truncate font-sans text-sm font-medium tracking-normal md:px-1">
                 <span className="hidden text-muted-foreground md:inline">
-                  {folder?.label} / {dirOf(open.path) && `${dirOf(open.path)} / `}
+                  {folder?.label} / {dirOf(open.path.replace(/\/index\.md$/, "")) && `${dirOf(open.path.replace(/\/index\.md$/, ""))} / `}
                 </span>
-                {nameOf(open.path)}
+                {(thing && thingTitles.get(thing)) || nameOf(open.path)}
               </h2>
               <Button
                 size="sm"
@@ -182,7 +186,8 @@ export function KnowledgePage() {
 const KIND_ICON: Record<string, typeof UserIcon> = { clients: Building2Icon, contacts: UserIcon, team: UsersIcon, services: BriefcaseIcon, projects: FolderKanbanIcon };
 // A field's [[folder/name]] links as chips that open that thing's index.md ([[folder/name/note]]: that note); other
 // text as it is.
-function Linked({ text, prefix, titles }: { text: string; prefix: string; titles?: { to: string; title: string | null }[] }) {
+// hrefOf: where a link goes instead (a client's chip to the Clients page)
+export function Linked({ text, prefix, titles, hrefOf }: { text: string; prefix: string; titles?: { to: string; title: string | null }[]; hrefOf?: (to: string) => string | null }) {
   const parts = text.split(/\[\[([a-z]+\/[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)?)\]\]/);
   if (parts.length === 1) return text;
   return (
@@ -192,7 +197,7 @@ function Linked({ text, prefix, titles }: { text: string; prefix: string; titles
         const Icon = KIND_ICON[p.split("/")[0]!] ?? FileTextIcon;
         const name = titles?.find((l) => l.to === p)?.title ?? p.split("/").slice(1).join(" · ").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
         return (
-          <Badge key={i} variant="secondary" render={<Link href={`/knowledge?file=${encodeURIComponent(`${prefix}${p}${p.split("/").length === 2 ? "/index" : ""}.md`)}`} />}>
+          <Badge key={i} variant="secondary" render={<Link href={hrefOf?.(p) ?? `/knowledge?file=${encodeURIComponent(`${prefix}${p}${p.split("/").length === 2 ? "/index" : ""}.md`)}`} />}>
             <Icon data-icon="inline-start" />
             {name}
           </Badge>
@@ -202,17 +207,35 @@ function Linked({ text, prefix, titles }: { text: string; prefix: string; titles
   );
 }
 
-// One folder's notes and, nested under it, its subfolders (closed until clicked).
-function Tree({ paths, dir, depth, open, onOpen }: { paths: string[]; dir: string; depth: number; open: string | null; onOpen: (path: string) => void }) {
+// One folder's notes and, nested under it, its subfolders (closed until clicked). A thing's folder (one with an
+// index.md) goes by its title: one row when that's all it holds, else its page first inside it.
+function Tree({ paths, dir, depth, open, onOpen, titles }: { paths: string[]; dir: string; depth: number; open: string | null; onOpen: (path: string) => void; titles?: Map<string, string> }) {
   const inside = (p: string) => !dir || p.startsWith(`${dir}/`);
   const rest = (p: string) => (dir ? p.slice(dir.length + 1) : p);
-  const mine = paths.filter((p) => inside(p) && !rest(p).includes("/"));
+  const isPage = (p: string) => p.endsWith("/index.md") && paths.includes(p);
+  const mine = paths.filter((p) => inside(p) && !rest(p).includes("/")).sort((a, b) => Number(isPage(b)) - Number(isPage(a)));
   const subs = [...new Set(paths.filter((p) => inside(p) && rest(p).includes("/")).map((p) => rest(p).split("/")[0]!))].sort();
   const pad = { paddingLeft: `${0.5 + depth * 1}rem` };
+  const title = (folder: string) => titles?.get(folder) ?? folder.split("/").pop()!.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  const row = (p: string, label: string, extra = 0) => (
+    <button
+      key={p}
+      type="button"
+      onClick={() => onOpen(p)}
+      aria-current={open === p}
+      style={{ paddingLeft: `${0.5 + depth * 1 + extra}rem` }}
+      className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${open === p ? "bg-accent font-medium" : "hover:bg-accent/60"}`}
+    >
+      <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
   return (
     <>
       {subs.map((name) => {
         const sub = dir ? `${dir}/${name}` : name;
+        // just its page: one row, by its title
+        if (paths.filter((p) => p.startsWith(`${sub}/`)).every((p) => p === `${sub}/index.md`)) return row(`${sub}/index.md`, title(sub), depth ? 1.25 : 0);
         return (
           <details key={sub} open={!!open?.startsWith(`${sub}/`) || undefined}>
             <summary style={pad} className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1.5 pr-2 text-sm hover:bg-accent/60 [&::-webkit-details-marker]:hidden">
@@ -221,23 +244,11 @@ function Tree({ paths, dir, depth, open, onOpen }: { paths: string[]; dir: strin
               <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{name}</span>
             </summary>
-            <Tree paths={paths} dir={sub} depth={depth + 1} open={open} onOpen={onOpen} />
+            <Tree paths={paths} dir={sub} depth={depth + 1} open={open} onOpen={onOpen} titles={titles} />
           </details>
         );
       })}
-      {mine.map((p) => (
-        <button
-          key={p}
-          type="button"
-          onClick={() => onOpen(p)}
-          aria-current={open === p}
-          style={{ paddingLeft: `${0.5 + depth * 1 + (depth ? 1.25 : 0)}rem` }}
-          className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${open === p ? "bg-accent font-medium" : "hover:bg-accent/60"}`}
-        >
-          <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{nameOf(p)}</span>
-        </button>
-      ))}
+      {mine.map((p) => row(p, isPage(p) && dir ? title(dir) : nameOf(p), depth ? 1.25 : 0))}
     </>
   );
 }
