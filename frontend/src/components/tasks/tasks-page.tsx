@@ -606,7 +606,6 @@ export function TasksPage() {
             </div>
           )}
         </div>
-        <PageAsk />
       </div>
 
       <TaskSheet id={openId} onClose={() => setOpenId(null)} />

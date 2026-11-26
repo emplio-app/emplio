@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { PageAsk } from "@/components/chat/composer";
+import { useAskOpen } from "@/components/chat/composer";
 import { ClientPicker } from "@/components/clients/client-picker";
 import { TaskSheet } from "@/components/tasks/tasks-page";
 import { Button } from "@/components/ui/button";
@@ -96,7 +96,6 @@ export function ProcessesPage() {
             ))}
           </ul>
         )}
-        <PageAsk />
       </div>
     </div>
   );
@@ -111,6 +110,7 @@ export function ProcessPage() {
   const p = processes.data?.find((x) => x.name === decodeURIComponent(name));
   const [all, setAll] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  useAskOpen(p && { kind: "process", title: p.title, ref: `company/processes/${p.name}.md` });
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
@@ -141,7 +141,6 @@ export function ProcessPage() {
             <Board p={p} all={all} setAll={setAll} admin={admin} onOpenTask={setTaskId} />
           )}
         </div>
-        <PageAsk open={p && { kind: "process", title: p.title, ref: `company/processes/${p.name}.md` }} />
       </div>
       <TaskSheet id={taskId} onClose={() => setTaskId(null)} />
     </div>

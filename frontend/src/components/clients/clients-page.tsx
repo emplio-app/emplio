@@ -353,7 +353,6 @@ export function ClientsPage() {
             </ul>
           )}
         </div>
-        <PageAsk />
       </div>
 
       <Sheet

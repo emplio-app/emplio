@@ -7,7 +7,6 @@ import type { ProcessRun, Task } from "@emplio/shared";
 import { CheckIcon, FolderKanbanIcon, ListTodoIcon, MessageCircleIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { PageAsk } from "@/components/chat/composer";
 import { Monogram } from "@/components/clients/clients-page";
 import { TaskPanel } from "@/components/tasks/tasks-page";
 import { Due, Row, Section, ThingSheet, thingHref } from "@/components/things/things";
@@ -137,7 +136,6 @@ export function TodayPage() {
             </>
           )}
         </div>
-        <PageAsk />
       </div>
       <Sheet open={!!taskId} onOpenChange={(o) => !o && setTaskId(null)}>
         <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">{taskId && <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} />}</SheetContent>

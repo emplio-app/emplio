@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { JobSummary } from "@emplio/shared";
-import {
+import { BriefcaseIcon,
   BlocksIcon,
   ContactIcon,
   FolderKanbanIcon,
@@ -482,6 +482,7 @@ export function AppSidebar() {
 const MORE = [
   { href: "/projects", label: "Projects", icon: FolderKanbanIcon, tip: undefined },
   { href: "/contacts", label: "Contacts", icon: ContactIcon, tip: undefined },
+  { href: "/services", label: "Services", icon: BriefcaseIcon, tip: undefined },
   { href: "/processes", label: "Processes", icon: WorkflowIcon, tip: "processes" },
   { href: "/knowledge", label: "Memory", icon: BookOpenIcon, tip: "memory", also: ["/files", "/database"] },
   { href: "/team", label: "Team", icon: UsersIcon, tip: "team" },

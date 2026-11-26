@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AppSidebar } from "@/components/chat/app-sidebar";
 import { BottomTabs } from "@/components/chat/bottom-tabs";
+import { LayoutAsk } from "@/components/chat/composer";
 import { JustUpdated, NewVersionBar } from "@/components/chat/new-version";
 import { DraftProvider } from "@/components/chat/draft";
 import { DesktopHistory } from "@/components/desktop-history";
@@ -46,6 +47,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {notifyBar}
             <JustUpdated />
             {children}
+            <LayoutAsk />
             <BottomTabs />
           </SidebarInset>
         </SidebarProvider>

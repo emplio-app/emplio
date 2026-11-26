@@ -285,6 +285,10 @@ body:has(input:not([type="checkbox"], [type="radio"], [type="range"], [type="fil
   .under-tabs {
     padding-bottom: var(--tabs-h);
   }
+  /* with Emplio's message box under the page (composer.tsx LayoutAsk), the box clears the tabs instead */
+  [data-slot="sidebar-inset"]:has(> .page-ask) :is(.page-in, .under-tabs) {
+    padding-bottom: 1.5rem;
+  }
 }
 
 /* Frosted glass for bars that float over content: what scrolls underneath shows through, blurred. Solid for

@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { api, useMe, useThings } from "@/lib/api";
 import { Avatar, ThingSheet } from "@/components/things/things";
-import { PageAsk } from "@/components/chat/composer";
 import { usePathname, useRouter } from "next/navigation";
 import type { Thing } from "@emplio/shared";
 
@@ -318,7 +317,6 @@ export function TeamPage() {
             </section>
           )}
         </div>
-        <PageAsk />
       </div>
 
       <Dialog open={adding} onOpenChange={setAdding}>

@@ -9,7 +9,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useState } from "react";
 import { useConfirm } from "@/components/confirm";
-import { PageAsk } from "@/components/chat/composer";
 import { fileHref } from "@/components/chat/attachments";
 import { inApp } from "@/lib/save-file";
 import { download, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
@@ -222,7 +221,6 @@ export function FilesPage() {
             </ul>
           )}
         </div>
-        <PageAsk />
       </div>
 
       {confirmDialog}

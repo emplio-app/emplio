@@ -460,7 +460,7 @@ const fromNote = (p: { type: string; data: unknown }) =>
 // A message sent from one of the app's pages rather than the chat (frontend composer.tsx PageAsk): one line on where they
 // were and what they had open, so "this one" makes sense. Worded here; the page only says which page and thing.
 const PAGES: Record<string, string> = { today: "Today", tasks: "Work", clients: "Clients", projects: "Projects", contacts: "Contacts", processes: "Processes", knowledge: "Memory", files: "Files", database: "Database", team: "Team" };
-const OPEN_KINDS = new Set(["client", "project", "contact", "teammate", "task", "process", "note", "table"]);
+const OPEN_KINDS = new Set(["client", "project", "contact", "teammate", "service", "task", "process", "note", "table"]);
 export function sentFromNote(data: unknown): string | null {
   const d = (data ?? {}) as { page?: unknown; open?: { kind?: unknown; title?: unknown; ref?: unknown } };
   const page = typeof d.page === "string" && Object.hasOwn(PAGES, d.page) ? PAGES[d.page] : null;

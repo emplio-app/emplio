@@ -7,7 +7,7 @@ import type { Mention, SentFrom } from "@emplio/shared";
 import type { ChatStatus, FileUIPart } from "ai";
 import { ArrowUpIcon, AtSignIcon, FileIcon, FolderIcon, PaperclipIcon, PlusIcon, SquareSlashIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import {
   PromptInput,
@@ -293,13 +293,48 @@ const mentionOf = (o: Open): Mention => ({
 // opens and sends it (chat-view.tsx picks SAY_TEXT up) with a hidden note of where it was sent from. With a thing
 // open, the box starts with its @mention, theirs to delete; that box isn't kept as a draft, the page's own is.
 // className: for a box under a page's panes rather than in its scroll (Memory's notes and database)
-export function PageAsk({ open, sheet, className }: { open?: Open | null; sheet?: boolean; className?: string }) {
+export function PageAsk({ open, sheet }: { open?: Open | null; sheet?: boolean }) {
   const page = usePathname().split("/")[1] ?? "";
   // a fresh box for each thing opened
-  return <PageBox key={open ? `${open.kind}:${open.ref}` : page} page={page} open={open ?? undefined} sheet={sheet} className={className} />;
+  return <PageBox key={open ? `${open.kind}:${open.ref}` : page} page={page} open={open ?? undefined} sheet={sheet} />;
 }
 
-function PageBox({ page, open, sheet, className }: { page: string; open?: Open; sheet?: boolean; className?: string }) {
+// The pages' own box lives once in the app's layout (LayoutAsk); a page with a thing open on it (a process, a note,
+// a table) says so with useAskOpen, and the box starts with its @mention.
+// ponytail: one page shows at a time, so one value is enough
+let shown: Open | null = null;
+const listeners = new Set<() => void>();
+export function useAskOpen(open: Open | null | undefined) {
+  const k = open ? `${open.kind}:${open.ref}:${open.title}` : "";
+  useEffect(() => {
+    shown = open ?? null;
+    listeners.forEach((f) => f());
+    return () => {
+      shown = null;
+      listeners.forEach((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- k is open, by value
+  }, [k]);
+}
+const ASK_PAGES = ["today", "tasks", "clients", "projects", "contacts", "services", "processes", "knowledge", "database", "files", "team"];
+export function LayoutAsk() {
+  const open = useSyncExternalStore(
+    (f) => (listeners.add(f), () => void listeners.delete(f)),
+    () => shown,
+    () => null,
+  );
+  if (!ASK_PAGES.includes(usePathname().split("/")[1] ?? "")) return null;
+  // over the foot of the page, fading it out; on a phone, above the bottom tabs (globals.css .page-ask)
+  return (
+    <div className="page-ask pointer-events-none relative z-10 -mt-6 shrink-0 bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]">
+      <div className="pointer-events-auto">
+        <PageAsk open={open} />
+      </div>
+    </div>
+  );
+}
+
+function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boolean }) {
   const router = useRouter();
   const { data: conversations } = useConversations();
   const main = conversations?.find((x) => x.kind === "main");
@@ -326,10 +361,6 @@ function PageBox({ page, open, sheet, className }: { page: string; open?: Open; 
   return sheet ? (
     <div className="shrink-0 border-t px-3 pt-3 pb-[max(0.75rem,var(--safe-bottom))]">{box}</div>
   ) : (
-    // sticky at the foot of the page's scroll (a flex column, so it sits at the foot when the page is short too); on a
-    // phone that's above the bottom tabs, the scroll's padding
-    <div className={cn("sticky bottom-0 z-10 mt-auto w-full bg-linear-to-t from-background from-70% to-transparent pt-6 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-3", className)}>
-      <div className="mx-auto w-full max-w-3xl px-4">{box}</div>
-    </div>
+    <div className="mx-auto w-full max-w-3xl px-4">{box}</div>
   );
 }

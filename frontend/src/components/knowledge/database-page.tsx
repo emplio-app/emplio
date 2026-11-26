@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownIcon, ArrowUpIcon, ChevronLeftIcon, ChevronRightIcon, DatabaseIcon, DownloadIcon, FilterIcon, LockIcon, SearchIcon, TableIcon, XIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 import { toast } from "sonner";
-import { PageAsk } from "@/components/chat/composer";
+import { useAskOpen } from "@/components/chat/composer";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +106,7 @@ export function DatabasePage() {
       return next;
     });
   };
+  useAskOpen(open ? { kind: "table", title: open, ref: open } : null);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -277,8 +278,6 @@ export function DatabasePage() {
           )}
         </main>
       </div>
-      {/* under both panes, as on Memory's notes (knowledge-page.tsx) */}
-      <PageAsk className="border-t pt-3" open={open ? { kind: "table", title: open, ref: open } : null} />
     </div>
   );
 }

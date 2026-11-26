@@ -111,7 +111,7 @@ export type Mention = { kind: MentionKind; id: string; label: string; detail?: s
 // it. Goes in the message as a part { type: "data-sent-from", data: SentFrom }; the server words the note the model gets.
 export type SentFrom = {
   page: string;
-  open?: { kind: "client" | "project" | "contact" | "teammate" | "task" | "process" | "note" | "table"; title: string; ref: string };
+  open?: { kind: "client" | "project" | "contact" | "teammate" | "service" | "task" | "process" | "note" | "table"; title: string; ref: string };
 };
 
 // GET /commands?q=: what the chat box's / menu offers. A skill or app is put in the message as /name; an

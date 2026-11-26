@@ -4,7 +4,7 @@
 // one, and the same panel for a team member's file. All read from company/<kind>/<name>/index.md; Emplio keeps them,
 // so changes go through it (the Notes button opens the file in Memory).
 import type { Thing, ThingKind } from "@emplio/shared";
-import { ArrowUpRightIcon, FileTextIcon, FolderKanbanIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react";
+import { ArrowUpRightIcon, BriefcaseIcon, FileTextIcon, FolderKanbanIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -26,7 +26,7 @@ export function thingHref(to: string) {
   const [kind, name, more] = to.split("/");
   if (!name || more) return null;
   if (kind === "clients") return `/clients?client=${name}`;
-  if (kind === "projects" || kind === "contacts" || kind === "team") return `/${kind}?open=${encodeURIComponent(to)}`;
+  if (kind === "projects" || kind === "contacts" || kind === "team" || kind === "services") return `/${kind}?open=${encodeURIComponent(to)}`;
   return null;
 }
 const fileHref = (path: string) => `/knowledge?file=${encodeURIComponent(`company/${path}/index.md`)}`;
@@ -52,7 +52,6 @@ function Page({ title, summary, children }: { title: string; summary: string; ch
           </div>
           {children}
         </div>
-        <PageAsk />
       </div>
       <ThingSheet />
     </div>
@@ -281,12 +280,50 @@ export function ContactsPage() {
   );
 }
 
+// What the business offers: each service, its fee and what it covers.
+export function ServicesPage() {
+  const things = useThings();
+  const [query, setQuery] = useState("");
+  const { show } = useOpen();
+  const all = (things.data ?? []).filter((t) => t.kind === "services");
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = all.filter((s) => matches(words, s.title, s.fields.fee, s.fields.price, s.fields.description));
+  return (
+    <Page title="Services" summary={things.isPending ? "Loading…" : all.length ? `${all.length} service${all.length === 1 ? "" : "s"}` : "What you offer clients, and for how much."}>
+      {all.length > 5 && <Search value={query} onChange={setQuery} placeholder="Search services" />}
+      {things.isPending ? (
+        <Loading />
+      ) : !all.length ? (
+        <Empty icon={BriefcaseIcon} title="No services yet">
+          Tell Emplio what you offer: &ldquo;Monthly bookkeeping, 800 a month, covers payroll and VAT returns.&rdquo;
+        </Empty>
+      ) : !shown.length ? (
+        <p className="py-12 text-center text-sm text-muted-foreground">No services match &ldquo;{query.trim()}&rdquo;.</p>
+      ) : (
+        <ul className="grid gap-0.5">
+          {shown.map((s) => (
+            <li key={s.path}>
+              <Row
+                onClick={() => show(s.path)}
+                lead={<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted"><BriefcaseIcon className="size-4 text-muted-foreground" /></span>}
+                title={s.title}
+                meta={s.fields.description}
+                right={s.fields.fee || s.fields.price ? <span className="text-muted-foreground">{s.fields.fee || s.fields.price}</span> : undefined}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Page>
+  );
+}
+
 // how a field that links back reads: Sarah "leads" the project that names her as lead
 const AS: Record<string, string> = { handler: "Handles", lead: "Leads", team: "On the team", approver: "Approves", client: "", text: "Mentioned" };
 const KIND_LABEL: Record<ThingKind, string> = { clients: "Clients", contacts: "Contacts", team: "Team", services: "Services", projects: "Projects" };
 const ONE: Record<ThingKind, string> = { clients: "Client", contacts: "Contact", team: "Team member", services: "Service", projects: "Project" };
 // what the message box calls one that's open (composer.tsx Open)
-const OPEN_KIND: Partial<Record<ThingKind, Open["kind"]>> = { clients: "client", contacts: "contact", team: "teammate", projects: "project" };
+const OPEN_KIND: Partial<Record<ThingKind, Open["kind"]>> = { clients: "client", contacts: "contact", team: "teammate", projects: "project", services: "service" };
 
 // One thing, opened from a list (?open=projects/x): its fields (links as chips that open what they name), its notes,
 // and what names it. Changes go through Emplio: Notes opens the file in Memory, with Suggest a change there.
