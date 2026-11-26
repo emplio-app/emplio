@@ -54,16 +54,22 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     return { text };
   });
 
-  // the notes in the same folder that link here: [[knowledge/pricing]] for knowledge/pricing.md,
-  // [[clients/northwind]] for clients/northwind/index.md
   app.get<{ Querystring: { repo: string; path: string } }>("/knowledge/links", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const { repo, path } = req.query;
     if (!foldersFor(ctx).some((f) => f.repo === repo) || !path?.endsWith(".md")) return reply.code(400).send({ error: "No such note." });
-    const to = `[[${path.replace(/(\/index)?\.md$/, "")}]]`;
-    const rows = await db.select({ path: fileIndex.path }).from(fileIndex)
-      .where(and(eq(fileIndex.workspaceId, ctx.workspaceId), eq(fileIndex.repo, repo), sql`strpos(${fileIndex.text}, ${to}) > 0`));
-    return rows.map((r) => r.path).filter((p) => p !== path && shown(p)).sort();
+    return linkedFrom(ctx.workspaceId, repo, path);
   });
+}
+
+// The notes in the same folder that link to this one: [[knowledge/pricing]] for knowledge/pricing.md,
+// [[clients/northwind]] (or a note in it, [[clients/northwind/decisions]]) for clients/northwind/index.md.
+// ponytail: read from the search copy, so a link written in this reply shows once it's saved
+export async function linkedFrom(workspaceId: string, repo: string, path: string) {
+  const to = `[[${path.replace(/(\/index)?\.md$/, "")}`;
+  const rows = await db.select({ path: fileIndex.path }).from(fileIndex).where(
+    and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo), sql`(strpos(${fileIndex.text}, ${to + "]]"}) > 0 or strpos(${fileIndex.text}, ${to + "/"}) > 0)`),
+  );
+  return rows.map((r) => r.path).filter((p) => p !== path && shown(p)).sort();
 }
