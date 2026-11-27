@@ -3,6 +3,7 @@
 // A new person's first minutes: what Emplio can do (the welcome dialog, once, right after signing up), jobs to start
 // with (the empty chat's cards), and Telegram offered once they've sent a couple of messages.
 import { SeePlans, track, useCreditStatus } from "@cloud/client";
+import { inApp } from "@/lib/save-file";
 import type { UIMessage } from "ai";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -225,7 +226,7 @@ export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; b
         </DialogHeader>
         {paused && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-            {owner ? "Free trials are paused right now. Pick a plan and Emplio starts work straight away." : "Emplio is paused until the owner picks a plan."}
+            {inApp() ? "Emplio is paused for this business right now." : owner ? "Free trials are paused right now. Pick a plan and Emplio starts work straight away." : "Emplio is paused until the owner picks a plan."}
           </div>
         )}
         {/* on a phone the first four, so the sheet fits the screen without scrolling */}
