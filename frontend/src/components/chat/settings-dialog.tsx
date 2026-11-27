@@ -15,6 +15,7 @@ import { BellIcon, BrainIcon, Building2Icon, CalendarClockIcon, ChevronRightIcon
 import { BusinessTab, YouTab } from "@/components/chat/settings-people";
 import { useRouter } from "next/navigation";
 import { SeePlans } from "@cloud/client";
+import { inApp } from "@/lib/save-file";
 import { SAY_TEXT } from "@/components/chat/attachments";
 import { useDraft } from "@/components/chat/draft";
 import { Fragment, useState } from "react";
@@ -254,7 +255,8 @@ export function SettingsDialog({
                 <h3 className="font-medium">{s.label}</h3>
                 <p className="mb-4 text-sm text-muted-foreground">{s.help}</p>
                 {/* the free trial runs the fast AI whatever Quality says (backend settingsFor) */}
-                {data.modelLock && SETTING_FIELDS.some((f) => f.section === s.key && f.key === "modelSet") && (
+                {/* the store apps never mention paid plans */}
+                {data.modelLock && !inApp() && SETTING_FIELDS.some((f) => f.section === s.key && f.key === "modelSet") && (
                   <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm">
                     <span className="min-w-0 flex-1">{data.modelLock}</span>
                     {data.canEdit && <SeePlans size="sm" label="See plans" />}
