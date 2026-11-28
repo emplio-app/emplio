@@ -601,7 +601,7 @@ export function ServicesPage() {
                 dim={!!s.archivedAt}
                 lead={<TileIcon icon={BriefcaseIcon} />}
                 title={<Named name={s.name} private={s.private} />}
-                meta={[s.activeProjects ? `${s.activeProjects} active project${s.activeProjects === 1 ? "" : "s"}` : "No active projects", s.process && `runs ${processes.find((p) => p.name === s.process)?.title ?? s.process}`].filter(Boolean).join(" · ")}
+                meta={[s.activeProjects ? `${s.activeProjects} active project${s.activeProjects === 1 ? "" : "s"}` : "No active projects", s.process && `starts ${processes.find((p) => p.name === s.process)?.title ?? s.process}`].filter(Boolean).join(" · ")}
                 right={<span className="text-muted-foreground" title={moneyText(s) || undefined}>{moneyText(s) || "No price yet"}</span>}
               />
             </li>
@@ -986,7 +986,7 @@ function ServicePanel({ slug }: { slug: string }) {
         <Field label="Price note">
           <Text value={s.priceNote} label="Price note" disabled={!admin} placeholder={admin ? "e.g. + GST, 80 hours a month" : "—"} onSave={(priceNote) => save.mutate({ priceNote })} />
         </Field>
-        <Field label="Runs">
+        <Field label="Starts process">
           <Choose value={s.process ?? ""} items={items} label="Process it runs" disabled={!admin} onChange={(process) => save.mutate({ process: process || null })} className={cn(QUIET, "w-full")} />
         </Field>
         <Details kind="service" details={s.details} disabled={!admin} onSave={(details) => save.mutate({ details })} />
