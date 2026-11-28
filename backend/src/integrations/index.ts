@@ -397,7 +397,7 @@ const MAX_FILE = 100 * 1024 * 1024;
 
 // {"file": "<path>"} anywhere in an action's input: that file from the agent's computer, read by `read`.
 // ponytail: an app input that is itself an object with only a string "file" key would be taken for one
-const attachFiles = (input: unknown, read?: (path: string) => Promise<Uint8Array>) =>
+export const attachFiles = (input: unknown, read?: (path: string) => Promise<Uint8Array>) =>
   mapDeep(input, async (v) => {
     if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).join() !== "file") return undefined;
     const path = (v as { file: unknown }).file;
@@ -408,7 +408,8 @@ const attachFiles = (input: unknown, read?: (path: string) => Promise<Uint8Array
     });
     if (bytes.length > MAX_FILE) throw new AppsError(`${path} is over 100 MB`);
     const name = basename(path);
-    return new AppFile(name, Bun.file(name).type.split(";")[0]!, bytes);
+    // by its extension in any case: a phone's IMG_1234.JPG is a photo, not a document
+    return new AppFile(name, Bun.file(name.toLowerCase()).type.split(";")[0]!, bytes);
   });
 
 // readFile: reads a file from the agent's computer, for files attached to the input
