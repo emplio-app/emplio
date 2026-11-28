@@ -146,7 +146,9 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
     await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason, status: "failed", error: paused ?? "nobody to run it as", finishedAt: new Date() });
     return;
   }
-  const all = row.clients || o.client ? await listClients(row) : [];
+  // as the person behind it sees them: a member's never reach a private client
+  const as = row.clients || o.client ? await personFor(row.workspaceId, row.userId) : null;
+  const all = as ? await listClients(as) : [];
   const targets = o.client ? all.filter((c) => c.slug === o.client) : row.clients ? pickClients(all, row.clients) : [null];
   const period = row.when === "schedule" ? periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE) : null;
   // what stops a second one: per client and period, or per new client; a task on an event or by hand isn't kept from repeating
@@ -173,7 +175,7 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
         assigneeId: a.assigneeId,
         agent: a.agent,
         requesterId: row.userId,
-        client: c?.slug ?? null,
+        clientId: c?.id ?? null,
         dueAt: due,
         repeatKey: keyOf(c?.slug ?? "-"),
       });
@@ -191,7 +193,7 @@ async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: un
   else if (made && row.clients) await post(row.workspaceId, row.userId, `${name}${period ? ` for ${period}` : ""}: ${row.process ? "started" : "a task added"} for ${made} client${made === 1 ? "" : "s"}${row.process ? "" : `, due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}. It's on the Work page.`).catch(() => {});
 }
 
-// A client added as active, or won (their file, file-index.ts): the automations for each new client, for them.
+// A client added at, or moved into, an active stage from a prospect one (clients.ts): the automations for each new client, for them.
 export async function forNewClient(workspaceId: string, client: string) {
   const rows = await db
     .select()

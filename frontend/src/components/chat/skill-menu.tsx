@@ -8,6 +8,7 @@ import { type KeyboardEvent, useEffect, useState } from "react";
 import { AppLogo } from "@/components/chat/connect-card";
 import { cached, instant, MenuSkeleton, SearchingMore } from "@/components/chat/mention-menu";
 import { api } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 // Typing "/" at the start of a message offers the business's skills (and the person's own): pick one and the
@@ -108,7 +109,7 @@ export function useSkillMenu(input: string, setInput: (text: string) => void) {
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 text-sm font-medium">
               /{s.name}
-              {s.kind === "skill" && s.scope === "me" && <span className="rounded bg-muted px-1 text-[0.65rem] font-normal text-muted-foreground">yours</span>}
+              {s.kind === "skill" && s.scope === "me" && <Badge variant="secondary" className="font-normal">yours</Badge>}
             </span>
             <span className="line-clamp-2 text-xs text-muted-foreground">{s.description}</span>
           </span>

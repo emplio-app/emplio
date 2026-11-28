@@ -363,7 +363,7 @@ export function Tour() {
               key={`${t.id}-${active.step}`}
               initialFocus={false}
               finalFocus={false}
-              className="relative w-[min(20rem,calc(100vw-1.5rem))] origin-(--transform-origin) rounded-2xl border bg-popover p-4 text-popover-foreground shadow-lg shadow-black/10 transition-[opacity,scale] duration-200 ease-out outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-opacity"
+              className="relative w-[min(20rem,calc(100vw-1.5rem))] origin-(--transform-origin) rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg shadow-black/10 transition-[opacity,scale] duration-200 ease-out outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-opacity"
             >
               <Popover.Arrow className="size-3 rotate-45 bg-popover data-[side=bottom]:-top-[7px] data-[side=bottom]:border-t data-[side=bottom]:border-l data-[side=left]:-right-[7px] data-[side=left]:border-t data-[side=left]:border-r data-[side=right]:-left-[7px] data-[side=right]:border-b data-[side=right]:border-l data-[side=top]:-bottom-[7px] data-[side=top]:border-r data-[side=top]:border-b" />
               <Popover.Title className="text-sm font-medium">

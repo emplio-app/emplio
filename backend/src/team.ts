@@ -7,12 +7,13 @@ import { record } from "./activity";
 import { users, workspaceMembers } from "./db/schema";
 import { esc } from "./integrations";
 import { sendEmail } from "./mail";
+import { freeSlug } from "./records";
 
 const canManage = (ctx: Pick<Ctx, "role">) => ctx.role === "owner" || ctx.role === "admin";
 
 export const listTeam = (workspaceId: string): Promise<TeamMember[]> =>
   db
-    .select({ id: users.id, name: users.name, email: users.email, role: workspaceMembers.role, reportsTo: workspaceMembers.reportsTo })
+    .select({ id: users.id, name: users.name, email: users.email, role: workspaceMembers.role, reportsTo: workspaceMembers.reportsTo, slug: workspaceMembers.slug, title: workspaceMembers.title })
     .from(workspaceMembers)
     .innerJoin(users, eq(users.id, workspaceMembers.userId))
     .where(eq(workspaceMembers.workspaceId, workspaceId))
@@ -21,7 +22,7 @@ export const listTeam = (workspaceId: string): Promise<TeamMember[]> =>
 // Add someone to the inviter's business and email them. Shared by the Team screen and the agent's `emplio team add`.
 export async function addMember(
   ctx: Pick<Ctx, "workspaceId" | "workspaceName" | "userId" | "userName" | "role">,
-  input: { email: string; name?: string; role?: "admin" | "member" },
+  input: { email: string; name?: string; role?: "admin" | "member"; title?: string },
 ): Promise<{ ok: true; member: TeamMember; emailed: boolean } | { ok: false; error: string }> {
   if (!canManage(ctx)) return { ok: false, error: "Only the owner or an admin can add people." };
   const email = normalizeEmail(input.email);
@@ -36,7 +37,11 @@ export async function addMember(
   // ponytail: one business per person until there's a workspace switcher
   if (memberships.length) return { ok: false, error: `${email} already belongs to another business.` };
 
-  await db.insert(workspaceMembers).values({ workspaceId: ctx.workspaceId, userId: user.id, role });
+  // their notes' folder, team/<slug>/, set once
+  const taken = (await db.select({ slug: workspaceMembers.slug }).from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ctx.workspaceId))).flatMap((m) => (m.slug ? [m.slug] : []));
+  const slug = freeSlug(name ?? user.name ?? email.split("@")[0]!, taken, "teammate");
+  const title = input.title?.trim().slice(0, 80) || null;
+  await db.insert(workspaceMembers).values({ workspaceId: ctx.workspaceId, userId: user.id, role, slug, title });
   // an invited person without a name yet gets the one the inviter gave
   if (name && !user.name) await db.update(users).set({ name }).where(eq(users.id, user.id));
 
@@ -51,7 +56,7 @@ export async function addMember(
   });
 
   record({ workspaceId: ctx.workspaceId, userId: ctx.userId, kind: "team", summary: `Added ${name ?? user.name ?? email} <${email}> as ${role}` });
-  return { ok: true, member: { id: user.id, name: name ?? user.name, email, role, reportsTo: null }, emailed };
+  return { ok: true, member: { id: user.id, name: name ?? user.name, email, role, reportsTo: null, slug, title }, emailed };
 }
 
 // Change someone's role (or remove them, role null). The owner can't be changed, and nobody changes themselves.
@@ -103,6 +108,16 @@ export async function setManager(
   return { ok: true };
 }
 
+// What someone does here ("Design lead", "Article assistant"): an owner or admin sets anyone's, a person their own.
+export async function setTitle(ctx: Pick<Ctx, "workspaceId" | "userId" | "role">, userId: string, title: string | null) {
+  if (!canManage(ctx) && userId !== ctx.userId) return { ok: false as const, error: "Only the owner or an admin can change someone else's title." };
+  const t = title?.trim().slice(0, 80) || null;
+  const [row] = await db.update(workspaceMembers).set({ title: t }).where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, userId))).returning();
+  if (!row) return { ok: false as const, error: "Not on the team." };
+  record({ workspaceId: ctx.workspaceId, userId: ctx.userId, kind: "team", summary: t ? `Set a title: ${t}` : "Cleared a title" });
+  return { ok: true as const };
+}
+
 export async function teamRoutes(app: FastifyInstance) {
   app.get("/team", async (req, reply) => {
     const ctx = await context(req, reply);
@@ -121,6 +136,7 @@ export async function teamRoutes(app: FastifyInstance) {
             email: { type: "string", maxLength: 254 },
             name: { type: "string", maxLength: 100 },
             role: { type: "string", enum: ["admin", "member"] },
+            title: { type: "string", maxLength: 80 },
           },
         },
       },
@@ -141,7 +157,7 @@ export async function teamRoutes(app: FastifyInstance) {
         body: {
           type: "object",
           minProperties: 1,
-          properties: { role: { type: "string", enum: ["admin", "member"] }, reportsTo: { type: ["string", "null"], format: "uuid" } },
+          properties: { role: { type: "string", enum: ["admin", "member"] }, reportsTo: { type: ["string", "null"], format: "uuid" }, title: { type: ["string", "null"], maxLength: 80 } },
         },
       },
     },
@@ -151,7 +167,9 @@ export async function teamRoutes(app: FastifyInstance) {
       const changed = req.body.role ? await changeMember(ctx, req.params.userId, req.body.role) : { ok: true as const };
       if (!changed.ok) return reply.code(400).send({ error: changed.error });
       const managed = req.body.reportsTo !== undefined ? await setManager(ctx, req.params.userId, req.body.reportsTo) : changed;
-      return managed.ok ? managed : reply.code(400).send({ error: managed.error });
+      if (!managed.ok) return reply.code(400).send({ error: managed.error });
+      const titled = req.body.title !== undefined ? await setTitle(ctx, req.params.userId, req.body.title) : managed;
+      return titled.ok ? titled : reply.code(400).send({ error: titled.error });
     },
   );
 

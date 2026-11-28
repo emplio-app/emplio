@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 
 // Saved passwords and keys. They go straight to our server, which keeps them encrypted; the AI employee
@@ -59,18 +60,15 @@ export function SaveLoginDialog({ card, onClose, onSaved }: { card?: SaveLoginCa
         >
           {!card && (
             <>
-              <div className="flex gap-1 rounded-lg bg-muted p-1 text-sm">
-                {(["login", "key"] as const).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setKind(k)}
-                    className={`flex-1 rounded-md px-3 py-1.5 font-medium ${kind === k ? "bg-background shadow-sm" : "text-muted-foreground"}`}
-                  >
-                    {k === "login" ? "Website login" : "API key or token"}
-                  </button>
-                ))}
-              </div>
+              <Tabs value={kind} onValueChange={(k) => setKind(k as typeof kind)}>
+                <TabsList className="w-full">
+                  {(["login", "key"] as const).map((k) => (
+                    <TabsTrigger key={k} value={k}>
+                      {k === "login" ? "Website login" : "API key or token"}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
               <label className="grid gap-1.5 text-sm font-medium">
                 Website
                 <Input required placeholder={key ? "api.vercel.com" : "vercel.com"} value={site} onChange={(e) => setSite(e.target.value)} />
@@ -141,7 +139,7 @@ export function SaveLoginCardView({ card }: { card: SaveLoginCard }) {
           <CheckIcon className="size-3.5" /> Saved
         </span>
       ) : (
-        <Button size="sm" className="rounded-full" onClick={() => setOpen(true)}>
+        <Button size="sm" onClick={() => setOpen(true)}>
           Save
         </Button>
       )}

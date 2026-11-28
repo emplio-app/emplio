@@ -9,12 +9,26 @@ export const FIRM: Business["firm"] = {
     "An accounting and company-secretarial firm: bookkeeping, tax returns, payroll and annual filings for about 40 small companies. Each client has one of us looking after them. Invoices are due in 30 days.",
 };
 
-// a handler is their team file, [[team/<name>]]
-const person = (name: string, email: string) => ({ id: email, name, email, path: `team/${name.toLowerCase()}` });
+// a handler is a teammate
+const person = (name: string, email: string) => ({ id: email, name });
 const RAJ = person("Raj", "raj@kaveri.example");
 const PRIYA = person("Priya", "priya@kaveri.example");
-const client = (slug: string, name: string, stage: Client["stage"], handlers: Client["handlers"], details: [string, string][], openTasks = 2, waitingTasks = 0): Client =>
-  ({ slug, name, stage, handlers, details: details.map(([n, value]) => ({ name: n, value })), openTasks, waitingTasks });
+const client = (slug: string, name: string, stage: "active" | "prospect", handlers: Client["handlers"], details: [string, string][], openTasks = 2, waitingTasks = 0): Client => ({
+  id: slug,
+  slug,
+  name,
+  stage: stage === "active" ? "Active" : "Prospect",
+  stageCategory: stage,
+  handlers,
+  details: details.map(([n, value]) => ({ key: n.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: n, value })),
+  openTasks,
+  waitingTasks,
+  activeProjects: 0,
+  externalIds: {},
+  private: false,
+  archivedAt: null,
+  updatedAt: "2026-11-20T10:00:00.000Z",
+});
 
 export const CLIENTS = {
   northwind: client("northwind-traders", "Northwind Traders", "active", [RAJ], [["Contact email", "sarah@northwind.example"], ["Files", "monthly"], ["Tax number", "27AAACN1234F1Z5"]], 3, 1),
@@ -28,7 +42,13 @@ const LIST = Object.values(CLIENTS)
   .map((c) => [c.slug, c.stage, c.handlers.map((h) => h.name).join(", ") || "nobody named", `${c.openTasks} open${c.waitingTasks ? ` (${c.waitingTasks} waiting)` : ""}`, c.name].join("\t"))
   .join("\n");
 const SHOW = (c: Client) =>
-  [`${c.name} (${c.stage}), handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named"}`, ...c.details.map((d) => `${d.name}: ${d.value}`), `Notes: company/clients/${c.slug}/index.md`].join("\n");
+  [
+    `${c.name} (${c.stage}), handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named"}`,
+    ...c.details.map((d) => `${d.name}: ${d.value}`),
+    ...RUNS.split("\n").filter((l) => !l.startsWith("\t") && l.split("\t")[2]!.startsWith(c.name)).map((l) => `process: ${l}`),
+    ...TASKS.split("\n").filter((l) => l.split("\t")[4]!.startsWith(`${c.name}:`)).map((l) => `open task: ${l}`),
+    `Notes: company/clients/${c.slug}/index.md`,
+  ].join("\n");
 
 const PROCESSES = [
   "payment-chase\t3 steps\tby hand\t2 going\tPayment chase",
@@ -116,7 +136,7 @@ const AUTOMATIONS = [
 export const RUNS = [
   "7c1e04aa\tPayment chase\tFabrikam Inc\tstep 2/3 Call them (Raj, todo, due 2026-11-12, task a1f3c9d2)\n\tInvoice: INV-2207 · Amount: 85000 · Due date: 2026-11-01",
   "3b9f2d10\tPayment chase\tNorthwind Traders\tstep 1/3 Send a reminder (Emplio, doing, task f1a2b3c4)\n\tInvoice: INV-1093 · Amount: 42000 · Due date: 2026-11-05",
-  "e4a77c02\tAnnual filing\tContoso Ltd\tstep 3/5 Approve the notice (Meera, todo, due 2026-11-11, task c05d8e11)\n\tFinancial year: 2025-26 · AGM date: 2026-12-15",
+  "e4a77c02\tAnnual filing\tContoso Ltd\tstep 3/5 Approve the notice (Meera, todo, due 2026-11-11, task c05d8e11)\n\tFinancial year: 2025-26 · AGM date: 2026-12-15\n\tan OK step: not right? emplio processes back e4a77c02 --note \"<what to fix>\" (step 2 redoes it)",
   "51d0c9e3\tClient onboarding\tWingtip Studio\tstep 1/4 Kickoff call (Priya, todo, due 2026-11-11, task d9c4a370)",
   "c8d2e5f1\tPayment chase\tWingtip Studio\tstep 1/3 Send a reminder (Emplio, doing, task fb617283)\n\tInvoice: INV-3410 · Amount: 9600 · Due date: 2026-10-28",
   "9a2b6f71\tMonthly books\tNorthwind Traders · Nov 2026\tstep 1/3 Collect bank statements (Raj, waiting, due 2026-11-06, task b7e21d04)",
@@ -146,7 +166,14 @@ export async function checker() {
 
 // The same, as data: what code gets back in code mode (the app answers code with rows, src/sandbox.ts)
 const CODE = process.env.EVAL_CODE_MODE !== "0";
-const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: `company/clients/${c.slug}/index.md` });
+// a show also has the work going for them, as the app gives it (src/clients.ts clientsCommand show)
+const asData = (c: Client, show = false) => ({
+  slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])),
+  ...(show
+    ? { processes: RUN_ROWS.filter((r) => r.subject.startsWith(c.name)).map((r) => ({ id: r.id, process: r.title, subject: r.subject, status: "active", step: r.step })), open_tasks: TASK_ROWS.filter((t) => t.client === c.name).map((t) => ({ id: t.id, title: t.title, status: t.status, due: t.due, waiting_on: t.waiting_on })) }
+    : { open_tasks: c.openTasks, waiting_tasks: c.waitingTasks }),
+  notes: `company/clients/${c.slug}/index.md`,
+});
 const listOf = (text: string, data: unknown) => (CODE ? JSON.stringify(data, null, 1) : text);
 const RUN_ROWS = RUNS.split("\n").filter((l) => !l.startsWith("\t")).map((l, i) => {
   const [id, title, subject, at] = l.split("\t") as [string, string, string, string];
@@ -166,6 +193,24 @@ const HELP = async (area: string) => (await import(`../../src/${area}`)).USAGE a
 const TEAM = "Meera <meera@kaveri.example>\towner\nRaj <raj@kaveri.example>\tmember\nPriya <priya@kaveri.example>\tadmin";
 const FILE = (text: string) => text.replace(/^company\/[^\n]+:\n/, "");
 
+// emplio search <words>: what the real search finds here (src/sandbox.ts search): tasks and process runs by their
+// words, and clients and contacts among the records; the longest word that finds something
+const CONTACT_ROWS = "sarah-lee\tSarah Lee\tFinance manager\tsarah@northwind.example\tNorthwind Traders\naccounts-contoso\tAccounts team\t\taccounts@contoso.example\tContoso Ltd";
+export const search = (command: string) => {
+  const m = /emplio search\s+(.+)$/.exec(command.split("\n")[0]!);
+  if (!m) return null;
+  const words = m[1]!.replace(/['"]/g, "").split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length);
+  const find = (w: string, text: string) => text.split("\n").filter((l) => !l.startsWith("\t") && l.toLowerCase().includes(w.toLowerCase()));
+  for (const w of words) {
+    const tasks = find(w, TASKS);
+    const runs = find(w, RUNS);
+    const records = [...find(w, LIST), ...find(w, CONTACT_ROWS)];
+    if (tasks.length || runs.length || records.length)
+      return `== Files\n(none)\n\n== Records (clients, contacts, projects, services, meetings)\n${records.join("\n") || "(none)"}\n\n== Tasks\n${[...tasks, ...runs.map((r) => `process run ${r}`)].join("\n") || "(none)"}\n\n== Past chats\n(none)`;
+  }
+  return "== Files\n(none)\n\n== Records\n(none)\n\n== Tasks\n(none)\n\n== Past chats\n(none)";
+};
+
 // what the firm's commands answer, first match wins; writes answer like the server does
 export const world = async (): Promise<World> => [
   ["clients help", await HELP("clients")],
@@ -173,10 +218,15 @@ export const world = async (): Promise<World> => [
   ["automations help", await HELP("automations")],
   ["tasks help", await HELP("tasks")],
   ["team( list)?\\s*$", TEAM],
-  ["clients (list|search)|clients\\s*$", listOf(LIST, Object.values(CLIENTS).map(asData))],
+  ["clients (list|search)|clients\\s*$", listOf(LIST, Object.values(CLIENTS).map((c) => asData(c)))],
   // by name or slug, any case (Northwind, northwind-traders)
-  ...Object.values(CLIENTS).map((c): [string, string] => [`clients show .*${c.slug.split("-")[0]!.replace(/./g, (x) => `[${x}${x.toUpperCase()}]`)}`, listOf(SHOW(c), asData(c))]),
+  ...Object.values(CLIENTS).map((c): [string, string] => [`clients show .*${c.slug.split("-")[0]!.replace(/./g, (x) => `[${x}${x.toUpperCase()}]`)}`, listOf(SHOW(c), asData(c, true))]),
   ["clients show", "error: no such client (emplio clients list)"],
+  ["contacts (list|search)|contacts\\s*$", CONTACT_ROWS],
+  ["contacts show .*([sS]arah|[nN]orthwind)", "Sarah Lee, Finance manager at Northwind Traders · sarah@northwind.example · updatedAt 2026-10-02T10:00:00.000Z\nnotes: company/contacts/sarah-lee/index.md"],
+  ["contacts show", "error: no such contact (emplio contacts list)"],
+  ["contacts add", "added: their notes are company/contacts/<slug>/index.md"],
+  ["contacts update", "updated"],
   ["clients add", "added: the client is on the list; their page is company/clients/<slug>/index.md"],
   ["clients update", "updated"],
   ["processes show .*payment", PAYMENT_CHASE],

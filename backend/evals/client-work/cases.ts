@@ -95,7 +95,7 @@ export async function cases(): Promise<Case[]> {
     c("handler change", "client", "priya is taking over northwind from raj", { kinds: ["client"], allow: ["change"] }),
 
     // detail
-    c("new contact email", "detail", "northwind's contact is now tom@northwind.example", { kinds: ["detail"] }),
+    c("new contact email", "detail", "northwind's contact is now tom@northwind.example", { kinds: [], allow: ["detail", "contact"] }),
     c("tax number", "detail", "contoso's tax number is 27AAACC1234D1Z9", { kinds: ["detail"] }),
     c("filing frequency", "detail", "wingtip moved to quarterly filing", { kinds: ["detail"] }),
     c("detail in a client's chat", "detail", "their accounts email is now finance@fabrikam.example", { kinds: ["detail"] }, fabrikam),

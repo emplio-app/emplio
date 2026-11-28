@@ -46,6 +46,8 @@ export function writesOf(commands: string[]): Write[] {
       if (area === "processes" && sub === "start") return write("process");
       if (area === "processes" && (sub === "add" || sub === "update")) return write("write-process");
       if (area === "processes" && (sub === "set" || sub === "back" || sub === "stop")) return write("change");
+      // contacts are records now (src/contacts.ts): one added or changed is the contact door
+      if (area === "contacts" && (sub === "add" || sub === "update")) return write("contact");
       if (area === "clients" && sub === "add") return write("client");
       if (area === "clients" && sub === "update") {
         // "Detail=value" words are details; --stage, --handler, --name change the client

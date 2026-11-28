@@ -78,7 +78,7 @@ export function ClaudeImport({ busy, error, onFiles }: { busy: boolean; error?: 
 
   const zone = (on: boolean) =>
     cn(
-      "flex w-full items-center gap-3 rounded-xl border border-dashed p-4 text-left text-sm transition-colors hover:bg-muted/50",
+      "flex w-full items-center gap-3 rounded-xl border border-dashed p-4 text-left text-sm transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
       on && "border-primary bg-primary/5",
     );
 
@@ -120,9 +120,9 @@ export function ClaudeImport({ busy, error, onFiles }: { busy: boolean; error?: 
                 if (files.length) onFiles(files);
               }}
             />
-            <button type="button" disabled={busy} className="mt-2 text-xs underline underline-offset-2" onClick={() => zipsInput.current?.click()}>
+            <Button variant="link" size="xs" disabled={busy} className="mt-2 h-auto p-0 text-muted-foreground" onClick={() => zipsInput.current?.click()}>
               {busy ? "Bringing it over…" : "Already downloaded the zips? Pick them instead"}
-            </button>
+            </Button>
           </>
         )}
       </Step>
@@ -186,9 +186,9 @@ export function ClaudeImport({ busy, error, onFiles }: { busy: boolean; error?: 
               </span>
             </span>
           </button>
-          <button type="button" className="mt-2 text-xs text-muted-foreground underline underline-offset-2" onClick={() => (setParts(null), setGot(new Map()), setOpened(new Set()))}>
+          <Button variant="link" size="xs" className="mt-2 h-auto p-0 text-muted-foreground" onClick={() => (setParts(null), setGot(new Map()), setOpened(new Set()))}>
             Use a different manifest
-          </button>
+          </Button>
         </Step>
       )}
 

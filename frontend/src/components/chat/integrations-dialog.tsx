@@ -39,8 +39,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 
 const STATUS: Record<Connection["status"], { label: string; dot: string }> = {
-  active: { label: "Connected", dot: "bg-emerald-500" },
-  pending: { label: "Sign-in not finished", dot: "bg-amber-500" },
+  active: { label: "Connected", dot: "bg-primary" },
+  pending: { label: "Sign-in not finished", dot: "bg-warning" },
   expired: {
     label: "Expired, reconnect to keep using it",
     dot: "bg-destructive",
@@ -186,7 +186,6 @@ function YourApps({
                     autoFocus
                     maxLength={80}
                     aria-label={`Name for this ${c.name} account`}
-                    className="h-7 text-sm"
                     onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setRenaming(null))}
                     onBlur={(e) =>
                       e.currentTarget.value.trim() && e.currentTarget.value !== c.label
@@ -312,13 +311,6 @@ function Browse({
     apps.data?.some((a) => a.category === c.key),
   );
 
-  const chip = (selected: boolean) =>
-    `shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-      selected
-        ? "border-primary bg-primary text-primary-foreground"
-        : "bg-background text-muted-foreground hover:text-foreground"
-    }`;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="grid gap-3 px-5 pt-4 pb-3">
@@ -330,28 +322,30 @@ function Browse({
             data-tip="apps"
             data-tip-side="bottom"
             autoFocus
-            className="h-10 pl-9"
+            className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <div className="-mx-5 flex gap-1.5 overflow-x-auto px-5 pb-1 [scrollbar-width:none]">
-          <button
-            type="button"
-            className={chip(!category)}
+          <Button
+            size="xs"
+            variant={!category ? "default" : "outline"}
+            className="shrink-0"
             onClick={() => setCategory(null)}
           >
             All
-          </button>
+          </Button>
           {categories.map((c) => (
-            <button
+            <Button
               key={c.key}
-              type="button"
-              className={chip(category === c.key)}
+              size="xs"
+              variant={category === c.key ? "default" : "outline"}
+              className="shrink-0"
               onClick={() => setCategory(c.key)}
             >
               {c.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -376,7 +370,7 @@ function Browse({
               {list.map((a) => (
                 <div
                   key={a.app}
-                  className="flex items-start gap-3 rounded-xl border bg-card p-3"
+                  className="flex items-center gap-3 rounded-xl border bg-card p-3"
                 >
                   <AppLogo src={a.logo} />
                   <div className="min-w-0 flex-1">
@@ -389,15 +383,16 @@ function Browse({
                         <ConnectedMark
                           count={active.get(a.app)}
                         />
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="xs"
                           onClick={() => connect(a)}
                           disabled={connecting === a.app}
-                          className="inline-flex items-center gap-0.5 whitespace-nowrap text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-70"
+                          className="text-muted-foreground"
                         >
                           <PlusIcon className="size-3" />
                           {connecting === a.app ? "Waiting…" : "Add another"}
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>

@@ -15,10 +15,8 @@ import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { api, useMe, useThings } from "@/lib/api";
-import { Avatar, ThingSheet } from "@/components/things/things";
-import { usePathname, useRouter } from "next/navigation";
-import type { Thing } from "@emplio/shared";
+import { api, useClients, useMe, useProjects } from "@/lib/api";
+import Link from "next/link";
 import { AskFloat } from "@/components/chat/composer";
 
 const teamQueryKey = ["team"];
@@ -46,12 +44,14 @@ export function TeamPage() {
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
   const [admin, setAdmin] = useState(false);
   const add = useMutation({
     mutationFn: (body: AddMemberRequest) => api<TeamMember>("/team", body),
     onSuccess: () => {
       setEmail("");
       setName("");
+      setTitle("");
       setAdmin(false);
       setAdding(false);
       void refresh();
@@ -65,6 +65,11 @@ export function TeamPage() {
     mutationFn: ({ id, reportsTo }: { id: string; reportsTo: string | null }) => api(`/team/${id}`, { reportsTo }, "PATCH"),
     onSettled: refresh,
   });
+  const retitle = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string | null }) => api(`/team/${id}`, { title }, "PATCH"),
+    onSettled: refresh,
+  });
+  const [titling, setTitling] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (id: string) => api(`/team/${id}`, undefined, "DELETE"),
     onSettled: refresh,
@@ -91,21 +96,15 @@ export function TeamPage() {
     return id === me?.user.id ? "you" : m && label(m);
   };
 
-  // each person's team file (company/team/<name>/index.md: role, skills, hours…), matched by email, else by name; and
-  // what names them: the clients they handle, the projects they lead
-  const things = useThings();
-  const router = useRouter();
-  const pathname = usePathname();
-  const files = (things.data ?? []).filter((t) => t.kind === "team");
-  const fileOf = (m: TeamMember) => files.find((f) => f.fields.email?.toLowerCase() === m.email.toLowerCase()) ?? files.find((f) => !f.fields.email && f.title.toLowerCase() === m.name?.toLowerCase());
-  const notHere = files.filter((f) => !(team.data ?? []).some((m) => fileOf(m) === f) && (!q || `${f.title} ${f.fields.role ?? ""}`.toLowerCase().includes(q)));
-  const doesFor = (f: Thing) => {
-    const naming = (field: string, kind: string) => (things.data ?? []).filter((t) => t.kind === kind && t.links.some((l) => l.to === f.path && l.field === field)).map((t) => t.title);
-    const handles = naming("handler", "clients");
-    const leads = naming("lead", "projects");
-    return [handles.length && `Handles ${handles.join(", ")}`, leads.length && `Leads ${leads.join(", ")}`].filter(Boolean).join(" · ");
+  // what each looks after: the clients they handle, the projects they lead
+  const clients = useClients().data ?? [];
+  const projects = useProjects().data ?? [];
+  const doesFor = (m: TeamMember) => {
+    const handles = clients.filter((c) => c.handlers.some((h) => h.id === m.id)).map((c) => c.name);
+    const leads = projects.filter((p) => p.lead?.id === m.id).map((p) => p.name);
+    const few = (l: string[]) => (l.length > 3 ? `${l.slice(0, 3).join(", ")} +${l.length - 3}` : l.join(", "));
+    return [handles.length && `Handles ${few(handles)}`, leads.length && `Leads ${few(leads)}`].filter(Boolean).join(" · ");
   };
-  const openFile = (f: Thing) => router.push(`${pathname}?open=${encodeURIComponent(f.path)}`, { scroll: false });
 
   const myRole = me?.workspaces[0]?.role;
   const canManage = myRole === "owner" || myRole === "admin";
@@ -140,7 +139,7 @@ export function TeamPage() {
                 </Button>
               ))}
             </nav>
-            <InputGroup className="h-8 w-full sm:ml-auto sm:w-56">
+            <InputGroup className="w-full sm:ml-auto sm:w-56">
               <InputGroupAddon>
                 <SearchIcon />
               </InputGroupAddon>
@@ -176,7 +175,7 @@ export function TeamPage() {
                   {shown.slice(0, limit(shown.length)).map((m) => (
                     <li key={m.id} className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <Person file={fileOf(m)} onOpen={openFile}>
+                        <Person slug={m.slug}>
                         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                           {initials(label(m))}
                         </span>
@@ -187,8 +186,7 @@ export function TeamPage() {
                           </div>
                           <div className="truncate text-xs text-muted-foreground">
                             {[
-                              fileOf(m)?.fields.role ?? (m.name && m.email),
-                              fileOf(m)?.fields.capacity,
+                              m.title ?? (m.name && m.email),
                               m.reportsTo &&
                                 `reports to ${(() => {
                                   const l = team.data?.find((x) => x.id === m.reportsTo);
@@ -198,14 +196,14 @@ export function TeamPage() {
                               .filter(Boolean)
                               .join(" · ")}
                           </div>
-                          {fileOf(m) && doesFor(fileOf(m)!) && <div className="truncate text-xs text-muted-foreground/80">{doesFor(fileOf(m)!)}</div>}
+                          {doesFor(m) && <div className="truncate text-xs text-muted-foreground/80">{doesFor(m)}</div>}
                         </div>
                         </Person>
                         <Badge variant={m.role === "member" ? "outline" : "secondary"}>{ROLE_LABEL[m.role]}</Badge>
                         {canManage && m.role !== "owner" && m.id !== me?.user.id && (
                           <DropdownMenu>
                             <DropdownMenuTrigger
-                              render={<Button variant="ghost" size="icon" className="size-7" aria-label={`Manage ${m.name ?? m.email}`} />}
+                              render={<Button variant="ghost" size="icon-sm" aria-label={`Manage ${m.name ?? m.email}`} />}
                             >
                               <MoreHorizontalIcon />
                             </DropdownMenuTrigger>
@@ -220,6 +218,7 @@ export function TeamPage() {
                               >
                                 {m.role === "admin" ? "Make staff" : "Make admin"}
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setTitling(m.id)}>{m.title ? "Change job title" : "Set job title"}</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => setPicking(m.id)}>
                                 {m.reportsTo ? "Change who they report to" : "Set who they report to"}
                               </DropdownMenuItem>
@@ -240,6 +239,19 @@ export function TeamPage() {
                           </DropdownMenu>
                         )}
                       </div>
+                      {titling === m.id && (
+                        <form
+                          className="mt-3"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const v = String(new FormData(e.currentTarget).get("title") ?? "").trim();
+                            if (v !== (m.title ?? "")) retitle.mutate({ id: m.id, title: v || null });
+                            setTitling(null);
+                          }}
+                        >
+                          <Input autoFocus name="title" defaultValue={m.title ?? ""} placeholder={`${label(m)}'s job title, e.g. Senior accountant`} aria-label="Job title" onFocus={(e) => e.currentTarget.select()} onBlur={(e) => e.currentTarget.form?.requestSubmit()} onKeyDown={(e) => e.key === "Escape" && setTitling(null)} />
+                        </form>
+                      )}
                       {picking === m.id && (
                         <Combobox
                           items={[null, ...(team.data ?? []).filter((x) => x.id !== m.id)]}
@@ -275,22 +287,6 @@ export function TeamPage() {
                       )}
                     </li>
                   ))}
-                  {/* someone with a team file who doesn't sign in (a freelancer): shown, not managed here */}
-                  {(view === "people" || shown.length <= FEW) &&
-                    notHere.map((f) => (
-                      <li key={f.path} className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <Person file={f} onOpen={openFile}>
-                            <Avatar name={f.title} />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium">{f.title}</div>
-                              <FileLine f={f} does={doesFor(f)} />
-                            </div>
-                          </Person>
-                          <Badge variant="outline" className="text-muted-foreground">Not on Emplio</Badge>
-                        </div>
-                      </li>
-                    ))}
                 </ul>
               )}
               {shown.length > limit(shown.length) && (
@@ -334,6 +330,7 @@ export function TeamPage() {
               add.mutate({
                 email,
                 name: name || undefined,
+                title: title.trim() || undefined,
                 role: admin ? "admin" : "member",
               });
             }}
@@ -348,6 +345,7 @@ export function TeamPage() {
                 onChange={(e) => setEmail(e.target.value)}
               />
               <Input placeholder="Full name" aria-label="Full name" value={name} onChange={(e) => setName(e.target.value)} />
+              <Input className="sm:col-span-2" placeholder="Job title (optional), e.g. Account manager" aria-label="Job title" value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
             <div className="flex items-center justify-between gap-2">
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -363,30 +361,21 @@ export function TeamPage() {
         </DialogContent>
       </Dialog>
       {confirmDialog}
-      <ThingSheet />
     </div>
   );
 }
 
-// a person, opening their team file when they have one
-function Person({ file, onOpen, children }: { file?: Thing; onOpen: (f: Thing) => void; children: React.ReactNode }) {
-  return file ? (
-    <Button variant="ghost" onClick={() => onOpen(file)} className="h-auto justify-start whitespace-normal font-normal -my-1.5 -ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1.5 pr-0 pl-2 text-left hover:bg-muted/50">
+// a person, opening their notes (company/team/<slug>/index.md: what they're good at, how they like to work)
+function Person({ slug, children }: { slug: string | null; children: React.ReactNode }) {
+  return slug ? (
+    <Link
+      href={`/knowledge?file=${encodeURIComponent(`company/team/${slug}/index.md`)}`}
+      className="-my-1.5 -ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1.5 pr-0 pl-2 text-left hover:bg-muted"
+    >
       {children}
-    </Button>
+    </Link>
   ) : (
     <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
-  );
-}
-
-// what their team file says (role, how much they can take on) and what they look after
-function FileLine({ f, does }: { f: Thing; does: string }) {
-  const about = [f.fields.role, f.fields.capacity ?? f.fields.hours].filter(Boolean).join(" · ");
-  return (
-    <>
-      {about && <div className="truncate text-xs text-muted-foreground">{about}</div>}
-      {does && <div className="truncate text-xs text-muted-foreground/80">{does}</div>}
-    </>
   );
 }
 
@@ -428,7 +417,7 @@ function Agents({ list, searching, limit, makerOf }: { list: AgentInfo[] | undef
               type="button"
               aria-expanded={open}
               onClick={() => setShown(open ? null : a.slug)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
             >
               <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted">
                 <BotIcon className="size-4 text-muted-foreground" />

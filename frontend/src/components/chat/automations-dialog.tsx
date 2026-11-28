@@ -178,7 +178,7 @@ export function AutomationsDialog({
                       a.error
                         ? "bg-destructive"
                         : a.enabled
-                          ? "bg-emerald-500"
+                          ? "bg-primary"
                           : "bg-muted-foreground/40"
                     }`}
                     aria-label={
@@ -218,7 +218,7 @@ export function AutomationsDialog({
                             <span className="truncate">
                               {x.title} <span className="text-muted-foreground">· {x.app}</span>
                             </span>
-                            {!x.allowed && <span className="shrink-0 text-amber-600 dark:text-amber-400">needs your OK</span>}
+                            {!x.allowed && <span className="shrink-0 text-warning">needs your OK</span>}
                           </label>
                         ))
                       ) : (
@@ -236,13 +236,14 @@ export function AutomationsDialog({
                           Last run {at(a.lastRun.startedAt)},{" "}
                           {RUN_LABEL[a.lastRun.status]}
                           {" · "}
-                          <button
-                            type="button"
+                          <Button
+                            variant="link"
+                            size="xs"
                             onClick={() => setRunsOf(a.name)}
-                            className="underline underline-offset-2 hover:text-foreground"
+                            className="h-auto p-0 text-muted-foreground hover:text-foreground"
                           >
                             see runs
-                          </button>
+                          </Button>
                         </>
                       ) : (
                         "Never run"

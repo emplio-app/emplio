@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { SearchHit } from "@emplio/shared";
+import type { RecordHit, SearchHit } from "@emplio/shared";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -40,7 +40,10 @@ function Snippet({ text }: { text: string }) {
   );
 }
 
-// Chats whose title matches, then messages in this person's chats matching what's typed in the sidebar's search box.
+const KIND: Record<RecordHit["kind"], string> = { client: "Client", contact: "Contact", project: "Project", service: "Service", meeting: "Meeting" };
+
+// The clients, contacts, projects, services and meetings they may see, then chats whose title matches, then messages
+// in this person's chats matching what's typed in the sidebar's search box.
 export function SearchResults({ query, onOpen }: { query: string; onOpen: () => void }) {
   const q = useDebounced(query.trim());
   const hits = useQuery({
@@ -48,14 +51,30 @@ export function SearchResults({ query, onOpen }: { query: string; onOpen: () => 
     queryFn: () => api<SearchHit[]>(`/search?${new URLSearchParams({ q })}`),
     enabled: q.length >= 2,
   });
+  const records = useQuery({
+    queryKey: ["search-records", q],
+    queryFn: () => api<RecordHit[]>(`/search/records?${new URLSearchParams({ q })}`),
+    enabled: q.length >= 2,
+  });
 
-  if (q.length < 2 || hits.isPending)
-    return <p className="px-4 py-6 text-sm text-muted-foreground">{q.length < 2 ? "Type to search your chats." : "Searching…"}</p>;
-  if (!hits.data?.length)
+  if (q.length < 2 || hits.isPending || records.isPending)
+    return <p className="px-4 py-6 text-sm text-muted-foreground">{q.length < 2 ? "Type to search clients, projects and your chats." : "Searching…"}</p>;
+  if (!hits.data?.length && !records.data?.length)
     return <p className="px-4 py-6 text-sm text-muted-foreground">Nothing found for &quot;{q}&quot;.</p>;
   return (
     <ul className="grid grid-cols-[minmax(0,1fr)] gap-0.5 px-2 py-2">
-      {hits.data.map((h) => (
+      {records.data?.map((r) => (
+        <li key={`${r.kind}/${r.slug}`}>
+          <Link href={r.href} onClick={onOpen} className="block rounded-md px-2 py-2 hover:bg-sidebar-accent">
+            <div className="flex items-baseline gap-2">
+              <span className="truncate text-sm font-medium">{r.name}</span>
+              <span className="ml-auto shrink-0 text-xs text-muted-foreground">{KIND[r.kind]}</span>
+            </div>
+            {r.line && <p className="truncate text-xs text-muted-foreground">{r.line}</p>}
+          </Link>
+        </li>
+      ))}
+      {hits.data?.map((h) => (
         <li key={h.messageId || h.conversationId}>
           <Link
             href={`/chat/${h.conversationId}${h.messageId ? `#m-${h.messageId}` : ""}`}

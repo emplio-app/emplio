@@ -127,6 +127,41 @@
       "when": 1795628958744,
       "tag": "20261125174918_drop_clients_table",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795753073011,
+      "tag": "20261127041753_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795764627080,
+      "tag": "20261127073027_record_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795766118960,
+      "tag": "20261127075518_private_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795796767800,
+      "tag": "20261127162607_private_tasks_processes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795804433823,
+      "tag": "20261127183353_meetings",
+      "breakpoints": true
     }
   ]
 }

@@ -4,17 +4,17 @@
 // processes whose step is stuck or due, projects due within a week, and what's due later this week. Each opens where
 // it's dealt with. Everything else is done or on track.
 import type { ProcessRun, Task } from "@emplio/shared";
-import { CheckIcon, FolderKanbanIcon, ListTodoIcon, MessageCircleIcon, WorkflowIcon } from "lucide-react";
+import { CheckIcon, ListTodoIcon, MessageCircleIcon, WorkflowIcon } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Monogram } from "@/components/clients/clients-page";
 import { TaskPanel } from "@/components/tasks/tasks-page";
-import { Due, Row, Section, ThingSheet, thingHref } from "@/components/things/things";
+import { Due, RecordSheet, Row, Section } from "@/components/things/things";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useConversations, useMe, useProcessRuns, useTasks, useThings } from "@/lib/api";
+import { useConversations, useMe, useProcessRuns, useProjects, useTasks } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { daysAway, dayText, exactDate } from "@/lib/when";
 import { AskFloat } from "@/components/chat/composer";
@@ -32,7 +32,7 @@ export function TodayPage() {
   const { data: me } = useMe();
   const tasks = useTasks();
   const runs = useProcessRuns();
-  const things = useThings();
+  const projectList = useProjects();
   const { data: conversations } = useConversations();
   const main = conversations?.find((c) => c.kind === "main");
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -45,11 +45,9 @@ export function TodayPage() {
   const waiting = mine.filter((t) => t.status === "waiting").sort(byDue);
   const week = mine.filter((t) => t.status !== "waiting" && days(t) > 0 && days(t) < 7).sort(byDue);
   const stuck = (runs.data ?? []).filter((r) => r.current && (r.current.status === "waiting" || days(r.current) < 7)).sort((a, b) => byDue(a.current!, b.current!));
-  const projects = (things.data ?? [])
-    .filter((p) => p.kind === "projects" && p.fields.due && daysAway(p.fields.due) <= 7 && !/^(done|complete|completed|closed|finished|cancell?ed)$/i.test(p.fields.status ?? ""))
-    .sort((a, b) => a.fields.due!.localeCompare(b.fields.due!));
-  const titles = new Map((things.data ?? []).map((t) => [t.path, t.title]));
-  const loading = tasks.isPending || runs.isPending || things.isPending;
+  // open ones (the list's default), due within a week or late
+  const projects = (projectList.data ?? []).filter((p) => p.status === "active" && p.dueOn && daysAway(p.dueOn) <= 7).sort((a, b) => a.dueOn!.localeCompare(b.dueOn!));
+  const loading = tasks.isPending || runs.isPending || projectList.isPending;
   const nothing = !late.length && !today.length && !waiting.length && !week.length && !stuck.length && !projects.length;
 
   const hour = new Date().getHours();
@@ -70,7 +68,7 @@ export function TodayPage() {
   // late on our side in red; late on someone else's (waiting) in the app's waiting amber
   const when = (t: { dueAt: string | null }, tone?: "late" | "overdue" | "soft") =>
     t.dueAt ? (
-      <span title={exactDate(t.dueAt)} className={cn(tone === "late" ? "font-medium text-destructive" : tone === "overdue" ? "font-medium text-amber-700 dark:text-amber-300" : tone === "soft" ? "text-muted-foreground" : "text-foreground")}>
+      <span title={exactDate(t.dueAt)} className={cn(tone === "late" ? "font-medium text-destructive" : tone === "overdue" ? "font-medium text-warning" : tone === "soft" ? "text-muted-foreground" : "text-foreground")}>
         {dayText(t.dueAt, { late: tone === "late" || tone === "overdue" })}
       </span>
     ) : null;
@@ -99,7 +97,7 @@ export function TodayPage() {
               ))}
             </div>
           ) : nothing ? (
-            <div className="grid justify-items-center gap-2 rounded-2xl border border-dashed px-6 py-14 text-center">
+            <div className="grid justify-items-center gap-2 rounded-xl border border-dashed px-6 py-14 text-center">
               <span className="grid size-12 place-items-center rounded-full bg-muted">
                 <CheckIcon className="size-5 text-muted-foreground" />
               </span>
@@ -119,20 +117,17 @@ export function TodayPage() {
               <Few
                 title="Projects due soon"
                 list={projects}
-                row={(p) => {
-                  const client = /\[\[(clients\/[a-z0-9-]+)\]\]/.exec(p.fields.client ?? "")?.[1];
-                  return (
-                    <li key={p.path}>
-                      <Row
-                        href={thingHref(p.path) ?? undefined}
-                        lead={client ? <Monogram c={{ slug: client.slice(8), name: titles.get(client) ?? client.slice(8) }} size="sm" /> : <Tile icon={FolderKanbanIcon} />}
-                        title={p.title}
-                        meta={client && titles.get(client)}
-                        right={<Due due={p.fields.due} />}
-                      />
-                    </li>
-                  );
-                }}
+                row={(p) => (
+                  <li key={p.id}>
+                    <Row
+                      href={`?open=${encodeURIComponent(`projects/${p.slug}`)}`}
+                      lead={<Monogram c={p.client} size="sm" />}
+                      title={p.name}
+                      meta={[p.client.name, p.lead && `${p.lead.name} leads`].filter(Boolean).join(" · ")}
+                      right={<Due due={p.dueOn!} />}
+                    />
+                  </li>
+                )}
               />
               <Few title="Later this week" list={week} row={(t) => taskRow(t, when(t, "soft"))} />
             </>
@@ -143,7 +138,7 @@ export function TodayPage() {
         <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">{taskId && <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} />}</SheetContent>
       </Sheet>
       {/* a project opened here (?open=projects/x) */}
-      <ThingSheet />
+      <RecordSheet />
     </div>
   );
 }
@@ -185,7 +180,7 @@ function RunRow({ r, onOpen }: { r: ProcessRun; onOpen: () => void }) {
           <span className="flex min-w-0 items-center gap-2">
             <span className="flex w-12 shrink-0 gap-0.5" aria-label={`Step ${r.step + 1} of ${r.steps.length}`}>
               {r.steps.map((_, i) => (
-                <span key={i} className={cn("h-1 flex-1 rounded-full", i < r.step ? "bg-primary" : i === r.step ? (c.status === "waiting" ? "bg-amber-500" : "bg-primary/40") : "bg-muted-foreground/20")} />
+                <span key={i} className={cn("h-1 flex-1 rounded-full", i < r.step ? "bg-primary" : i === r.step ? (c.status === "waiting" ? "bg-warning" : "bg-primary/40") : "bg-muted-foreground/20")} />
               ))}
             </span>
             <span className="truncate">

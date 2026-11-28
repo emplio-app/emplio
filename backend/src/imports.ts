@@ -274,7 +274,9 @@ const sortingNotes = (ctx: Ctx, label: string, dir: string, chats: number) => `$
   chats ? `, and ${chats} of their old ${label} chats are saved as their archived chats (\`emplio history search <words>\` finds them; skim them only for what the files don't already say)` : ""
 }.
 Sort it the way you sort anything you learn:
-- About the business (clients, people at work, suppliers, prices, decisions, how work is done): company/knowledge/, one file per client, person or topic. Add to files that are already there instead of making duplicates, and mark each line "(from ${label}, <date if known>)".
+- The business's clients, their people, projects, services it sells and past meetings: records, not loose files. Look first (\`emplio clients list\`, \`emplio contacts list\` and the like; \`emplio search <name>\`), then add what's missing (\`emplio clients add "<name>"\`, \`emplio contacts add\`, \`emplio projects add\`, \`emplio services add\`, \`emplio meetings add\`; each one's help has the options) and put what was known about each in the notes file the command gives.
+- Everything else about the business (people at work, suppliers, prices, decisions, how work is done): company/knowledge/, one file per person or topic.
+- Either way: add to what's already there instead of making duplicates, and mark each line "(from ${label}, <date if known>)".
 - About ${ctx.userName}: me/profile.md; how they like things done (including tone and rules from persona or instruction files like SOUL.md, AGENTS.md or custom instructions): me/preferences.md. Never company/AGENT.md.
 - Their private life (family, health, personal money): me/notes/, never company files.
 - Finance, HR or owner-only matters: restricted/ if you can see it, me/notes/ if not.

@@ -66,7 +66,7 @@ const ICONS = { work: BrainIcon, memory: MessagesSquareIcon, computer: MonitorIc
 // sits just above the row's bottom border (inside its p-2, which the sideways scroll clips to), not up the tab's right edge.
 // A phone is too narrow for all seven: the row scrolls sideways.
 const TAB =
-  "h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-[0.95rem] [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px] max-sm:after:inset-x-0! max-sm:after:top-auto! max-sm:after:-bottom-2! max-sm:after:h-0.5! max-sm:after:w-auto!";
+  "h-9 px-1.5 text-xs sm:h-11 sm:flex-none sm:gap-2.5 sm:px-3 sm:text-base [&_svg]:max-sm:hidden sm:[&_svg:not([class*='size-'])]:size-[18px] max-sm:after:inset-x-0! max-sm:after:top-auto! max-sm:after:-bottom-2! max-sm:after:h-0.5! max-sm:after:w-auto!";
 
 // what Quality shows once any model was picked by hand
 const CUSTOM = "custom";
@@ -112,7 +112,7 @@ function QualityNote({
         `Picked by hand: ${picked
           .map((p) => `${p.label} (${models?.find((m) => m.id === p.model)?.name ?? p.model})`)
           .join(", ")}. Choosing a Quality resets them. `}
-      <Button variant="link" size="xs" className="h-auto p-0 text-xs" onClick={onCustomize}>
+      <Button variant="link" size="xs" className="h-auto p-0" onClick={onCustomize}>
         {picked.length ? "Change models" : "Pick models yourself"}
       </Button>
     </p>

@@ -16,6 +16,10 @@ import { availableApps } from "./integrations";
 import { listTeam } from "./team";
 import { listAgents } from "./agents";
 import { listClients, notesPath } from "./clients";
+import { notesDir } from "./private";
+import { listContacts } from "./contacts";
+import { listProjects } from "./projects";
+import { listServices } from "./services";
 
 type Who = Pick<Ctx, "workspaceId" | "userId" | "role">;
 const PER_KIND = 4;
@@ -46,9 +50,20 @@ async function fileMentions(who: Who): Promise<Mention[]> {
   });
 }
 
-// clients (their files), plus records in other folders; id is the file path
+// clients, contacts, projects and services (the database's, by name), plus records in other folders; id is the notes path
 async function clientMentions(who: Who, files: Mention[]): Promise<Mention[]> {
-  const listed = (await listClients(who).catch(() => [])).map((c): Mention => ({ kind: "record", id: notesPath(c), label: c.name, detail: `Client · ${c.stage}` }));
+  const [clients, contacts, projects, services] = await Promise.all([
+    listClients(who).catch(() => []),
+    listContacts(who).catch(() => []),
+    listProjects(who, { open: true }).catch(() => []),
+    listServices(who).catch(() => []),
+  ]);
+  const listed: Mention[] = [
+    ...clients.map((c): Mention => ({ kind: "record", id: notesPath(c), label: c.name, detail: `Client · ${c.stage}` })),
+    ...contacts.map((c): Mention => ({ kind: "record", id: `${notesDir("contact", c)}/index.md`, label: c.name, detail: ["Contact", c.clients[0]?.name].filter(Boolean).join(" · ") })),
+    ...projects.map((p): Mention => ({ kind: "record", id: `${notesDir("project", p)}/index.md`, label: p.name, detail: `Project · ${p.client.name}` })),
+    ...services.map((s): Mention => ({ kind: "record", id: `${notesDir("service", s)}/index.md`, label: s.name, detail: "Service" })),
+  ];
   const ids = new Set(listed.map((m) => m.id));
   return [...listed, ...files.filter((f) => f.kind === "record" && !ids.has(f.id))];
 }
@@ -188,7 +203,9 @@ export async function describeMentions(who: Who, picked: unknown): Promise<strin
       case "record":
         return m.detail?.startsWith("Client")
           ? [`- @${m.label}: the client ${m.label}; their notes are in /work/${m.id} (may not exist yet) and their open tasks and who handles them: emplio clients show "${m.label}". Read both first.`]
-          : [`- @${m.label}: ${m.detail?.toLowerCase()}; their notes are in /work/${m.id}: read it first.`];
+          : /^(Contact|Project|Service)/.test(m.detail ?? "")
+            ? [`- @${m.label}: the ${m.detail!.split(" · ")[0]!.toLowerCase()} ${m.label}${m.detail!.includes(" · ") ? ` (${m.detail!.split(" · ")[1]})` : ""}; everything on it: emplio ${m.detail!.split(" · ")[0]!.toLowerCase()}s show ${m.id.split("/")[2]}; notes (may not exist yet): /work/${m.id}.`]
+            : [`- @${m.label}: ${m.detail?.toLowerCase()}; their notes are in /work/${m.id}: read it first.`];
       case "file":
         return [`- @${m.label}: the file /work/${m.id}; use this exact one.`];
       case "chat":

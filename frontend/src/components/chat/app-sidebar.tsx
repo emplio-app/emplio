@@ -181,7 +181,11 @@ export function AppSidebar() {
         <div className="px-1">
           <Logo href={main ? `/chat/${main.id}` : "/home"} onClick={() => setOpenMobile(false)} />
         </div>
-        <SidebarMenu>
+      </SidebarHeader>
+
+      {/* everything between the logo and the foot scrolls as one: the menu and the chats */}
+      <SidebarContent className="px-1">
+        <SidebarMenu className="px-2">
           {/* what needs a look today, across every client */}
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -248,7 +252,7 @@ export function AppSidebar() {
                 {!!waitingOnMe && (
                   <span
                     title={`${waitingOnMe} waiting on you`}
-                    className="grid h-5 min-w-5 place-items-center rounded-md bg-amber-500/15 px-1 text-amber-700 dark:text-amber-300"
+                    className="grid h-5 min-w-5 place-items-center rounded-md bg-warning/10 px-1 text-warning"
                   >
                     {waitingOnMe}
                   </span>
@@ -280,9 +284,6 @@ export function AppSidebar() {
           {/* the rest, folded away so the menu stays short; open while one of them is the page */}
           <MoreItems pathname={pathname} onOpen={() => setOpenMobile(false)} />
         </SidebarMenu>
-      </SidebarHeader>
-
-      <SidebarContent className="px-1">
         <SidebarGroup className="pb-0">
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarMenu>
@@ -302,15 +303,16 @@ export function AppSidebar() {
                   onKeyDown={(e) => e.key === "Escape" && closeSearch()}
                   className="h-9 w-full rounded-md bg-background pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label="Close search"
                   title="Close search"
                   onClick={closeSearch}
-                  className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
                 >
                   <XIcon className="size-4" />
-                </button>
+                </Button>
               </>
             ) : (
               <>
@@ -484,7 +486,7 @@ const MORE = [
   { href: "/contacts", label: "Contacts", icon: ContactIcon, tip: undefined },
   { href: "/services", label: "Services", icon: BriefcaseIcon, tip: undefined },
   { href: "/processes", label: "Processes", icon: WorkflowIcon, tip: "processes" },
-  { href: "/knowledge", label: "Memory", icon: BookOpenIcon, tip: "memory", also: ["/files", "/database"] },
+  { href: "/knowledge", label: "Memory", icon: BookOpenIcon, tip: "memory", also: ["/brain", "/files", "/database"] },
   { href: "/team", label: "Team", icon: UsersIcon, tip: "team" },
 ];
 function MoreItems({ pathname, onOpen }: { pathname: string; onOpen: () => void }) {
@@ -543,7 +545,7 @@ function JobRows({ jobs, pathname, onOpen, onClose }: { jobs: JobSummary[]; path
             {j.status === "working" ? (
               <Spinner className="ml-auto size-3 shrink-0 text-muted-foreground" aria-label="Working" />
             ) : j.status === "asking" ? (
-              <CircleHelpIcon className="ml-auto size-3 shrink-0 text-amber-500" aria-label="Has a question" />
+              <CircleHelpIcon className="ml-auto size-3 shrink-0 text-warning" aria-label="Has a question" />
             ) : j.status === "failed" ? (
               <XIcon className="ml-auto size-3 shrink-0 text-destructive" aria-label="Failed" />
             ) : null}

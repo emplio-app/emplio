@@ -3,39 +3,23 @@
 // blob sha changed; a repo never indexed is filled on its first search. Text files only (TEXT below), up to MAX_BYTES each. Who may search which repo is the
 // caller's to decide. The agent's own chats search the files on their computer instead (emplio search); this is
 // for what has no computer, like the chat review.
-import { isWon } from "@emplio/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import { fileIndex } from "./db/schema";
 import { listPaths, readFile } from "./gitea";
 import { toQuery } from "./search";
-import { readTop } from "./things";
 
 // .media: the pointer to a big file kept in storage, with its name and, for a document, its words
 const TEXT = /\.(md|txt|csv|tsv|json|jsonl|ya?ml|toml|ini|html?|xml|py|js|mjs|ts|sh|sql|media)$|(^|\/)[^./]+$/i;
 const MAX_BYTES = 200_000;
 
 const syncing = new Map<string, Promise<unknown>>();
-// A client's page (company/clients/<slug>/index.md) new as active, or moved from prospect to active, however it was written
-// (emplio clients, the app, Emplio editing it by hand): the new-client automations run for them, here only, so never
-// twice. A repo's first indexing starts nothing.
-// A top that doesn't read at all has no stage (null): it starts nothing. A warning in one that reads (a link
-// unquoted) doesn't stop it.
-const stageOf = (text: string) => {
-  const t = readTop(text);
-  return t.problems.length && !Object.keys(t.values).length ? null : String(t.values.stage ?? "").toLowerCase() || "active";
-};
-const CLIENT_FILE = /^clients\/([a-z0-9][a-z0-9-]*)\/index\.md$/;
-// the same client's file where it was before (clients/<slug>.md, knowledge/clients/): moved there isn't new
-const WAS_CLIENT = /^(?:knowledge\/)?clients\/([a-z0-9][a-z0-9-]*)(?:\/index)?\.md$/;
-
 export function syncFiles(workspaceId: string, repo: string) {
   const key = `${workspaceId}/${repo}`;
-  const won: string[] = [];
   const run = (syncing.get(key) ?? Promise.resolve()).then(async () => {
     const files = (await listPaths(workspaceId, repo)).filter((f) => TEXT.test(f.path) && f.size <= MAX_BYTES);
     const rows = await db
-      .select({ path: fileIndex.path, sha: fileIndex.sha, text: sql<string | null>`case when ${fileIndex.path} ~ ${WAS_CLIENT.source} then ${fileIndex.text} end` })
+      .select({ path: fileIndex.path, sha: fileIndex.sha })
       .from(fileIndex)
       .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo)));
     const gone = rows.filter((r) => !files.some((f) => f.path === r.path)).map((r) => r.path);
@@ -47,14 +31,9 @@ export function syncFiles(workspaceId: string, repo: string) {
       if (text === null || text.includes("\0")) continue;
       const values = { workspaceId, repo, path: f.path, sha: f.sha, text, updatedAt: new Date() };
       await db.insert(fileIndex).values(values).onConflictDoUpdate({ target: [fileIndex.workspaceId, fileIndex.repo, fileIndex.path], set: values });
-      const slug = repo === "company" && rows.length ? CLIENT_FILE.exec(f.path)?.[1] : undefined;
-      const old = rows.find((r) => r.path === f.path) ?? rows.find((r) => WAS_CLIENT.exec(r.path)?.[1] === slug);
-      if (slug && isWon(stageOf(text) ?? "") && (!old || stageOf(old.text ?? "") === "prospect")) won.push(slug);
     }
   });
   syncing.set(key, run.catch(() => {}));
-  // after this sync, outside the queue: an automation may commit, and wait on the next sync
-  void run.then(() => won.length ? import("./automations").then((a) => Promise.all(won.map((slug) => a.forNewClient(workspaceId, slug)))) : undefined).catch((error) => console.error("new-client automations failed", error));
   return run;
 }
 

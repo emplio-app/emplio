@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Client, ConversationSummary, MeResponse, Process, ProcessRun, Task, Thing, ThingKind, ThingPage } from "@emplio/shared";
+import type { Client, ClientField, FieldKind, ClientPage, ClientStage, Contact, ConversationSummary, HistoryEntry, MeResponse, Process, ProcessRun, Project, Service, Task } from "@emplio/shared";
 import { WebSocketChatTransport } from "ai";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const API_URL =
@@ -27,14 +27,22 @@ export async function api<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? data.message ?? "Something went wrong");
+  if (!res.ok) throw Object.assign(new Error(data.error ?? data.message ?? "Something went wrong"), { match: data.match as Match | undefined });
   return data as T;
 }
+// a record a new one looks like (backend records.ts Match): the app offers to open it, or add anyway
+export type Match = { slug: string; name: string; archived: boolean };
+export const matchIn = (e: unknown) => (e as { match?: Match } | null)?.match;
+// a change refused because someone changed it after it was read (backend records.ts stale): shown, then the latest
+export const isStale = (e: unknown) => /after you read it/.test((e as Error | null)?.message ?? "");
 
 export const meQueryKey = ["me"];
 export const conversationsQueryKey = ["conversations"];
 export const tasksQueryKey = ["tasks"];
-export const clientsQueryKey = ["clients"];
+// every record list and page (clients, contacts, projects, services, stages, fields) sits under this, so a change
+// to one refreshes them all: a project's change shows on its client's page
+export const recordsQueryKey = ["records"];
+export const clientsQueryKey = ["records", "clients"];
 // each chat's Allow cards (approval-card.tsx), under ["approvals", chat id]
 export const approvalsQueryKey = ["approvals"];
 export const versionQueryKey = ["version"];
@@ -50,13 +58,67 @@ export const processRunsQueryKey = ["process-runs"];
 export function useProcesses() {
   return useQuery({ queryKey: processesQueryKey, queryFn: () => api<Process[]>("/processes") });
 }
-// A thing (clients/northwind) with what links to it: a client's contacts and projects
-export function useThingPage(path: string, enabled = true) {
-  return useQuery({ queryKey: ["things", path], queryFn: () => api<ThingPage>(`/things/page?path=${encodeURIComponent(path)}`), enabled });
+const list = (f: Record<string, string | boolean | undefined>) => {
+  const q = new URLSearchParams(Object.entries(f).flatMap(([k, v]) => (v ? [[k, v === true ? "1" : v]] : [])));
+  return q.size ? `?${q}` : "";
+};
+// Everything about one client: its contacts, projects, open work, runs, meetings, notes and history
+export function useClientPage(slug: string) {
+  return useQuery({ queryKey: [...recordsQueryKey, "client", slug], queryFn: () => api<ClientPage>(`/clients/${encodeURIComponent(slug)}/page`) });
 }
-// Every thing of a kind (projects, contacts, team), or all of them, with their fields and links
-export function useThings(kind?: ThingKind) {
-  return useQuery({ queryKey: ["things", "list", kind ?? "all"], queryFn: () => api<Thing[]>(`/things${kind ? `?kind=${kind}` : ""}`) });
+export function useArchivedClients(enabled: boolean) {
+  return useQuery({ queryKey: [...clientsQueryKey, "archived"], queryFn: () => api<Client[]>("/clients?archived=1"), enabled });
+}
+export function useStages() {
+  return useQuery({ queryKey: [...recordsQueryKey, "stages"], queryFn: () => api<ClientStage[]>("/client-stages") });
+}
+// the business's own fields on one kind of record
+export function useFields(kind: FieldKind = "client") {
+  return useQuery({ queryKey: [...recordsQueryKey, "fields", kind], queryFn: () => api<ClientField[]>(`/fields/${kind}`) });
+}
+export function useContacts(f: { client?: string; archived?: boolean } = {}) {
+  return useQuery({ queryKey: [...recordsQueryKey, "contacts", f], queryFn: () => api<Contact[]>(`/contacts${list(f)}`) });
+}
+export function useProjects(f: { client?: string; archived?: boolean; all?: boolean } = {}) {
+  return useQuery({ queryKey: [...recordsQueryKey, "projects", f], queryFn: () => api<Project[]>(`/projects${list(f)}`) });
+}
+export function useServices(f: { archived?: boolean } = {}) {
+  return useQuery({ queryKey: [...recordsQueryKey, "services", f], queryFn: () => api<Service[]>(`/services${list(f)}`) });
+}
+// one contact, project or service with its history (and a project's tasks)
+export function useRecord<T>(kind: "contacts" | "projects" | "services", slug: string | null) {
+  return useQuery({
+    queryKey: [...recordsQueryKey, kind, "one", slug],
+    queryFn: () => api<T & { history: HistoryEntry[] }>(`/${kind}/${encodeURIComponent(slug!)}`),
+    enabled: !!slug,
+  });
+}
+// a change to any record: refetch every record list and page, and the tasks (a project's move takes its tasks along)
+// silent: the caller shows the error (an add form offering the close match)
+const SAVE_FAILED = "emplio:save-failed";
+// A field's own copy of a saved value: follows the saved one, and goes back to it when a save is refused
+export function useSaved(value: string) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  useEffect(() => {
+    const back = () => setV(value);
+    window.addEventListener(SAVE_FAILED, back);
+    return () => window.removeEventListener(SAVE_FAILED, back);
+  }, [value]);
+  return [v, setV] as const;
+}
+export function useSaveRecord<In, Out = unknown>(fn: (input: In) => Promise<Out>, o: { done?: (out: Out) => void; silent?: boolean } = {}) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (out) => o.done?.(out),
+    onError: (e) => {
+      // a field left showing what was refused goes back to what's saved (useSaved)
+      window.dispatchEvent(new Event(SAVE_FAILED));
+      if (!o.silent) toast.error(isStale(e) ? `${e.message.split(" at ")[0]} just now. Here's the latest; make your change again.` : e.message.replace(/^./, (c) => c.toUpperCase()));
+    },
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: recordsQueryKey }), qc.invalidateQueries({ queryKey: tasksQueryKey }), qc.invalidateQueries({ queryKey: processRunsQueryKey })]),
+  });
 }
 export function useProcessRuns(f: { process?: string; client?: string; all?: boolean } = {}) {
   const q = new URLSearchParams({ ...(f.process && { process: f.process }), ...(f.client && { client: f.client }), ...(f.all && { all: "1" }) });

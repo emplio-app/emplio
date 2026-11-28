@@ -1,467 +1,703 @@
-// Clients: who the business works for, at what stage (prospect, active, past) and who on the team handles each. All
-// of it is their page, company/clients/<slug>/index.md (things.ts): name, stage, handler (a list of "[[team/<name>]]"
-// links) and their details (any other key) in the YAML at the top, their notes below; tasks, process runs and chats point at the slug, which stays
-// when they're renamed. The web app's Clients page and `emplio clients` change the file here, each change a commit.
-// Everyone on the team sees them and may add one; changing or removing is for the owner and admins (details: anyone).
-import { and, eq, inArray, sql } from "drizzle-orm";
+// Clients: who the business works for. Rows (records.ts says the rules every record keeps): a name, a stage from the
+// business's own list (client_stages: Onboarding, Retainer, On hold, each a prospect, active or past one), who on the
+// team handles them, and the business's own client fields (client_fields: Tax number, Files) filled in. Their notes
+// are the file company/clients/<slug>/index.md, words only. Tasks, process runs, chats and projects point at the id.
+// Anyone adds clients and fills in their fields; the stage, who handles them, archiving and the lists of stages and
+// fields are the owner's and admins'; deleting for good is the owner's alone, and only for one nothing points at.
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { isWon, STAGE_RULE, type Client, type ClientDetail, type ClientInput, type ClientStage, type Role, type TeamMember, type Thing } from "@emplio/shared";
-import { record } from "./activity";
+import {
+  STAGE_CATEGORIES,
+  type Client,
+  type ClientDetail,
+  type ClientField,
+  type ClientInput,
+  type ClientPage,
+  type ClientStage,
+  type StageCategory,
+} from "@emplio/shared";
 import { context } from "./auth";
 import { db } from "./db";
-import { conversations, processRuns, tasks } from "./db/schema";
-import { syncFiles } from "./file-index";
-import { editFile, readFile, UPKEEP, writeFiles } from "./gitea";
+import { detailKey, detailsOf, fieldsCommand, listFields, nextDetails } from "./fields";
+import { notesDir, setPrivate, notesAt } from "./private";
+import { clientHandlers, clients, clientStages, contactClients, conversations, processRuns, projects, tasks, users } from "./db/schema";
+import { linkedFrom } from "./knowledge";
 import { listTeam } from "./team";
-import { parseDocument, isMap, isScalar } from "yaml";
-import { listThings, thingFile, thingPage, TOP, words as titleOf } from "./things";
+import { purging,
+  clean,
+  closeMatch,
+  count,
+  diff,
+  findIn,
+  freeSlug,
+  historyOf,
+  isAdmin,
+  logChange,
+  parseArgs,
+  personIn,
+  slugOf,
+  stale,
+  type Tx,
+  type Who, matchOf, type Match, privateOf, seesPrivate, type Viewer, wsOf, say, visibleClient, visibleProject } from "./records";
 
-type Who = { workspaceId: string; userId: string; role: Role };
-type Result = { ok: true; client: Client } | { ok: false; error: string };
-type File = { path: string; content: string };
+export { slugOf, detailKey };
+type Result = { ok: true; client: Client } | { ok: false; error: string; match?: Match };
+type Row = typeof clients.$inferSelect;
 
-const isAdmin = (w: Who) => w.role !== "member";
 export const FOLDER = "clients";
-export const notesPath = (c: { slug: string }) => `company/${thingFile(`${FOLDER}/${c.slug}`)}`;
+export const notesPath = (c: { slug: string; private?: boolean }) => `${notesDir("client", c)}/index.md`;
+const OPEN = ["todo", "doing", "waiting"] as const;
 
-// "Acme Foods Pvt. Ltd." -> "acme-foods-pvt-ltd": the notes file's name
-export const slugOf = (name: string) =>
-  name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+export const detailOf = (c: { details: ClientDetail[] }, name: string) => c.details.find((d) => d.key === detailKey(name) || detailKey(d.name) === detailKey(name))?.value;
 
-// "Contact email" → contact-email: how a detail matches a process input of the same name (processes.ts inputKey)
-export const detailKey = (name: string) =>
-  name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-export const detailOf = (c: { details: ClientDetail[] }, name: string) => c.details.find((d) => detailKey(d.name) === detailKey(name))?.value;
+// --- stages ---
 
-// the keys at the top of a client's file that aren't details
-const KEPT = ["name", "stage", "handler"];
+const SEED: [string, StageCategory][] = [
+  ["Prospect", "prospect"],
+  ["Active", "active"],
+  ["Past", "past"],
+];
 
-// The changes laid over what's there: a new name added at the end, a known one (any case) given its new value, "" or
-// null removing it. A string is what's wrong.
-export function mergeDetails(old: ClientDetail[], given: Record<string, string | null>): ClientDetail[] | string {
-  const out = [...old];
-  for (const [raw, v] of Object.entries(given)) {
-    const name = raw.trim();
-    if (!detailKey(name)) return `"${raw}" isn't a name for a detail`;
-    if (name.length > 60) return `a detail's name is at most 60 characters (${name.slice(0, 20)}…)`;
-    if (!/^[a-z][\w -]*$/i.test(name)) return `"${raw}": a detail's name starts with a letter and has only letters, digits, spaces and dashes`;
-    if (KEPT.includes(name.toLowerCase())) return `${name} isn't a detail: --${name.toLowerCase()}`;
-    // one line in the file
-    const value = (v ?? "").replace(/\s+/g, " ").trim();
-    if (value.length > 500) return `${name} is at most 500 characters`;
-    const i = out.findIndex((d) => detailKey(d.name) === detailKey(name));
-    if (!value) {
-      if (i >= 0) out.splice(i, 1);
-    } else if (i >= 0) out[i] = { name, value };
-    else out.push({ name, value });
+export async function listStages(workspaceId: string): Promise<ClientStage[]> {
+  const read = () => db.select().from(clientStages).where(eq(clientStages.workspaceId, workspaceId)).orderBy(asc(clientStages.position), asc(clientStages.name));
+  let rows = await read();
+  if (!rows.length) {
+    // every business starts with these three; renamed, added to or removed from in Settings
+    await db.insert(clientStages).values(SEED.map(([name, category], position) => ({ workspaceId, name, category, position }))).onConflictDoNothing();
+    rows = await read();
   }
-  return out.length > 50 ? "a client has at most 50 details" : out;
+  return rows.map(({ id, name, category, position }) => ({ id, name, category, position }));
 }
 
-// A schedule's clients: list: all (*), names, and Detail=value (every active client with that detail, any case)
-export function pickClients<T extends { slug: string; name: string; stage: string; details: ClientDetail[] }>(all: T[], list: string[]): T[] {
+// By name (any case), or a category's word (active: the first active stage). A string is what's wrong.
+export function stageIn(all: ClientStage[], q: string): ClientStage | string {
+  const s = clean(q).toLowerCase();
+  const hit = all.find((x) => x.name.toLowerCase() === s) ?? all.find((x) => x.category === s) ?? all.find((x) => slugOf(x.name) === slugOf(s));
+  return hit ?? `"${q}" isn't one of this business's stages: ${all.map((x) => x.name).join(", ")} (an owner or admin adds one: emplio clients stages add "${clean(q)}" --category prospect|active|past)`;
+}
+
+// --- reading ---
+
+export async function listClients(v: Viewer, f: { archived?: boolean; ids?: string[]; category?: StageCategory } = {}): Promise<Client[]> {
+  const w = { workspaceId: wsOf(v) };
+  const where: (SQL | undefined)[] = [eq(clients.workspaceId, w.workspaceId), f.archived ? isNotNull(clients.archivedAt) : isNull(clients.archivedAt)];
+  // a private one only to owners, admins and whoever handles them
+  where.push(visibleClient(v, clients.id, clients.private));
+  if (f.ids) where.push(f.ids.length ? inArray(clients.id, f.ids) : sql`false`);
+  if (f.category) where.push(eq(clientStages.category, f.category));
+  const [rows, fields] = await Promise.all([
+    db
+      .select({ c: clients, stage: clientStages.name, category: clientStages.category })
+      .from(clients)
+      .innerJoin(clientStages, eq(clientStages.id, clients.stageId))
+      .where(and(...where))
+      .orderBy(asc(sql`lower(${clients.name})`)),
+    listFields(w.workspaceId, "client"),
+  ]);
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.c.id);
+  const [handlers, work, active] = await Promise.all([
+    db
+      .select({ clientId: clientHandlers.clientId, id: users.id, name: users.name, email: users.email })
+      .from(clientHandlers)
+      .innerJoin(users, eq(users.id, clientHandlers.userId))
+      .where(inArray(clientHandlers.clientId, ids)),
+    db
+      .select({
+        clientId: tasks.clientId,
+        open: sql<number>`count(*) filter (where ${tasks.status} in ('todo', 'doing', 'waiting'))`.mapWith(Number),
+        waiting: sql<number>`count(*) filter (where ${tasks.status} = 'waiting')`.mapWith(Number),
+      })
+      .from(tasks)
+      .where(and(eq(tasks.workspaceId, w.workspaceId), inArray(tasks.clientId, ids)))
+      .groupBy(tasks.clientId),
+    db
+      .select({ clientId: projects.clientId, n: sql<number>`count(*)`.mapWith(Number) })
+      .from(projects)
+      .where(and(inArray(projects.clientId, ids), eq(projects.status, "active"), isNull(projects.archivedAt), visibleProject(v)))
+      .groupBy(projects.clientId),
+  ]);
+  return rows.map(({ c, stage, category }) => ({
+    id: c.id,
+    slug: c.slug,
+    name: c.name,
+    stage,
+    stageCategory: category,
+    handlers: handlers.filter((h) => h.clientId === c.id).map((h) => ({ id: h.id, name: h.name ?? h.email })),
+    details: detailsOf(fields, c.details),
+    openTasks: work.find((x) => x.clientId === c.id)?.open ?? 0,
+    waitingTasks: work.find((x) => x.clientId === c.id)?.waiting ?? 0,
+    activeProjects: active.find((x) => x.clientId === c.id)?.n ?? 0,
+    externalIds: c.externalIds,
+    private: c.private,
+    archivedAt: c.archivedAt?.toISOString() ?? null,
+    updatedAt: c.updatedAt.toISOString(),
+  }));
+}
+
+// By slug, exact name, then a unique part of a name; archived ones only when nothing current matches.
+// ponytail: loads the business's clients to look; a firm with 10k+ wants a query of its own
+export async function findClient(v: Viewer, q: string, exact = false): Promise<Client | string> {
+  const hit = findIn(await listClients(v), q, "client", exact);
+  if (typeof hit !== "string") return hit;
+  const old = findIn(await listClients(v, { archived: true }), q, "client", true);
+  return typeof old === "string" ? hit : old;
+}
+const one = async (workspaceId: string, id: string, archived = false) => (await listClients(workspaceId, { ids: [id], archived }))[0]!;
+
+// A schedule's clients: list: all (*), names, and Field=value (every active client with that value, any case)
+export function pickClients<T extends { slug: string; name: string; stageCategory: StageCategory; details: ClientDetail[] }>(all: T[], list: string[]): T[] {
   const wanted = list.map((c) => c.trim().toLowerCase());
-  if (wanted.includes("*")) return all.filter((c) => isWon(c.stage));
+  const working = (c: T) => c.stageCategory === "active";
+  if (wanted.includes("*")) return all.filter(working);
   const byDetail = wanted.flatMap((w) => (w.includes("=") ? [w.split("=").map((s) => s.trim()) as [string, string]] : []));
   return all.filter(
     (c) =>
-      (c.stage !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name)))) ||
-      (isWon(c.stage) && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
+      (c.stageCategory !== "past" && (wanted.includes(c.slug) || wanted.includes(c.name.toLowerCase()) || wanted.includes(slugOf(c.name)))) ||
+      (working(c) && byDetail.some(([k, v]) => detailOf(c, k)?.toLowerCase() === v)),
   );
 }
 
+// --- writing ---
 
-// A file's YAML top changed: each key set (in place, any case, else added at the end) or removed (null); other keys,
-// comments and the words below as they were. YAML that doesn't read is left for whoever broke it to fix.
-export function setFields(text: string, set: Record<string, unknown>) {
-  const top = TOP.exec(text);
-  const doc = parseDocument(top?.[1] ?? "");
-  if (doc.errors.length) throw new Error(`the YAML at the top of this file doesn't read (${doc.errors[0]!.message.split("\n")[0]}); fix it first`);
-  for (const [k, v] of Object.entries(set)) {
-    const old = isMap(doc.contents) ? doc.contents.items.find((p) => isScalar(p.key) && String(p.key.value).toLowerCase() === k)?.key : undefined;
-    if (v === null) old && doc.delete(old);
-    else doc.set(old ?? k, v);
+async function handlerIds(w: Who, asked: string[]) {
+  const team = await listTeam(w.workspaceId);
+  const ids: string[] = [];
+  for (const raw of asked) {
+    if (!clean(raw)) continue;
+    const m = personIn(team, raw, w.userId);
+    if (typeof m === "string") return { error: m };
+    ids.push(m.id);
   }
-  const yaml = isMap(doc.contents) && doc.contents.items.length ? String(doc) : "";
-  return `---\n${yaml}---\n${top ? text.slice(top[0].length) : text ? `\n${text}` : ""}`;
+  return { ids: [...new Set(ids)], names: (ids: string[]) => ids.map((id) => team.find((m) => m.id === id)?.name ?? team.find((m) => m.id === id)?.email ?? id) };
 }
 
-// A team file's member: its email: one's, else its name one's (team files written before emails were kept).
-const memberOf = (file: Thing | undefined, team: TeamMember[]) =>
-  file && (team.find((m) => m.email === file.fields.email?.toLowerCase()) ?? team.find((m) => !file.fields.email && m.name?.toLowerCase() === file.title.toLowerCase()));
+// New-client automations run when a client becomes active: added as one, or moved from a prospect stage
+// ponytail: imported when needed; automations.ts reads clients through this file
+const becameActive = (workspaceId: string, slug: string) =>
+  void import("./automations").then((a) => a.forNewClient(workspaceId, slug)).catch((error) => console.error("new-client automations failed", slug, error));
 
-const toClient = (t: Thing, things: Thing[], team: TeamMember[], counts: Map<string | null, { open: number; waiting: number }>): Client => {
-  const slug = t.path.slice(FOLDER.length + 1);
-  const stage = t.fields.stage?.toLowerCase() ?? "";
-  return {
-    slug,
-    name: t.title,
-    stage: STAGE_RULE.test(stage) ? stage : "active",
-    handlers: t.links
-      .filter((l) => l.field === "handler" && l.to.startsWith("team/"))
-      .map((l) => {
-        const file = things.find((x) => x.path === l.to);
-        const m = memberOf(file, team);
-        return { id: m?.id ?? null, name: file?.title ?? m?.name ?? titleOf(l.to.slice(5)), path: l.to };
-      }),
-    // keys are lowercase in the file: shown with a capital
-    details: Object.entries(t.fields).flatMap(([k, value]) => (KEPT.includes(k) ? [] : [{ name: k.charAt(0).toUpperCase() + k.slice(1), value }])),
-    openTasks: counts.get(slug)?.open ?? 0,
-    waitingTasks: counts.get(slug)?.waiting ?? 0,
-  };
+export async function addClient(w: Who, input: ClientInput): Promise<Result> {
+  const name = clean(input.name).slice(0, 200);
+  if (!slugOf(name)) return { ok: false, error: "a client needs a name" };
+  const [stages, fields, current, archived] = await Promise.all([listStages(w.workspaceId), listFields(w.workspaceId, "client"), listClients(w.workspaceId), listClients(w.workspaceId, { archived: true })]);
+  const stage = stageIn(stages, input.stage ?? "active");
+  if (typeof stage === "string") return { ok: false, error: stage };
+  const match = closeMatch([...current, ...archived], name);
+  if (input.private && !isAdmin(w)) return { ok: false, error: "only the owner or an admin can make a client private" };
+  // one they can't see: not named to them
+  if (match?.private && !seesPrivate(w)) return { ok: false, error: "the owner or an admin already keeps a client like that; ask them" };
+  if (match && !input.force)
+    return {
+      ok: false,
+      match: matchOf(match),
+      error: match.archivedAt
+        ? `${match.name} is an archived client; ${say(w, "bring them back from the archived clients, or add a new one anyway", `bring them back with emplio clients restore ${match.slug}, or add a new one with --force`)}`
+        : `did you mean ${match.name}? (emplio clients show ${match.slug}); if this is another client, add it with --force`,
+    };
+  const people = input.handlers ? await handlerIds(w, input.handlers) : null;
+  if (people && "error" in people) return { ok: false, error: people.error! };
+  const slug = freeSlug(name, [...current, ...archived].map((c) => c.slug), "client");
+  const made = await db.transaction(async (tx) => {
+    const d = await nextDetails(tx, w, "client", fields, {}, input.details ?? {});
+    if ("error" in d) return d.error!;
+    const [row] = await tx
+      .insert(clients)
+      .values({ workspaceId: w.workspaceId, slug, name, stageId: stage.id, details: d.details, externalIds: cleanIds({}, input.externalIds), private: !!input.private })
+      .returning();
+    if (people?.ids.length) await tx.insert(clientHandlers).values(people.ids.map((userId) => ({ clientId: row!.id, userId })));
+    await logChange(tx, w, {
+      kind: "client",
+      id: row!.id,
+      clientId: row!.id,
+      summary: `Added client ${name}`,
+      changes: diff(null, { name, stage: stage.name, ...(people?.ids.length && { handlers: people.names(people.ids) }), ...(input.private && { private: true }), ...d.details }, Object.fromEntries(fields.map((f) => [f.key, f.name]))),
+      detail: match ? { forced: true, matched: { slug: match.slug, name: match.name } } : undefined,
+    });
+    return row!;
+  });
+  if (typeof made === "string") return { ok: false, error: made };
+  if (stage.category === "active") becameActive(w.workspaceId, slug);
+  return { ok: true, client: await one(w.workspaceId, made.id) };
+}
+
+const cleanIds = (old: Record<string, string>, given: Record<string, string | null> | undefined) => {
+  const out = { ...old };
+  for (const [k, v] of Object.entries(given ?? {})) {
+    const key = clean(k).toLowerCase();
+    if (!key) continue;
+    if (clean(v)) out[key] = clean(v);
+    else delete out[key];
+  }
+  return out;
 };
 
-export async function listClients(w: Pick<Who, "workspaceId">, f: { stage?: ClientStage } = {}) {
-  const [things, team] = await Promise.all([listThings(w.workspaceId), listTeam(w.workspaceId)]);
-  const files = things.filter((t) => t.kind === FOLDER);
-  if (!files.length) return [];
-  const counts = await db
-    .select({
-      client: tasks.client,
-      open: sql<number>`count(*) filter (where ${tasks.status} in ('todo', 'doing', 'waiting'))`.mapWith(Number),
-      waiting: sql<number>`count(*) filter (where ${tasks.status} = 'waiting')`.mapWith(Number),
-    })
-    .from(tasks)
-    .where(and(eq(tasks.workspaceId, w.workspaceId), inArray(tasks.client, files.map((t) => t.path.slice(FOLDER.length + 1)))))
-    .groupBy(tasks.client);
-  const by = new Map(counts.map((c) => [c.client, c]));
-  return files.map((t) => toClient(t, things, team, by)).filter((c) => !f.stage || c.stage === f.stage);
-}
-
-// By slug or name: exact first, then a unique part of the name. A string is what's wrong.
-export async function findClient(workspaceId: string, q: string, exact = false): Promise<Client | string> {
-  const all = await listClients({ workspaceId });
-  const s = q.trim().toLowerCase();
-  if (!s) return "which client?";
-  // a slug before a name: one named "Acme" kept as acme-2 never stands in for acme
-  const hit = all.find((c) => c.slug === s) ?? all.find((c) => c.slug === slugOf(s)) ?? (exact ? undefined : all.find((c) => c.name.toLowerCase() === s));
-  if (hit) return hit;
-  if (exact) return `no client "${q}"`;
-  const loose = all.filter((c) => c.name.toLowerCase().includes(s) || c.slug.includes(slugOf(s) || s));
-  if (loose.length === 1) return loose[0]!;
-  return loose.length
-    ? `"${q}" matches ${loose.map((c) => c.name).join(", ")}; say which`
-    : `no client "${q}" (emplio clients list; add one with emplio clients add)`;
-}
-
-// Who handles them, as given (a teammate's user id, email or name, "me", or a team file: team/<name>), to their
-// [[team/<name>]] links, with the team files to write for a teammate who has none yet (or whose file has no email:
-// it's how a link finds who to give the work to). A string is what's wrong.
-export async function handlerLinks(workspaceId: string, asked: string[], me: string | null, team: TeamMember[], things: Thing[]): Promise<{ links: string[]; files: File[] } | string> {
-  const people = things.filter((t) => t.kind === "team");
-  const links: string[] = [];
-  const files: File[] = [];
-  for (const raw of asked) {
-    const part = raw.trim().toLowerCase();
-    if (!part) continue;
-    // a team/ link stays as given, its file there or not (a link to nothing yet is only a warning)
-    if (/^team\/[a-z0-9-]+$/.test(part)) {
-      links.push(part);
-      continue;
-    }
-    const hits = part === "me" ? team.filter((m) => m.id === me) : team.filter((m) => m.id === part || m.email === part || m.name?.toLowerCase() === part);
-    const loose = hits.length ? hits : team.filter((m) => m.name?.toLowerCase().includes(part) || m.email.includes(part));
-    const m = loose.length === 1 ? loose[0]! : null;
-    if (!m) {
-      // someone with a team file who isn't a member (a freelancer)
-      const file = people.filter((t) => t.title.toLowerCase() === part);
-      if (!loose.length && file.length === 1) {
-        links.push(file[0]!.path);
-        continue;
+// exact: the app names one by its slug; a part of a name is for chats. Only the fields given change.
+export async function updateClient(w: Who, q: string, input: ClientInput, exact = false): Promise<Result> {
+  const admin = ["name", "stage", "handlers", "externalIds", "private"].filter((k) => input[k as keyof ClientInput] !== undefined);
+  if (!isAdmin(w) && admin.length) return { ok: false, error: `only the owner or an admin can change a client's ${admin.join(", ")} (anyone can fill in their fields)` };
+  const found = await findClient(w, q, exact);
+  if (typeof found === "string") return { ok: false, error: found };
+  if (found.archivedAt) return { ok: false, error: `${found.name} is archived; bring them back first${say(w, "", `: emplio clients restore ${found.slug}`)}` };
+  const [stages, fields] = await Promise.all([listStages(w.workspaceId), listFields(w.workspaceId, "client")]);
+  const stage = input.stage !== undefined ? stageIn(stages, input.stage) : null;
+  if (typeof stage === "string") return { ok: false, error: stage };
+  if (input.name !== undefined && !slugOf(input.name)) return { ok: false, error: "a client needs a name" };
+  const people = input.handlers ? await handlerIds(w, input.handlers) : null;
+  if (people && "error" in people) return { ok: false, error: people.error! };
+  let won = false;
+  const done = await db.transaction(async (tx) => {
+    const [row] = await tx.select().from(clients).where(eq(clients.id, found.id)).for("update");
+    if (!row) return `${found.name} was deleted meanwhile`;
+    const late = await stale(row, input.updatedAt, found.name, "client", w);
+    if (late) return late;
+    const d = input.details ? await nextDetails(tx, w, "client", fields, row.details, input.details) : { details: row.details, added: [] };
+    if ("error" in d) return d.error!;
+    const oldStage = stages.find((s) => s.id === row.stageId)!;
+    const before: Record<string, unknown> = { ...row.details, name: row.name, stage: oldStage.name };
+    const next: Record<string, unknown> = {};
+    if (input.name !== undefined) next.name = clean(input.name).slice(0, 200);
+    if (stage) next.stage = stage.name;
+    for (const k of new Set([...Object.keys(row.details), ...Object.keys(d.details)])) if (row.details[k] !== d.details[k]) next[k] = d.details[k] ?? null;
+    const changes = diff(before, next, Object.fromEntries(fields.map((f) => [f.key, f.name])));
+    if (people) {
+      const had = await tx.select({ userId: clientHandlers.userId }).from(clientHandlers).where(eq(clientHandlers.clientId, row.id));
+      const oldIds = had.map((h) => h.userId).sort();
+      if (oldIds.join() !== [...people.ids].sort().join()) {
+        changes.push({ field: "handlers", from: people.names(oldIds), to: people.names(people.ids) });
+        await tx.delete(clientHandlers).where(eq(clientHandlers.clientId, row.id));
+        if (people.ids.length) await tx.insert(clientHandlers).values(people.ids.map((userId) => ({ clientId: row.id, userId })));
       }
-      return loose.length ? `"${raw}" matches ${loose.map((x) => x.name ?? x.email).join(", ")}; use their email` : `nobody on the team matches "${raw}" (emplio team list)`;
     }
-    const mine = people.find((t) => memberOf(t, team)?.id === m.id);
-    if (mine) {
-      if (!mine.fields.email) files.push({ path: thingFile(mine.path), content: setFields((await readFile(workspaceId, "company", thingFile(mine.path))) ?? "", { email: m.email }) });
-      links.push(mine.path);
-      continue;
-    }
-    // a new team file, under a name no other file has
-    const base = slugOf(m.name ?? m.email.split("@")[0]!) || "teammate";
-    let path = `team/${base}`;
-    for (let n = 2; people.some((t) => t.path === path) || files.some((f) => f.path === thingFile(path)); n++) path = `team/${base}-${n}`;
-    files.push({ path: thingFile(path), content: setFields("", { name: m.name ?? m.email, email: m.email, role: m.role }) });
-    links.push(path);
+    const ids = input.externalIds ? cleanIds(row.externalIds, input.externalIds) : row.externalIds;
+    if (JSON.stringify(ids) !== JSON.stringify(row.externalIds)) changes.push({ field: "external ids", from: row.externalIds, to: ids });
+    if (!changes.length) return null;
+    await tx
+      .update(clients)
+      .set({ name: (next.name as string) ?? row.name, stageId: stage?.id ?? row.stageId, details: d.details, externalIds: ids, updatedAt: new Date() })
+      .where(eq(clients.id, row.id));
+    await logChange(tx, w, { kind: "client", id: row.id, clientId: row.id, summary: `Changed ${changes.map((c) => c.field).join(", ")} of ${row.name}`, changes });
+    won = !!stage && stage.category === "active" && oldStage.category === "prospect";
+    return null;
+  });
+  if (done) return { ok: false, error: done };
+  if (input.private !== undefined && input.private !== found.private) {
+    const e = await setPrivate(w, "client", found.id, input.private);
+    if (e) return { ok: false, error: e };
   }
-  return { links: [...new Set(links)], files };
+  if (won) becameActive(w.workspaceId, found.slug);
+  return { ok: true, client: await one(w.workspaceId, found.id) };
 }
 
-// One commit to the company files as whoever made the change, read back before anything reads them.
-// files: or a change to one file (path), read and written as one step
-type Change = { path: string; content: string | null };
-async function commit(w: Who, files: Change[] | ((text: string | null) => Change[]), message: string, path = "") {
-  const me = (await listTeam(w.workspaceId)).find((m) => m.id === w.userId);
-  const author = me ? { name: me.name ?? me.email, email: me.email } : UPKEEP;
-  if (typeof files === "function") await editFile(w.workspaceId, "company", path, files, message, author);
-  else await writeFiles(w.workspaceId, "company", files, message, author);
-  // this sync also starts the new-client automations for one added as active or won (file-index.ts)
-  await syncFiles(w.workspaceId, "company");
-}
-
-// The file's top lines for what's asked; a string is what's wrong.
-async function changes(w: Who, input: ClientInput, old: Client | null): Promise<{ set: Record<string, unknown>; files: File[] } | string> {
-  if (input.name !== undefined && !slugOf(input.name)) return "a client needs a name";
-  if (input.stage !== undefined) input = { ...input, stage: input.stage.trim().toLowerCase().replace(/\s+/g, " ") };
-  if (input.stage !== undefined && !STAGE_RULE.test(input.stage)) return "stage is a word or two: prospect, active, past, or the business's own (onboarding, on hold)";
-  const set: Record<string, unknown> = {};
-  let files: File[] = [];
-  if (input.name !== undefined) set.name = input.name.replace(/\s+/g, " ").trim();
-  if (input.stage !== undefined) set.stage = input.stage;
-  if (input.handlers !== undefined) {
-    const [team, things] = await Promise.all([listTeam(w.workspaceId), listThings(w.workspaceId, "team")]);
-    const h = await handlerLinks(w.workspaceId, input.handlers, w.userId, team, things);
-    if (typeof h === "string") return h;
-    set.handler = h.links.length ? h.links.map((l) => `[[${l}]]`) : null;
-    files = h.files;
-  }
-  if (input.details !== undefined) {
-    const d = mergeDetails(old?.details ?? [], input.details);
-    if (typeof d === "string") return d;
-    // only the details given change; the rest stay as they are in the file (numbers, lists)
-    for (const [raw, v] of Object.entries(input.details)) {
-      const k = raw.trim().toLowerCase();
-      for (const o of old?.details ?? []) if (detailKey(o.name) === detailKey(raw) && o.name.toLowerCase() !== k) set[o.name.toLowerCase()] = null;
-      const value = (v ?? "").replace(/\s+/g, " ").trim();
-      // a fee is a number in the file (things.ts), the rest text as given
-      set[k] = !value ? null : k === "fee" && /^\d+(\.\d+)?$/.test(value) ? Number(value) : value;
-    }
-  }
-  return { set, files };
-}
-
-const fileOf = (slug: string) => thingFile(`${FOLDER}/${slug}`);
-const reread = async (w: Who, slug: string) => (await listClients(w)).find((c) => c.slug === slug)!;
-
-export async function addClient(w: Who, input: ClientInput, conversationId?: string): Promise<Result> {
-  if (input.name === undefined) return { ok: false, error: "a client needs a name" };
-  const c = await changes(w, { ...input, stage: input.stage ?? "active" }, null);
+// Out of the lists, kept with all their work; refused while work is open, unless withWork.
+export async function archiveClient(w: Who, q: string, o: { exact?: boolean; withWork?: boolean } = {}): Promise<Result> {
+  if (!isAdmin(w)) return { ok: false, error: "only the owner or an admin can archive a client; move them to a past stage instead" };
+  const c = await findClient(w, q, o.exact);
   if (typeof c === "string") return { ok: false, error: c };
-  const slug = slugOf(input.name);
-  if ((await listClients(w)).some((x) => x.slug === slug)) return { ok: false, error: `already a client: emplio clients show ${slug}` };
-  // ponytail: a file in clients/ Gitea has but the search copy doesn't yet is replaced; the copy follows every commit
-  await commit(w, [{ path: fileOf(slug), content: setFields("", c.set) }, ...c.files], `Client ${c.set.name} added`);
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Added client ${c.set.name}` });
-  return { ok: true, client: await reread(w, slug) };
+  if (c.archivedAt) return { ok: false, error: `${c.name} is archived already` };
+  if (!o.withWork && (c.openTasks || c.activeProjects))
+    return { ok: false, error: `${c.name} has ${[c.openTasks && count(c.openTasks, "open task"), c.activeProjects && count(c.activeProjects, "active project")].filter(Boolean).join(" and ")}; finish or move them first, or archive with the work (--with-work)` };
+  await db.transaction(async (tx) => {
+    await tx.update(clients).set({ archivedAt: new Date(), updatedAt: new Date() }).where(eq(clients.id, c.id));
+    await logChange(tx, w, { kind: "client", id: c.id, clientId: c.id, summary: `Archived ${c.name}`, changes: [{ field: "archived", from: false, to: true }] });
+  });
+  return { ok: true, client: await one(w.workspaceId, c.id, true) };
 }
 
-// exact: the app names one by its slug; a part of a name is for chats
-export async function updateClient(w: Who, q: string, input: ClientInput, conversationId?: string, exact = false): Promise<Result> {
-  // details (a contact's email, a tax number) anyone may fill in; the rest is for the owner and admins
-  if (!isAdmin(w) && Object.keys(input).some((k) => k !== "details")) return { ok: false, error: "only the owner or an admin can change a client (anyone can add their details)" };
-  const old = await findClient(w.workspaceId, q, exact);
-  if (typeof old === "string") return { ok: false, error: old };
-  const c = await changes(w, input, old);
-  if (typeof c === "string") return { ok: false, error: c };
-  // the file keeps its name, and so tasks and chats keep pointing at it
-  let gone = false;
-  const change = (text: string | null) => {
-    // removed meanwhile: not brought back
-    if (text === null) return ((gone = true), []);
-    const next = setFields(text, c.set);
-    return next !== text || c.files.length ? [{ path: fileOf(old.slug), content: next }, ...c.files] : [];
-  };
-  await commit(w, change, `Client ${old.name} changed`, fileOf(old.slug));
-  if (gone) return { ok: false, error: `${old.name} was removed meanwhile` };
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Changed client ${c.set.name ?? old.name}` });
-  return { ok: true, client: await reread(w, old.slug) };
+export async function restoreClient(w: Who, q: string, exact = false): Promise<Result> {
+  if (!isAdmin(w)) return { ok: false, error: "only the owner or an admin can bring back an archived client" };
+  const hit = findIn(await listClients(w, { archived: true }), q, "archived client", exact);
+  if (typeof hit === "string") return { ok: false, error: hit };
+  await db.transaction(async (tx) => {
+    await tx.update(clients).set({ archivedAt: null, updatedAt: new Date() }).where(eq(clients.id, hit.id));
+    await logChange(tx, w, { kind: "client", id: hit.id, clientId: hit.id, summary: `Brought back ${hit.name}`, changes: [{ field: "archived", from: true, to: false }] });
+  });
+  return { ok: true, client: await one(w.workspaceId, hit.id) };
 }
 
-// Their file goes; their tasks, process runs and chats stay, without the label.
-export async function removeClient(w: Who, q: string, conversationId?: string, exact = false) {
-  if (!isAdmin(w)) return { ok: false as const, error: "only the owner or an admin can remove a client; set them to past instead" };
-  const c = await findClient(w.workspaceId, q, exact);
-  if (typeof c === "string") return { ok: false as const, error: c };
-  await commit(w, [{ path: fileOf(c.slug), content: null }], `Client ${c.name} removed`);
-  for (const t of [tasks, processRuns, conversations])
-    await db.update(t).set({ client: null }).where(and(eq(t.workspaceId, w.workspaceId), eq(t.client, c.slug)));
-  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: conversationId || null, kind: "client", summary: `Removed client ${c.name}` });
-  return { ok: true as const, name: c.name };
+// Deleted for good: the owner, from the app, for an archived client nothing points at (one added by mistake).
+// Their history rows stay.
+export async function purgeClient(w: Who, slug: string) {
+  if (w.role !== "owner") return { ok: false as const, error: "only the owner can delete a client for good" };
+  const [c] = await db.select().from(clients).where(and(eq(clients.workspaceId, w.workspaceId), eq(clients.slug, slug)));
+  if (!c) return { ok: false as const, error: "no such client" };
+  if (!c.archivedAt) return { ok: false as const, error: `archive ${c.name} first` };
+  const n = async (t: typeof tasks | typeof processRuns | typeof conversations | typeof projects) =>
+    (await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(t).where(eq(t.clientId, c.id)))[0]!.n;
+  const [t, r, ch, p, k] = await Promise.all([
+    n(tasks),
+    n(processRuns),
+    n(conversations),
+    n(projects),
+    db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(contactClients).where(eq(contactClients.clientId, c.id)).then((x) => x[0]!.n),
+  ]);
+  const linked = [t && count(t, "task"), r && count(r, "process run"), ch && count(ch, "chat"), p && count(p, "project"), k && count(k, "contact")].filter(Boolean);
+  if (linked.length) return { ok: false as const, error: `${c.name} still has ${linked.join(", ")}; they stay archived` };
+  return purging(c.name, () =>
+    db.transaction(async (tx) => {
+      await tx.delete(clients).where(eq(clients.id, c.id));
+      await logChange(tx, w, { kind: "client", id: c.id, clientId: c.id, summary: `Deleted ${c.name} for good`, changes: [] });
+    }),
+  );
 }
+
+// --- chats ---
 
 // A chat is about the first client it's tied to (a task for them added in it, or them @mentioned); kept after that.
-export async function labelChat(conversationId: string | null | undefined, client: string | null | undefined) {
-  if (!conversationId || !client) return;
-  await db.update(conversations).set({ client }).where(and(eq(conversations.id, conversationId), sql`${conversations.client} is null`));
+export async function labelChat(conversationId: string | null | undefined, clientId: string | null | undefined) {
+  if (!conversationId || !clientId) return;
+  await db.update(conversations).set({ clientId }).where(and(eq(conversations.id, conversationId), isNull(conversations.clientId)));
 }
 
-// @mentioned clients (their file's path, mentions.ts) in a message: the first one labels the chat
+// @mentioned clients (their notes' path, mentions.ts) in a message: the first one labels the chat
 export async function labelFromMentions(workspaceId: string, conversationId: string, picked: unknown) {
   const slugs = (Array.isArray(picked) ? picked : []).flatMap((m) => {
-    const slug = m?.kind === "record" && typeof m.id === "string" ? new RegExp(`^company/${FOLDER}/([^/]+)/index\\.md$`).exec(m.id)?.[1] : null;
+    const slug = m?.kind === "record" && typeof m.id === "string" ? new RegExp(`^(?:company|restricted)/${FOLDER}/([^/]+)/index\\.md$`).exec(m.id)?.[1] : null;
     return slug ? [slug] : [];
   });
   if (!slugs.length) return;
-  if ((await listThings(workspaceId, FOLDER)).some((t) => t.path === `${FOLDER}/${slugs[0]}`)) await labelChat(conversationId, slugs[0]);
+  const [c] = await db.select({ id: clients.id }).from(clients).where(and(eq(clients.workspaceId, workspaceId), eq(clients.slug, slugs[0]!)));
+  if (c) await labelChat(conversationId, c.id);
 }
 
-// What the model is told each turn in a chat about one client: who they are and where the rest is.
-export async function clientNote(workspaceId: string, slug: string) {
-  const c = (await listClients({ workspaceId })).find((x) => x.slug === slug);
-  return c ? clientNoteText(c) : "";
+// What the model is told each turn in a chat about one client: who they are and where the rest is. Nothing when
+// the person can't see them (made private after the chat was linked).
+export async function clientNote(v: Viewer, clientId: string) {
+  const c = (await listClients(v, { ids: [clientId] }))[0];
+  return c ? clientNoteText(c, v) : "";
 }
 // the words of it, for a client as the app lists them (the evals use these too)
-export const clientNoteText = (c: Client) =>
-  `This chat is about the client ${c.name} (${c.stage}; handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${c.openTasks} open task${c.openTasks === 1 ? "" : "s"}${c.waitingTasks ? `, ${c.waitingTasks} waiting` : ""})${c.details.length ? `; ${c.details.map((d) => `${d.name}: ${d.value}`).join("; ")}` : ""}. Their notes: /work/${notesPath(c)}; their open work: emplio clients show ${c.slug}. Tasks you add here are for them (--client ${c.slug}) unless plainly not.`;
+export const clientNoteText = (c: Client, v?: Viewer) =>
+  `This chat is about the client ${c.name} (${c.stage}; handled by ${c.handlers.map((h) => h.name).join(", ") || "nobody named yet"}; ${count(c.openTasks, "open task")}${c.waitingTasks ? `, ${c.waitingTasks} waiting` : ""})${c.details.length ? `; ${c.details.map((d) => `${d.name}: ${d.value}`).join("; ")}` : ""}. Everything on them: emplio clients show ${c.slug}; their notes (words only): ${notesAt(v, "client", c)}. Tasks you add here are for them (--client ${c.slug}) unless plainly not.`;
+
+// --- the client page ---
+
+export async function clientPage(w: Who, slug: string): Promise<ClientPage | null> {
+  const c = await findClient(w, slug, true);
+  if (typeof c === "string") return null;
+  const [{ listContacts }, { listProjects }, { listTasks }, { listRuns }, { listMeetings }] = await Promise.all([import("./contacts"), import("./projects"), import("./tasks"), import("./processes"), import("./meetings")]);
+  const [contacts, projectList, open, runs, meetingList, linking, history] = await Promise.all([
+    listContacts(w, { clientId: c.id }),
+    listProjects(w, { clientId: c.id }),
+    listTasks(w, { clientId: c.id, open: true }),
+    listRuns(w.workspaceId, { clientId: c.id, all: true, viewer: w }),
+    listMeetings(w, { clientId: c.id }),
+    // a private one's are in restricted/ (and older ones may still be shared); paths start with their repo
+    Promise.all(
+      (c.private ? ["company", "restricted"] : ["company"]).map(async (repo) => (await linkedFrom(w.workspaceId, repo, `${FOLDER}/${c.slug}/index.md`)).map((p) => `${repo}/${p}`)),
+    ).then((x) => x.flat()),
+    historyOf(w.workspaceId, { clientId: c.id }, 30, false, w),
+  ]);
+  const title = (p: string) => p.replace(/^.*\//, "").replace(/\.md$/, "").replace(/^(\d{4}-\d{2}-\d{2})-?/, "").replace(/-/g, " ") || "note";
+  return {
+    client: c,
+    contacts,
+    projects: projectList,
+    tasks: open.slice(0, 50),
+    tasksTotal: open.length,
+    runs: [...runs.filter((r) => r.status === "active"), ...runs.filter((r) => r.status !== "active").slice(0, 10)],
+    meetings: meetingList.map((m) => ({ path: m.path, date: m.on, title: m.title })),
+    // other notes; a contact's or project's own notes are on its card already
+    notes: linking.filter((p) => !/^\w+\/meetings\//.test(p) && !/^\w+\/(clients|contacts|projects|services|team)\/[^/]+\/index\.md$/.test(p)).map((p) => ({ path: p, title: title(p) })),
+    history,
+  };
+}
 
 // --- `emplio clients` ---
 
-export const USAGE = `usage: emplio clients list [--stage <stage>]   every client: stage, who handles them, open tasks
-       emplio clients show <name>                         one client: who handles them, their details, open tasks, their file
-       emplio clients add <name> [options] ["Detail=value"]...      a new client (anyone): their page company/${FOLDER}/<slug>/index.md
-       emplio clients update <name> [options] ["Detail=value"]...   change one (owner and admins; details: anyone)
-       emplio clients remove <name>                       delete one added by mistake (owner and admins); otherwise --stage past
-options: --stage <stage>   a word or two for where they are, your own (onboarding, on hold) or prospect (not won yet), active (the default), past (no longer working with them)
-         --handler <names or emails>    who on the team looks after them, comma-separated; "none" clears it
-         --name <new name>              update only; the file keeps its name
-Name, stage, handler ("[[team/<name>]]") and details are the YAML at the top of their page, their notes below;
-change those with this command (not by editing the file), so the app reacts (a client won starts its automations).
-         "Detail=value"                 a short fact kept on them: "Contact email=sarah@northwind.com" "Tax number=27AAACN1234F1Z5"
-                                        "Files=monthly"; "Detail=" removes one. A process input of the same name is filled in
-                                        from it, and a schedule can pick clients by one (clients: [Files=monthly]). The rest of
-                                        what's known goes in their notes, below.
-A task for a client: emplio tasks add ... --client <name>; theirs: emplio tasks list --client <name>.`;
+export const USAGE = `usage: emplio clients list [--stage <stage>] [--archived]   every client: stage, who handles them, open work
+       emplio clients show <name>                       everything on one: stage, fields, contacts, projects, open work, history
+       emplio clients add <name> [options] ["Field=value"]...      a new client (anyone)
+       emplio clients update <name> [options] ["Field=value"]...   change one; only what you name changes
+       emplio clients archive <name> [--with-work]       out of the lists, kept with all their work (owner and admins)
+       emplio clients restore <name>                     bring an archived one back
+       emplio clients stages list|add|update|remove      this business's stages (owner and admins change them)
+       emplio clients fields list|add|update|remove      this business's client fields (owner and admins change them)
+options: --stage <stage>      one of this business's stages (emplio clients stages list); prospect, active or past means the first of those
+         --handler <names>    who on the team looks after them: names, emails or "me", comma-separated; "none" clears it
+         --private yes|no     owners and admins only see it (and its projects, and contacts at no other client); notes move to restricted/
+         --name <new name>    update only; their slug (in links and --client) stays
+         --force              add even though a client with a close name exists (it's recorded)
+         --updated-at <time>  update only: the updatedAt you read; refused if someone changed them since
+         "Field=value"        one of the business's client fields: "Tax number=27AAACN1234F1Z5" "Files=monthly"; "Field=" empties it.
+                              A process input of the same name is filled in from it; a schedule can pick clients by one.
+Clients live in the database: change them only with this command. Their notes file holds words (what they're like,
+decisions, history in prose), never their stage, fields or who handles them.
+A task for a client: emplio tasks add ... --client <name>; a project: emplio projects add <name> --client <name>.`;
+
+const STAGES_USAGE = `usage: emplio clients stages list
+       emplio clients stages add <name> --category prospect|active|past [--position <n>]
+       emplio clients stages update <name> [--name <new name>] [--category ...] [--position <n>]
+       emplio clients stages remove <name> [--to <stage>]   its clients move to --to (needed when it has any)`;
 
 const line = (c: Client) =>
   [c.slug, c.stage, c.handlers.length ? c.handlers.map((h) => h.name).join(", ") : "nobody named", `${c.openTasks} open${c.waitingTasks ? ` (${c.waitingTasks} waiting)` : ""}`, c.name].join("\t");
 
-const asData = (c: Client) => ({ slug: c.slug, name: c.name, stage: c.stage, handled_by: c.handlers.map((h) => h.name), details: Object.fromEntries(c.details.map((d) => [d.name, d.value])), open_tasks: c.openTasks, waiting_tasks: c.waitingTasks, notes: notesPath(c) });
+const asData = (c: Client) => ({
+  slug: c.slug,
+  name: c.name,
+  stage: c.stage,
+  stage_category: c.stageCategory,
+  private: c.private,
+  handled_by: c.handlers.map((h) => h.name),
+  fields: Object.fromEntries(c.details.map((d) => [d.name, d.value])),
+  open_tasks: c.openTasks,
+  waiting_tasks: c.waitingTasks,
+  active_projects: c.activeProjects,
+  archived: !!c.archivedAt,
+  updated_at: c.updatedAt,
+  notes: notesPath(c),
+});
 
-export async function clientsCommand(w: Who, conversationId: string, args: string[], data = false) {
+export async function clientsCommand(base: Omit<Who, "via" | "conversationId">, conversationId: string, args: string[], data = false): Promise<string> {
+  const w: Who = { ...base, via: "emplio", conversationId };
   const [sub, ...rest] = args;
-  const words: string[] = [];
-  const opts: Record<string, string> = {};
-  const detailArgs: string[] = [];
-  for (let i = 0; i < rest.length; i++) {
-    const a = rest[i]!;
-    if (a.startsWith("--")) opts[a.slice(2)] = rest[++i] ?? "";
-    // Stage=active, Handler=Raj, Name=X are the options, not details
-    else if (["stage", "handler", "name"].includes(a.slice(0, a.indexOf("=")).trim().toLowerCase())) opts[a.slice(0, a.indexOf("=")).trim().toLowerCase()] = a.slice(a.indexOf("=") + 1).trim();
-    else if (a.includes("=")) detailArgs.push(a);
-    else words.push(a);
-  }
-  const input = (): ClientInput | string => {
+  if (sub === "stages") return stagesCommand(w, rest);
+  if (sub === "fields") return fieldsCommand(w, "client", rest);
+  const { words, opts, pairs, flags } = parseArgs(rest, ["stage", "handler", "name"]);
+  const name = words.join(" ");
+  const input = (): ClientInput => {
     const i: ClientInput = {};
-    if (opts.stage !== undefined) i.stage = opts.stage as ClientStage;
+    if (opts.stage !== undefined) i.stage = opts.stage;
     if (opts.name !== undefined) i.name = opts.name;
-    // names, emails or "me", comma-separated
     if (opts.handler !== undefined) i.handlers = opts.handler.trim().toLowerCase() === "none" ? [] : opts.handler.split(",");
-    if (detailArgs.length) i.details = Object.fromEntries(detailArgs.map((a) => [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)]));
+    const priv = privateOf(opts, flags);
+    if (priv !== undefined) i.private = priv;
+    if (pairs.length) i.details = Object.fromEntries(pairs);
+    if (opts["updated-at"]) i.updatedAt = opts["updated-at"];
+    if (flags.has("force")) i.force = true;
     return i;
   };
 
   if (sub === "list") {
-    const list = await listClients(w, { stage: opts.stage?.trim().toLowerCase() || undefined });
+    const list = (await listClients(w, { archived: flags.has("archived") })).filter((c) => !opts.stage || c.stage.toLowerCase() === opts.stage.toLowerCase() || c.stageCategory === opts.stage.toLowerCase());
     if (data) return JSON.stringify(list.map(asData));
-    if (!list.length) return "No clients yet. Add them with emplio clients add <name>.";
+    if (!list.length) return flags.has("archived") ? "No archived clients." : "No clients yet. Add them with emplio clients add <name>.";
     return [...list.map(line), "", "In full: emplio clients show <name>."].join("\n");
   }
-  if (sub === "show" && words.length) {
-    const c = await findClient(w.workspaceId, words.join(" "));
+  if (sub === "show" && name) {
+    const c = await findClient(w, name);
     if (typeof c === "string") return `error: ${c}`;
-    const client = c;
-    if (data) return JSON.stringify(asData(client));
-    const open = await db
-      .select({ id: tasks.id, title: tasks.title, status: tasks.status, waitingOn: tasks.waitingOn, dueAt: tasks.dueAt })
-      .from(tasks)
-      .where(and(eq(tasks.workspaceId, w.workspaceId), eq(tasks.client, c.slug), inArray(tasks.status, ["todo", "doing", "waiting"])))
-      .orderBy(sql`${tasks.dueAt} asc nulls last`)
-      .limit(30);
-    // the files that link to them: their contacts, projects
-    const linked = (await thingPage(w.workspaceId, `${FOLDER}/${c.slug}`).catch(() => null))?.linkedFrom ?? [];
+    const page = (await clientPage(w, c.slug))!;
+    if (data) return JSON.stringify({ ...asData(c), contacts: page.contacts.map((x) => ({ slug: x.slug, name: x.name, email: x.email, role: x.clients.find((k) => k.id === c.id)?.role ?? null })), projects: page.projects.map((p) => ({ slug: p.slug, name: p.name, status: p.status })),
+      // the work going for them, so news about it finds its run and task (a call held: that step's task done)
+      processes: page.runs.map((r) => ({ id: r.id.slice(0, 8), process: r.processTitle, subject: r.subject, status: r.status, step: r.status === "active" ? `${r.step + 1} of ${r.steps.length}` : null })),
+      open_tasks: page.tasks.slice(0, 30).map((t) => ({ id: t.id.slice(0, 8), title: t.title, status: t.status, due: t.dueAt?.slice(0, 10) ?? null, waiting_on: t.waitingOn ?? null })),
+      meetings: page.meetings.slice(0, 5).map((m) => ({ date: m.date, title: m.title })) });
+    const day = (s: string | null) => (s ? s.slice(0, 10) : "no due date");
     return [
-      `${client.name} (${client.stage})`,
-      `handled by: ${client.handlers.map((h) => h.name).join(", ") || "nobody named yet"}`,
-      ...client.details.map((d) => `${d.name}: ${d.value}`),
-      `page: /work/${notesPath(c)} (the lines above in its YAML top, their notes below; other notes on them beside it)`,
-      ...linked.map((l) => `${l.kind === "contacts" ? "contact" : l.kind === "projects" ? "project" : l.kind}: ${l.title} (/work/company/${thingFile(l.from)}, as ${l.field})`),
-      ...(open.length
-        ? ["open tasks:", ...open.map((t) => `- ${t.id.slice(0, 8)} ${t.status} ${t.dueAt ? t.dueAt.toISOString().slice(0, 10) : "no due date"} ${t.title}${t.waitingOn ? ` (waiting on ${t.waitingOn})` : ""}`)]
+      `${c.name} (${c.slug}) · ${c.stage}${c.private ? " · PRIVATE (owners, admins and its handlers)" : ""}${c.archivedAt ? " · ARCHIVED" : ""} · updatedAt ${c.updatedAt}`,
+      `handled by: ${c.handlers.map((h) => h.name).join(", ") || "nobody named yet"}`,
+      ...c.details.map((d) => `${d.name}: ${d.value}`),
+      ...(page.contacts.length ? ["contacts:", ...page.contacts.map((x) => `- ${x.name} (${x.slug})${x.clients.find((k) => k.id === c.id)?.role ? `, ${x.clients.find((k) => k.id === c.id)!.role}` : ""}${x.email ? ` <${x.email}>` : ""}${x.phone ? ` ${x.phone}` : ""}`)] : ["no contacts yet"]),
+      ...(page.projects.length ? ["projects:", ...page.projects.map((p) => `- ${p.name} (${p.slug}) ${p.status}${p.lead ? `, led by ${p.lead.name}` : ""}${p.dueOn ? `, due ${p.dueOn}` : ""}`)] : []),
+      ...(page.runs.length ? ["processes:", ...page.runs.map((r) => `- ${r.processTitle}: ${r.subject} (${r.status === "active" ? `step ${r.step + 1} of ${r.steps.length}` : r.status})`)] : []),
+      ...(page.tasks.length
+        ? [`open tasks (${page.tasksTotal}):`, ...page.tasks.slice(0, 30).map((t) => `- ${t.id.slice(0, 8)} ${t.status} ${day(t.dueAt)} ${t.title}${t.waitingOn ? ` (waiting on ${t.waitingOn})` : ""}`)]
         : ["no open tasks"]),
+      ...(page.history.length ? ["recent changes:", ...page.history.slice(0, 8).map((h) => `- ${h.at.slice(0, 10)} ${h.who ?? "Emplio"}${h.via === "emplio" ? " (via Emplio)" : ""}: ${h.summary}`)] : []),
+      `notes: ${notesAt(w, "client", c)}${page.meetings.length ? `; meetings (emplio meetings list --client ${c.slug}): ${page.meetings.slice(0, 5).map((m) => `/work/${m.path.startsWith("restricted/") && !seesPrivate(w) ? m.path.replace(/^restricted/, "shared") : m.path}`).join(", ")}` : ""}`,
     ].join("\n");
   }
-  if (sub === "add" && words.length) {
-    const i = input();
-    if (typeof i === "string") return i;
-    const r = await addClient(w, { ...i, name: words.join(" ") }, conversationId);
-    return r.ok ? `added ${line(r.client)}; their notes go in /work/${notesPath(r.client)}, below its YAML top` : `error: ${r.error}`;
+  if (sub === "add" && name) {
+    const r = await addClient(w, { ...input(), name });
+    return r.ok ? `added ${line(r.client)}; notes about them (words only) go in /work/${notesPath(r.client)}` : `error: ${r.error}`;
   }
-  if (sub === "update" && words.length) {
+  if (sub === "update" && name) {
     const i = input();
-    if (typeof i === "string") return i;
-    if (!Object.keys(i).length) return USAGE;
-    const r = await updateClient(w, words.join(" "), i, conversationId);
-    return r.ok ? `updated ${line(r.client)}` : `error: ${r.error}`;
+    if (!Object.keys(i).filter((k) => k !== "updatedAt").length) return USAGE;
+    if (i.stage !== undefined && !i.updatedAt) return `error: a stage change needs --updated-at (the updatedAt from emplio clients show ${name}), so a newer change isn't overwritten`;
+    const r = await updateClient(w, name, i);
+    if (!r.ok) return `error: ${r.error}`;
+    // its notes moved by themselves: say where, so nobody copies them by hand
+    const priv = i.private === undefined ? "" : r.client.private ? `\nprivate now: only owners, admins and whoever handles them see them, their projects, tasks and notes (their open tasks too, nothing to change on those); notes moved to /work/${notesPath(r.client)}` : `\nshared with the team again; notes are back in /work/${notesPath(r.client)}`;
+    return `updated ${line(r.client)}${priv}`;
   }
-  if (sub === "remove" && words.length) {
-    const r = await removeClient(w, words.join(" "), conversationId);
-    return r.ok ? `removed ${r.name} and their file (their tasks stay, without the client)` : `error: ${r.error}`;
+  if ((sub === "archive" || sub === "remove") && name) {
+    const r = await archiveClient(w, name, { withWork: flags.has("with-work") });
+    return r.ok ? `archived ${r.client.name}: out of the lists, their work and history kept (emplio clients restore ${r.client.slug} brings them back)` : `error: ${r.error}`;
+  }
+  if (sub === "restore" && name) {
+    const r = await restoreClient(w, name);
+    return r.ok ? `brought back ${line(r.client)}` : `error: ${r.error}`;
   }
   return USAGE;
 }
 
+// --- stages and fields: the lists themselves ---
+
+async function logSetting(w: Who, summary: string) {
+  const { record } = await import("./activity");
+  record({ workspaceId: w.workspaceId, userId: w.userId, conversationId: w.conversationId || null, kind: "client", summary });
+}
+
+export async function saveStage(w: Who, q: string | null, input: { name?: string; category?: string; position?: number }) {
+  if (!isAdmin(w)) return "only the owner or an admin can change the stages";
+  const all = await listStages(w.workspaceId);
+  const name = input.name !== undefined ? clean(input.name).slice(0, 40) : undefined;
+  if (name !== undefined && !name) return "a stage needs a name";
+  if (input.category !== undefined && !STAGE_CATEGORIES.includes(input.category as StageCategory)) return "category is prospect (not won yet), active (being worked for) or past (no longer)";
+  const old = q === null ? null : all.find((s) => s.name.toLowerCase() === clean(q).toLowerCase());
+  if (q !== null && !old) return `no stage "${q}" (${all.map((s) => s.name).join(", ")})`;
+  if (name && all.some((s) => s.name.toLowerCase() === name.toLowerCase() && s.id !== old?.id)) return `there's a stage ${name} already`;
+  if (old && input.category && input.category !== old.category && !all.some((s) => s.id !== old.id && s.category === old.category))
+    return `${old.name} is the only ${old.category} stage; add another first`;
+  if (!old) {
+    if (!name || !input.category) return "a new stage needs a name and a category (prospect, active or past)";
+    if (all.length >= 30) return "a business has at most 30 stages";
+    await db.insert(clientStages).values({ workspaceId: w.workspaceId, name, category: input.category as StageCategory, position: input.position ?? all.length });
+  } else {
+    await db
+      .update(clientStages)
+      .set({ ...(name && { name }), ...(input.category && { category: input.category as StageCategory }), ...(input.position !== undefined && { position: input.position }) })
+      .where(eq(clientStages.id, old.id));
+  }
+  await logSetting(w, old ? `Changed the stage ${old.name}` : `Added the stage ${name}`);
+  return null;
+}
+
+// Its clients move to `to` (in one go, each change in their history)
+export async function removeStage(w: Who, q: string, to?: string) {
+  if (!isAdmin(w)) return "only the owner or an admin can change the stages";
+  const all = await listStages(w.workspaceId);
+  const old = all.find((s) => s.name.toLowerCase() === clean(q).toLowerCase());
+  if (!old) return `no stage "${q}"`;
+  if (!all.some((s) => s.id !== old.id && s.category === old.category)) return `${old.name} is the only ${old.category} stage; a business keeps at least one of each`;
+  const using = await db.select({ id: clients.id, name: clients.name }).from(clients).where(eq(clients.stageId, old.id));
+  const target = to ? stageIn(all.filter((s) => s.id !== old.id), to) : null;
+  if (typeof target === "string") return target;
+  if (using.length && !target) return `${count(using.length, "client")} ${using.length === 1 ? "is" : "are"} at ${old.name}; say where they move (--to <stage>)`;
+  await db.transaction(async (tx) => {
+    for (const c of using) {
+      await tx.update(clients).set({ stageId: target!.id, updatedAt: new Date() }).where(eq(clients.id, c.id));
+      await logChange(tx, w, { kind: "client", id: c.id, clientId: c.id, summary: `Moved ${c.name} to ${target!.name} (${old.name} removed)`, changes: [{ field: "stage", from: old.name, to: target!.name }] });
+    }
+    await tx.delete(clientStages).where(eq(clientStages.id, old.id));
+  });
+  await logSetting(w, `Removed the stage ${old.name}`);
+  return null;
+}
+
+async function stagesCommand(w: Who, args: string[]) {
+  const [sub, ...rest] = args;
+  const { words, opts } = parseArgs(rest);
+  const name = words.join(" ");
+  const position = opts.position !== undefined ? Number(opts.position) : undefined;
+  if (position !== undefined && !Number.isInteger(position)) return "error: --position is a whole number";
+  if (sub === "list") return (await listStages(w.workspaceId)).map((s) => `${s.name}\t${s.category}`).join("\n");
+  const err =
+    sub === "add" && name ? await saveStage(w, null, { name, category: opts.category, position })
+    : sub === "update" && name ? await saveStage(w, name, { name: opts.name, category: opts.category, position })
+    : sub === "remove" && name ? await removeStage(w, name, opts.to)
+    : STAGES_USAGE;
+  return err === STAGES_USAGE ? err : err ? `error: ${err}` : `done; the stages now:\n${(await listStages(w.workspaceId)).map((s) => `${s.name}\t${s.category}`).join("\n")}`;
+}
+
+// --- routes ---
+
 const BODY = {
   type: "object",
+  additionalProperties: false,
   properties: {
     name: { type: "string", maxLength: 200 },
-    stage: { type: "string", maxLength: 30 },
+    stage: { type: "string", maxLength: 40 },
     handlers: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 20 },
     details: { type: "object", maxProperties: 50, additionalProperties: { type: ["string", "null"], maxLength: 500 } },
+    externalIds: { type: "object", maxProperties: 20, additionalProperties: { type: ["string", "null"], maxLength: 200 } },
+    updatedAt: { type: "string", maxLength: 40 },
+    force: { type: "boolean" },
+    private: { type: "boolean" },
   },
 };
-
+const STAGE_BODY = { type: "object", additionalProperties: false, properties: { name: { type: "string", maxLength: 40 }, category: { type: "string" }, position: { type: "integer" }, to: { type: "string" } } };
 export async function clientRoutes(app: FastifyInstance) {
-  app.get("/clients", async (req, reply) => {
+  const fail = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, error: string, match?: Match) => reply.code(400).send({ error, match });
+
+  app.get<{ Querystring: { archived?: string } }>("/clients", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listClients(ctx);
+    return listClients(ctx, { archived: req.query.archived === "1" });
   });
-
+  app.get<{ Params: { slug: string } }>("/clients/:slug/page", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    return (await clientPage(ctx, req.params.slug)) ?? reply.code(404).send({ error: "No such client." });
+  });
   app.post<{ Body: ClientInput }>("/clients", { schema: { body: { ...BODY, required: ["name"] } } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const r = await addClient(ctx, req.body);
-    return r.ok ? r.client : reply.code(400).send({ error: r.error });
+    return r.ok ? r.client : fail(reply, r.error, r.match);
   });
-
   app.patch<{ Params: { slug: string }; Body: ClientInput }>("/clients/:slug", { schema: { body: BODY } }, async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    const r = await updateClient(ctx, req.params.slug, req.body, undefined, true);
-    return r.ok ? r.client : reply.code(400).send({ error: r.error });
+    const r = await updateClient(ctx, req.params.slug, req.body, true);
+    return r.ok ? r.client : fail(reply, r.error);
   });
-
+  app.post<{ Params: { slug: string }; Body: { withWork?: boolean } }>("/clients/:slug/archive", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const r = await archiveClient(ctx, req.params.slug, { exact: true, withWork: !!req.body?.withWork });
+    return r.ok ? r.client : fail(reply, r.error);
+  });
+  app.post<{ Params: { slug: string } }>("/clients/:slug/restore", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const r = await restoreClient(ctx, req.params.slug, true);
+    return r.ok ? r.client : fail(reply, r.error);
+  });
   app.delete<{ Params: { slug: string } }>("/clients/:slug", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    const r = await removeClient(ctx, req.params.slug, undefined, true);
-    return r.ok ? r : reply.code(400).send({ error: r.error });
+    const r = await purgeClient(ctx, req.params.slug);
+    return r.ok ? r : fail(reply, r.error);
   });
+
+  app.get("/client-stages", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    return listStages(ctx.workspaceId);
+  });
+  app.post<{ Body: { name: string; category: string; position?: number } }>("/client-stages", { schema: { body: { ...STAGE_BODY, required: ["name", "category"] } } }, async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const e = await saveStage(ctx, null, req.body);
+    return e ? fail(reply, e) : listStages(ctx.workspaceId);
+  });
+  app.patch<{ Params: { id: string }; Body: { name?: string; category?: string; position?: number } }>("/client-stages/:id", { schema: { body: STAGE_BODY } }, async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const s = (await listStages(ctx.workspaceId)).find((x) => x.id === req.params.id);
+    if (!s) return fail(reply, "no such stage");
+    const e = await saveStage(ctx, s.name, req.body);
+    return e ? fail(reply, e) : listStages(ctx.workspaceId);
+  });
+  app.delete<{ Params: { id: string }; Querystring: { to?: string } }>("/client-stages/:id", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    const s = (await listStages(ctx.workspaceId)).find((x) => x.id === req.params.id);
+    if (!s) return fail(reply, "no such stage");
+    const e = await removeStage(ctx, s.name, req.query.to);
+    return e ? fail(reply, e) : listStages(ctx.workspaceId);
+  });
+
 }
 
 if (import.meta.main) {
-  console.assert(slugOf("Acme Foods Pvt. Ltd.") === "acme-foods-pvt-ltd");
-  console.assert(slugOf("  Café Noir ") === "cafe-noir");
-  console.assert(slugOf("!!!") === "");
-  const d = mergeDetails([{ name: "Email", value: "a@x.com" }], { email: "b@x.com", "Files ": "monthly", Gone: "" }) as ClientDetail[];
-  console.assert(d.length === 2 && d[0]!.value === "b@x.com" && d[1]!.name === "Files", "merge", d);
-  console.assert((mergeDetails(d, { Files: null }) as ClientDetail[]).length === 1, "remove");
-  const cs = [
-    { slug: "a", name: "A", stage: "active", details: [{ name: "Files", value: "Monthly" }] },
-    { slug: "b", name: "B", stage: "active", details: [] },
-    { slug: "c", name: "C", stage: "prospect", details: [{ name: "Files", value: "monthly" }] },
+  const st: ClientStage[] = [
+    { id: "1", name: "Lead", category: "prospect", position: 0 },
+    { id: "2", name: "Onboarding", category: "active", position: 1 },
+    { id: "3", name: "Retainer", category: "active", position: 2 },
   ];
-  console.assert(pickClients(cs, ["files=monthly"]).map((c) => c.slug).join() === "a", "by detail");
+  console.assert((stageIn(st, "active") as ClientStage).name === "Onboarding" && (stageIn(st, "retainer") as ClientStage).id === "3" && typeof stageIn(st, "won") === "string");
+  const cs = [
+    { slug: "a", name: "A", stageCategory: "active" as const, details: [{ key: "files", name: "Files", value: "Monthly" }] },
+    { slug: "b", name: "B", stageCategory: "active" as const, details: [] },
+    { slug: "c", name: "C", stageCategory: "prospect" as const, details: [{ key: "files", name: "Files", value: "monthly" }] },
+  ];
+  console.assert(pickClients(cs, ["files=monthly"]).map((c) => c.slug).join() === "a", "by field");
   console.assert(pickClients(cs, ["B", "Files = Monthly"]).map((c) => c.slug).join() === "a,b", "mixed");
-  const f = setFields("---\nname: A\nfiles: monthly\nOther: x\n---\n# A\nnotes\n", { stage: "past", files: null, name: "B" });
-  console.assert(f === "---\nname: B\nOther: x\nstage: past\n---\n# A\nnotes\n", "set fields", f);
-  console.assert(setFields("# A\n", { name: "A" }) === "---\nname: A\n---\n\n# A\n", "no top yet");
-  const l = setFields("---\nname: A # kept\n---\n", { handler: ["[[team/a]]", "[[team/b]]"] });
-  console.assert(l === '---\nname: A # kept\nhandler:\n  - "[[team/a]]"\n  - "[[team/b]]"\n---\n', "links as a quoted list", l);
-  console.assert(typeof mergeDetails([], { "Tax no.": "1" }) === "string" && typeof mergeDetails([], { Stage: "x" }) === "string", "bad names");
+  console.assert(pickClients(cs, ["*"]).length === 2, "all active");
   console.log("ok");
 }

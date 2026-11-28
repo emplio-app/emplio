@@ -26,11 +26,13 @@ import {
   ChevronLeftIcon,
   Undo2Icon,
   WorkflowIcon,
+  ArrowUpRightIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AskFloat, PageAsk } from "@/components/chat/composer";
 import { Fragment, useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -75,7 +77,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
 import { ClientPicker } from "@/components/clients/client-picker";
-import { api, processRunsQueryKey, tasksQueryKey, useClients, useMe, useTasks } from "@/lib/api";
+import { PrivateSwitch } from "@/components/clients/clients-page";
+import { api, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProjects, useTasks } from "@/lib/api";
 import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -203,18 +206,16 @@ function Due({ t }: { t: Task }) {
 function StatusPill({ status }: { status: TaskStatus }) {
   if (status === "todo") return null;
   return (
-    <span
+    <Badge
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
-        status === "doing" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-        status === "waiting" &&
-          "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+        status === "doing" && "bg-info/10 text-info",
+        status === "waiting" && "bg-warning/10 text-warning",
         (status === "done" || status === "cancelled") &&
           "bg-muted text-muted-foreground",
       )}
     >
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }
 
@@ -234,8 +235,15 @@ function useTaskActions(onRemoved?: () => void) {
   });
   const clients = useClients();
   const update = useMutation({
+    // one at a time, each carrying the updatedAt the last one came back with: refused only when someone else changed it
+    scope: { id: "task-edit" },
     mutationFn: ({ id, ...body }: TaskInput & { id: string }) =>
-      api<Task>(`/tasks/${id}`, body, "PATCH"),
+      api<Task>(
+        `/tasks/${id}`,
+        { ...body, updatedAt: queryClient.getQueryData<Task[]>(tasksQueryKey)?.find((t) => t.id === id)?.updatedAt },
+        "PATCH",
+      ),
+    onSuccess: (t) => queryClient.setQueryData<Task[]>(tasksQueryKey, (old) => old?.map((x) => (x.id === t.id ? t : x))),
     // show it straight away; the server's answer replaces it
     onMutate: ({ id, ...body }) =>
       queryClient.setQueryData<Task[]>(tasksQueryKey, (old) =>
@@ -271,6 +279,11 @@ function useTaskActions(onRemoved?: () => void) {
   });
   const start = useMutation({
     mutationFn: (id: string) => api<Task>(`/tasks/${id}/start`, {}),
+    // the started task, as it now is, so the panel says so at once; you hear here and in a message when it's done
+    onSuccess: (t) => {
+      queryClient.setQueryData<Task[]>(tasksQueryKey, (old) => old?.map((x) => (x.id === t.id ? t : x)));
+      toast.success("Emplio started on it", { description: "You'll get a message when it's done or needs you." });
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
   });
   const remove = useMutation({
@@ -310,7 +323,7 @@ export function TasksPage() {
   useEffect(() => setClient(askedClient ?? "all"), [askedClient]);
   const clientItems = [
     { value: "all", label: "All clients" },
-    ...(clients.data ?? []).filter((c) => c.stage !== "past" || c.slug === client).map((c) => ({ value: c.slug, label: c.name })),
+    ...(clients.data ?? []).filter((c) => c.stageCategory !== "past" || c.slug === client).map((c) => ({ value: c.slug, label: c.name })),
   ];
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
@@ -380,7 +393,7 @@ export function TasksPage() {
   const row = (t: Task) => (
     <li
       key={t.id}
-      className="group flex items-start gap-3 px-2 py-2.5 hover:bg-muted/50 sm:rounded-lg"
+      className="group flex items-start gap-3 px-2 py-2.5 hover:bg-muted sm:rounded-lg"
     >
       <button
         type="button"
@@ -426,11 +439,12 @@ export function TasksPage() {
         )}
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {t.clientName && client === "all" && (
-            <span className="inline-flex max-w-48 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.7rem] font-medium text-foreground/80">
-              <Building2Icon className="size-3 shrink-0 text-muted-foreground" />
-              <span className="truncate">{t.clientName}</span>
-            </span>
+            <Badge variant="secondary" className="max-w-48">
+              <Building2Icon className="text-muted-foreground" />
+              <span className="min-w-0 truncate">{t.clientName}</span>
+            </Badge>
           )}
+          {t.project && <span className="max-w-48 truncate text-xs text-muted-foreground">{t.project.name}</span>}
           <Person t={t} />
           <Due t={t} />
           {t.requesterName && t.requesterId !== t.assigneeId && (
@@ -511,7 +525,7 @@ export function TasksPage() {
           <QuickAdd people={people} clientId={client === "all" ? null : client} />
 
           <div className="flex shrink-0 items-center gap-2">
-            <InputGroup className="h-8 flex-1">
+            <InputGroup className="flex-1">
               <InputGroupAddon>
                 <SearchIcon />
               </InputGroupAddon>
@@ -555,7 +569,7 @@ export function TasksPage() {
                       className={cn(
                         "px-2 font-sans text-xs font-medium tracking-normal text-muted-foreground",
                         g.label === "Needs you" &&
-                          "text-amber-700 dark:text-amber-300",
+                          "text-warning",
                       )}
                     >
                       {g.label}{" "}
@@ -586,10 +600,11 @@ export function TasksPage() {
               )}
               {!!finished.length && (
                 <section className="grid gap-1">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => setShowDone(!showDone)}
-                    className="flex items-center gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    className="justify-self-start text-muted-foreground"
                   >
                     <ChevronRightIcon
                       className={cn(
@@ -599,7 +614,7 @@ export function TasksPage() {
                     />
                     {words.length ? "Done" : "Done this week"}{" "}
                     <span className="font-normal">{finished.length}</span>
-                  </button>
+                  </Button>
                   {showDone && (
                     <ul className="divide-y sm:divide-y-0">
                       {finished.slice(0, 50).map(row)}
@@ -702,9 +717,9 @@ function SendBack({ to, onSend }: { to: string; onSend: (note: string) => void }
   const [note, setNote] = useState("");
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button variant="outline" size="sm" className="justify-self-start" />}>
+      <PopoverTrigger render={<Button variant="outline" size="sm" className="min-w-0 max-w-full justify-self-start" title={`Send back to “${to}”`} />}>
         <Undo2Icon />
-        Send back to &ldquo;{to}&rdquo;
+        <span className="truncate">Send back to &ldquo;{to}&rdquo;</span>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80">
         <form
@@ -845,14 +860,14 @@ function QuickAdd({ people, clientId }: { people: People; clientId: string | nul
           people={people}
           value={who}
           onChange={setWho}
-          className="h-8 min-w-0 flex-1 sm:w-44 sm:flex-none"
+          className="min-w-0 flex-1 sm:w-44 sm:flex-none"
         />
         <Input
           type="date"
           aria-label="Due"
           value={due}
           onChange={(e) => setDue(e.target.value)}
-          className="h-8 min-w-0 flex-1 sm:w-40 sm:flex-none"
+          className="min-w-0 flex-1 sm:w-40 sm:flex-none"
         />
         {/* on a phone a row of its own, so the person and the date each get half the width (the date was cut off) */}
         <Button
@@ -872,6 +887,30 @@ function QuickAdd({ people, clientId }: { people: People; clientId: string | nul
 }
 
 // One task, every field editable; text fields save when you leave them.
+// the client's project this task is part of (its open ones, and the one it's on)
+function ProjectSelect({ t, onChange }: { t: Task; onChange: (body: TaskInput) => void }) {
+  const projects = useProjects({ client: t.client! }).data ?? [];
+  const items = [{ value: "none", label: "No project" }, ...projects.map((p) => ({ value: p.slug, label: p.name })), ...(t.project && !projects.some((p) => p.slug === t.project!.slug) ? [{ value: t.project.slug, label: t.project.name }] : [])];
+  if (items.length < 2) return null;
+  return (
+    <>
+      <Label className="text-muted-foreground">Project</Label>
+      <Select items={items} value={t.project?.slug ?? "none"} onValueChange={(v) => v && onChange({ project: v === "none" ? null : (v as string) })}>
+        <SelectTrigger aria-label="Project" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((i) => (
+            <SelectItem key={i.value} value={i.value}>
+              {i.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </>
+  );
+}
+
 function TaskDetails({
   t,
   people,
@@ -926,14 +965,21 @@ function TaskDetails({
       </SheetHeader>
 
       <div className="grid flex-1 content-start gap-4 overflow-y-auto p-4">
-        {!t.assigneeId && t.running && (
+        {/* from the moment Start is pressed: what it's doing and where to watch (its own chat, once it has one) */}
+        {!t.assigneeId && (t.running || t.status === "doing") && (
           <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
-            <Spinner className="size-4" />
-            Emplio is working on this now.
+            <Spinner className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1">{t.workConversationId ? "Emplio is working on this now." : "Emplio is starting on this…"}</span>
+            {t.workConversationId && (
+              <Button variant="ghost" size="xs" className="shrink-0 text-primary hover:text-primary" nativeButton={false} render={<Link href={`/chat/${t.workConversationId}`} />}>
+                Watch
+                <ArrowUpRightIcon />
+              </Button>
+            )}
           </div>
         )}
         {t.process && (
-          <div className="grid gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+          <div className="grid gap-2 rounded-lg border bg-card px-3 py-2.5">
             <Link href={`/processes/${t.process.name}`} className="flex items-center gap-2 text-sm hover:underline">
               <WorkflowIcon className="size-4 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">
@@ -998,6 +1044,7 @@ function TaskDetails({
             onChange={(v) => onChange({ client: v === "none" ? null : v })}
             className="w-full"
           />
+          {t.client && <ProjectSelect t={t} onChange={onChange} />}
           <Label htmlFor="task-due" className="text-muted-foreground">
             Due
           </Label>
@@ -1024,6 +1071,11 @@ function TaskDetails({
               />
             </>
           )}
+          <PrivateSwitch
+            on={t.private}
+            what="Only owners, admins, who does it and who asked see this task (and, for a private client, the people who handle it)."
+            onChange={(on) => onChange({ private: on })}
+          />
         </div>
 
         <div className="grid gap-1.5">

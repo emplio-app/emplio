@@ -179,7 +179,7 @@ export function useMentionMenu(input: string, setInput: (text: string) => void, 
       {matches.map((m, i) => (
         <div key={`${m.kind}:${m.id}`}>
           {m.kind !== matches[i - 1]?.kind && (
-            <div className="flex items-center justify-between px-2.5 pt-2 pb-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+            <div className="flex items-center justify-between px-2.5 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {GROUP[m.kind]}
             </div>
           )}

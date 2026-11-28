@@ -6,9 +6,8 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
-import { cn } from "@/lib/utils";
 
-const KEY = "size-6 rounded-[6px] border border-background/20 bg-transparent text-background";
+const KEY = "size-6 rounded-md border border-primary-foreground/20 bg-transparent text-primary-foreground";
 
 // Places with their own Cmd+Enter or typing of their own (editing a message, a note on a quote, an open window)
 const NOT_FOR_THE_CARD = '[role="dialog"], [role="alertdialog"], input, textarea:not([name="message"]), [contenteditable="true"]';
@@ -40,10 +39,10 @@ export function NextStepCard({ card, onAnswer, onClose }: { card: NextStep; onAn
         {card.buttons.map((button, i) => (
           <Button
             key={button}
-            variant="secondary"
+            variant={i === 0 ? "default" : "secondary"}
+            size="lg"
             aria-keyshortcuts={i === 0 ? "Meta+Enter Control+Enter" : undefined}
             onClick={() => onAnswer(button)}
-            className={cn("h-9 rounded-[11px] px-3.5", i === 0 && "bg-foreground text-background hover:bg-foreground/90")}
           >
             {button}
             {i === 0 && (

@@ -9,8 +9,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AskFloat, useAskOpen } from "@/components/chat/composer";
 import { ClientPicker } from "@/components/clients/client-picker";
+import { PrivateSwitch } from "@/components/clients/clients-page";
 import { TaskSheet } from "@/components/tasks/tasks-page";
 import { matches, Search } from "@/components/things/things";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -86,7 +88,7 @@ export function ProcessesPage() {
               <li key={p.name}>
                 <Link
                   href={`/processes/${encodeURIComponent(p.name)}`}
-                  className="flex items-center gap-4 rounded-xl border bg-card px-4 py-3.5 transition-colors hover:bg-muted/40"
+                  className="flex items-center gap-4 rounded-xl border bg-card px-4 py-3.5 transition-colors hover:bg-muted"
                 >
                   <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
                     <WorkflowIcon className="size-4" />
@@ -98,7 +100,7 @@ export function ProcessesPage() {
                     </span>
                   </span>
                   {p.active > 0 && (
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary tabular-nums">{p.active} going</span>
+                    <Badge className="bg-primary/10 text-primary tabular-nums">{p.active} ongoing</Badge>
                   )}
                   <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
                 </Link>
@@ -164,7 +166,7 @@ export function ProcessPage() {
 function Empty() {
   return (
     <div className="mx-auto grid max-w-md justify-items-center gap-3 px-6 py-24 text-center">
-      <span className="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+      <span className="grid size-12 place-items-center rounded-xl bg-primary/10 text-primary">
         <WorkflowIcon className="size-6" />
       </span>
       <h2 className="text-lg font-semibold">No processes yet</h2>
@@ -195,6 +197,13 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
   });
   const rows = runs.data ?? [];
   const [editing, setEditing] = useState<ProcessRun | null>(null);
+  const setPrivate = useMutation({
+    mutationFn: (on: boolean) => api(`/processes/${p.name}/private`, { private: on }),
+    onSuccess: (_, on) => toast.success(on ? "Only owners and admins see it now" : "Everyone sees it now"),
+    onError: (e) => toast.error(e.message),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: processesQueryKey }),
+  });
+  const file = `${p.private ? "restricted" : "company"}/processes/${p.name}.md`;
   return (
     <section className="grid min-w-0 content-start gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -210,7 +219,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
               variant="outline"
               size="sm"
               nativeButton={false}
-              render={<Link href={`/chat?file=${encodeURIComponent(`company/processes/${p.name}.md`)}`} />}
+              render={<Link href={`/chat?file=${encodeURIComponent(file)}`} />}
             >
               <FileTextIcon />
               Edit steps
@@ -226,7 +235,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
                   href={
                     p.startedBy.length === 1
                       ? `/chat?file=${encodeURIComponent(`company/automations/${p.startedBy[0]!.name}.md`)}`
-                      : `/chat?file=${encodeURIComponent(`company/processes/${p.name}.md`)}&do=repeat`
+                      : `/chat?file=${encodeURIComponent(file)}&do=repeat`
                   }
                 />
               }
@@ -238,17 +247,20 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
           {!p.error && <Start p={p} />}
         </div>
       </div>
-      {p.error && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">This process can&rsquo;t run: {p.error}</p>}
+      {p.error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">This process can&rsquo;t run: {p.error}</p>}
       {p.about && <p className="max-w-prose text-sm whitespace-pre-line text-muted-foreground">{p.about}</p>}
+      <div className="grid max-w-md grid-cols-2">
+        <PrivateSwitch on={p.private} what="Only owners and admins see this process." onChange={(on) => setPrivate.mutate(on)} />
+      </div>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="grid min-w-0 content-start gap-3">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{all ? "All runs" : "Going now"}</h3>
+            <h3 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{all ? "All runs" : "Ongoing"}</h3>
             <Tabs value={all ? "all" : "going"} onValueChange={(v) => setAll(v === "all")}>
               <TabsList>
                 <TabsTrigger value="going" className="px-2.5 text-xs">
-                  Going
+                  Ongoing
                 </TabsTrigger>
                 <TabsTrigger value="all" className="px-2.5 text-xs">
                   All
@@ -264,7 +276,7 @@ function Board({ p, all, setAll, admin, onOpenTask }: { p: Process; all: boolean
           ) : !rows.length ? (
             <div className="grid justify-items-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center">
               <RouteIcon className="size-5 text-muted-foreground" />
-              <p className="text-sm font-medium">{all ? "Never run yet" : "Nothing going right now"}</p>
+              <p className="text-sm font-medium">{all ? "Never run yet" : "Nothing ongoing right now"}</p>
               <p className="max-w-xs text-sm text-muted-foreground">
                 {p.error
                   ? "Fix the process first."
@@ -326,8 +338,8 @@ function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask:
   const overdue = !!cur && late(cur.dueAt);
   const step = r.steps[r.step];
   return (
-    <li className={cn("group relative rounded-xl border bg-card transition-colors hover:bg-muted/40", r.status === "stopped" && "opacity-60")}>
-      <Button variant="ghost" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="h-auto justify-start whitespace-normal font-normal grid w-full gap-2.5 rounded-xl px-4 py-3 pr-12 text-left hover:bg-transparent disabled:opacity-100 dark:hover:bg-transparent">
+    <li className={cn("group relative rounded-xl border bg-card transition-colors hover:bg-muted", r.status === "stopped" && "opacity-60")}>
+      <button type="button" disabled={!cur} onClick={() => cur && onOpenTask(cur.taskId)} className="grid w-full gap-2.5 rounded-xl px-4 py-3 pr-12 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
         <span className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 truncate font-medium">
             {runName(r)}
@@ -347,7 +359,7 @@ function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask:
                   ? "bg-primary"
                   : i === r.step && active
                     ? waiting
-                      ? "bg-amber-500"
+                      ? "bg-warning"
                       : overdue
                         ? "bg-destructive"
                         : "bg-primary/35"
@@ -359,13 +371,13 @@ function RunCard({ r, onOpenTask, onStop, onEdit }: { r: ProcessRun; onOpenTask:
         {details && <span className="truncate text-xs text-muted-foreground">{details}</span>}
         {cur && step && (
           <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
-            {waiting ? <HourglassIcon className="size-3 text-amber-600" /> : <CircleDotIcon className="size-3 text-primary" />}
+            {waiting ? <HourglassIcon className="size-3 text-warning" /> : <CircleDotIcon className="size-3 text-primary" />}
             <span className="min-w-0 truncate text-foreground">{step.name}</span>
             <span>· {waiting ? "waiting on them" : cur.assigneeName}</span>
             {cur.dueAt && <span className={cn(overdue && "font-medium text-destructive")}>· {overdue ? "late, was due" : "due"} {short(cur.dueAt)}</span>}
           </span>
         )}
-      </Button>
+      </button>
       {(onStop || onEdit) && (
         <div className="absolute top-2 right-2">
           <DropdownMenu>

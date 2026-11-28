@@ -57,6 +57,7 @@
         "class-variance-authority": "^0.7.1",
         "cmdk": "^1.1.1",
         "cn": "^0.5.0",
+        "d3-force": "3.0.0",
         "input-otp": "^1.5.0",
         "lucide-react": "^1.60.0",
         "motion": "^14.4.0",
@@ -77,6 +78,7 @@
       "devDependencies": {
         "@openuidev/cli": "^0.6.0",
         "@tailwindcss/postcss": "^4.3.3",
+        "@types/d3-force": "3.0.10",
         "@types/node": "^20",
         "@types/react": "^19",
         "@types/react-dom": "^19",

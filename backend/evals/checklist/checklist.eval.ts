@@ -27,6 +27,7 @@ const load = () => (app ??= (async () => [await import("../emplio"), await impor
 export async function task(c: Case): Promise<Output> {
   const [{ reply, pretend, person }, { FROM_EMPLIO }, { jobCard }, { progressGuard }, { notCounted }, { JOB_WORLD }] = await load();
   let plan: PlanStep[] = [];
+  const { PLAN_TIP, planText } = await import("../../src/plan");
   const guard = progressGuard(null);
   // after each counted command, how many steps were ticked
   const ticks: number[] = [];
@@ -48,13 +49,20 @@ export async function task(c: Case): Promise<Output> {
     const counted = !notCounted(command);
     const note = guard.check(moved ? plan.map((s) => ({ ...s })) : null, counted);
     if (counted) ticks.push(done());
-    const out = /\bemplio plan\b/.test(command) ? "Checklist saved." : pretend(command, [...c.world, ...JOB_WORLD]);
+    const out = /\bemplio plan\b/.test(command) ? `${planText(plan)}${plan.some((x) => x.status !== "done") ? `\n${PLAN_TIP}` : ""}` : pretend(command, [...c.world, ...JOB_WORLD]);
     return note ? `${out}\n\n${note}` : out;
   };
   const card = jobCard([{ role: "user", parts: [{ type: "text", text: FROM_EMPLIO + c.brief }] }], []);
-  const said = await reply({}, [person(FROM_EMPLIO + c.brief)], standIn, 40, false, undefined, { agent: c.agent, card });
+  const job = { agent: c.agent, card };
+  const first = [person(FROM_EMPLIO + c.brief)];
+  const said = await reply({}, first, standIn, 40, false, undefined, job);
+  // a Done report with steps unticked: the app asks once, in a quiet run (src/jobs.ts openSteps), as here
+  const open = plan.filter((s) => s.status !== "done").map((s) => s.text);
+  const { openSteps, statusOf } = await import("../../src/checks");
+  if (open.length && statusOf(said.last ?? "") === "done")
+    await reply({}, [...first, ...(said.messages ?? []), person(FROM_EMPLIO + openSteps(open))], standIn, 6, false, undefined, job);
   const output = { commands: ticks.length, ticks, steps: plan.length, done: done(), report: said.last ?? "" };
-  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: c.name, output })}\n`);
+  if (process.env.EVAL_DUMP) appendFileSync(process.env.EVAL_DUMP, `${JSON.stringify({ name: c.name, output, commands: said.commands })}\n`);
   return output;
 }
 

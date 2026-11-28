@@ -156,15 +156,10 @@ export function AppLogo({ src, className = "size-10" }: { src?: string; classNam
 
 export function ConnectButton({ busy, onClick, label = "Connect" }: { busy: boolean; onClick: () => void; label?: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-70"
-    >
+    <Button onClick={onClick} disabled={busy}>
       {busy && <Spinner className="size-3" />}
       {busy ? "Waiting…" : label}
-    </button>
+    </Button>
   );
 }
 

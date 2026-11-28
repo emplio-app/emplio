@@ -86,9 +86,10 @@ def fetch(r):
 
 def open_(file, mode="r", *a, **k):
     r = real(file)
-    if not any(c in mode for c in "wax+"):
+    # read, and append too: an appended file starts from what's there, so the write the eval sees is the whole file
+    if not any(c in mode for c in "wx"):
         fetch(r)
-    elif isinstance(r, str) and r.startswith(W):
+    if any(c in mode for c in "wax+") and isinstance(r, str) and r.startswith(W):
         _makedirs(os.path.dirname(r), exist_ok=True)
     return _open(r, mode, *a, **k)
 

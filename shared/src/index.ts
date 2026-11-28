@@ -5,7 +5,8 @@ export type Change = { text: string; image?: string };
 export type Release = { version: string; date: string; changes: Change[] };
 
 export type User = { id: string; email: string; name: string | null };
-export type Workspace = { id: string; name: string; role: "owner" | "admin" | "member" };
+// currency: what its prices and fees are in (ISO code: INR, USD, GBP)
+export type Workspace = { id: string; name: string; role: "owner" | "admin" | "member"; currency: string };
 
 export type AuthStartRequest = { email: string };
 // notEmailed: no email service on this server, so the code is only in its log
@@ -28,9 +29,10 @@ export type UpdateConversationRequest = { title?: string; archived?: boolean };
 
 export type Role = Workspace["role"];
 // reportsTo: the user id of who they report to, if anyone
-export type TeamMember = { id: string; name: string | null; email: string; role: Role; reportsTo: string | null };
-export type AddMemberRequest = { email: string; name?: string; role?: "admin" | "member" };
-export type UpdateMemberRequest = { role?: "admin" | "member"; reportsTo?: string | null };
+// slug: their notes' folder, company/team/<slug>/; title: what they do here ("Design lead"); joined: signed in at least once
+export type TeamMember = { id: string; name: string | null; email: string; role: Role; reportsTo: string | null; slug: string | null; title: string | null };
+export type AddMemberRequest = { email: string; name?: string; role?: "admin" | "member"; title?: string };
+export type UpdateMemberRequest = { role?: "admin" | "member"; reportsTo?: string | null; title?: string | null };
 
 // label: which account (the Gmail address, or a name the person gave it); tells several of one app apart
 // problem: why it isn't (fully) working, said to the person, such as permissions left out when it was connected
@@ -194,6 +196,9 @@ export type SearchHit = {
   // its place in the chat (1 = first message)
   n: number;
 };
+
+// A client, contact, project, service or meeting found by the search box: line is a few of its details; href opens it
+export type RecordHit = { kind: "client" | "contact" | "project" | "service" | "meeting"; slug: string; name: string; line: string; href: string };
 
 // The few things about how the AI employee behaves that a business may want to tune: the Settings screen
 // draws itself from this list and the server checks against it. A workspace stores only what it changed;
@@ -570,6 +575,9 @@ export type JobInfo = {
 
 // GET /knowledge: the notes (.md files) this person can see, by folder (a git repo)
 export type KnowledgeFolder = { repo: string; label: string; files: string[] };
+// GET /knowledge/graph: the notes (id: repo/path, or a record's own page as its record, clients/northwind) and the
+// links between them by id; an id with no node is a record from the database or a note not written yet
+export type BrainGraph = { nodes: { id: string; repo: string; path: string; title: string | null }[]; edges: [string, string][] };
 
 export type DbTable = { name: string; type: string; rows: number | null; private: boolean };
 export type DbRows = { columns: string[]; rows: (string | number | null)[][]; total: number; offset: number; limit: number };
@@ -601,16 +609,22 @@ export type Task = {
   // the AI is working on it right now (its work chat is replying)
   running: boolean;
   chases: number;
-  // the client it's for: their folder's name, company/clients/<client>/ (clients.ts)
+  // the client (its slug) and project it's for
   client: string | null;
   clientName: string | null;
+  project: { slug: string; name: string } | null;
+  // owners, admins, who does it and who asked only (and a private client's handlers)
+  private: boolean;
+  updatedAt: string;
   // a process's step: which go (and its process's file name), which step of how many, where sending it back goes
   // (an OK step), and what was filled in when it started
   process: { runId: string; name: string; title: string; step: number; of: number; backTo: string | null; inputs: RunInput[] } | null;
   createdAt: string;
   doneAt: string | null;
 };
-export type TaskInput = { title?: string; notes?: string | null; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; client?: string | null };
+// client and project: a slug (or, from commands, a name); a project sets its client too. updatedAt: as read (the app),
+// refusing the change when it's older than the task's.
+export type TaskInput = { title?: string; notes?: string | null; private?: boolean; status?: TaskStatus; waitingOn?: string | null; assigneeId?: string | null; agent?: string | null; dueAt?: string | null; client?: string | null; project?: string | null; updatedAt?: string };
 
 // A process (backend processes.ts): steps done in order, for each client or anything else with a name. The file is
 // company/processes/<name>.md; each go of it is a ProcessRun, and each step a task.
@@ -639,6 +653,8 @@ export type Process = {
   steps: ProcessStep[];
   // how it's done, in the file's words
   about: string;
+  // its file is in restricted/processes/: owners and admins only
+  private: boolean;
   error: string | null;
   active: number;
 };
@@ -654,7 +670,9 @@ export type ProcessRun = {
   process: string;
   processTitle: string;
   subject: string;
+  // the client (slug) and project it's for
   client: string | null;
+  project: { slug: string; name: string } | null;
   // what was filled in when it started (changed since, maybe); the first one names it beside its client
   inputs: RunInput[];
   period: string | null;
@@ -668,52 +686,194 @@ export type ProcessRun = {
   doneAt: string | null;
 };
 
-// A client of the business (backend clients.ts): the Clients page and `emplio clients`. All of it is the file
-// company/clients/<slug>/index.md: name, stage, handler and details at its top, their notes below.
-// A stage is the business's own word for where a client is (lead, onboarding, on hold…), lowercase; prospect (not won
-// yet) and past (no longer working together) keep their meaning, every other stage is a client being worked for.
-export const CLIENT_STAGES = ["prospect", "active", "past"] as const;
-export type ClientStage = string;
-export const STAGE_RULE = /^[a-z][a-z0-9 -]{0,29}$/;
-export const isWorking = (stage: string) => stage !== "prospect" && stage !== "past";
-// won and being worked for: what every-client work and onboarding go to; the business's other words (lead, on hold) aren't
-// ponytail: a business whose word for won is something else gets neither; add it here
-export const WON_STAGES = ["active", "onboarding", "won"];
-export const isWon = (stage: string) => WON_STAGES.includes(stage);
+// --- Records (backend records.ts): clients, contacts, services, projects. Rows the server keeps; the app and
+// `emplio <kind>` call the same functions; notes about one are the file company/<kind>/<slug>/index.md. A slug is set
+// once and never changes; renaming changes only the name. Archived ones are kept, out of lists unless asked for.
+
+// A stage is the business's own word for where a client is (Onboarding, Retainer, On hold), each in one of three
+// categories the app reasons with: prospect (not won yet), active (being worked for), past (no longer).
+export const STAGE_CATEGORIES = ["prospect", "active", "past"] as const;
+export type StageCategory = (typeof STAGE_CATEGORIES)[number];
+export type ClientStage = { id: string; name: string; category: StageCategory; position: number };
+export const FIELD_TYPES = ["text", "number", "date", "choice"] as const;
+// The kinds of record a business adds its own fields to (a client's Tax number, a contact's Birthday)
+export const FIELD_KINDS = ["client", "contact", "project", "service"] as const;
+export type FieldKind = (typeof FIELD_KINDS)[number];
+export type ClientField = { id: string; key: string; name: string; type: (typeof FIELD_TYPES)[number]; options: string[]; position: number };
+export const MONEY_PERIODS = ["once", "monthly", "yearly", "hourly"] as const;
+export type MoneyPeriod = (typeof MONEY_PERIODS)[number];
+export const PROJECT_STATUSES = ["active", "on_hold", "done", "cancelled"] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export type RecordRef = { id: string; slug: string; name: string };
+export type PersonRef = { id: string; name: string };
+// one field changed: its value before and after (null: empty)
+export type RecordChange = { field: string; from: unknown; to: unknown };
+
 export type Client = {
+  id: string;
   slug: string;
   name: string;
-  stage: ClientStage;
-  // [[team/<name>]] links; id: the teammate's user id when their team file's email is a member's
-  handlers: { id: string | null; name: string; path: string }[];
-  // what's known about them, in their own words: Contact email, Tax number, Files: monthly. Processes fill inputs of the
-  // same name from these; a schedule's clients: [Files=monthly] picks the clients with that one.
+  // the stage's name, and its category
+  stage: string;
+  stageCategory: StageCategory;
+  handlers: PersonRef[];
+  // the business's client fields this one has filled in, in their order: Tax number, Files: Monthly. A process input of
+  // the same name is filled in from one; a schedule's clients: [Files=monthly] picks by one.
   details: ClientDetail[];
-  // tasks not done or cancelled, and how many of them wait on someone
   openTasks: number;
   waitingTasks: number;
+  activeProjects: number;
+  externalIds: Record<string, string>;
+  // owners and admins only: nobody else sees it, in the app or from Emplio
+  private: boolean;
+  archivedAt: string | null;
+  updatedAt: string;
 };
-export type ClientDetail = { name: string; value: string };
+export type ClientDetail = { key: string; name: string; value: string };
+// details: only the ones changing, by name or key; "" or null empties one. handlers: each a teammate's id, email or
+// name, or "me". updatedAt: as read; a newer one on the server refuses the change. force: add despite a close match.
+export type ClientInput = {
+  name?: string;
+  stage?: string;
+  handlers?: string[];
+  details?: Record<string, string | null>;
+  externalIds?: Record<string, string | null>;
+  private?: boolean;
+  updatedAt?: string;
+  force?: boolean;
+};
 
-// Things kept as folders in company/: <kind>/<name>/index.md (backend things.ts). path is "clients/northwind", which is
-// also how other files link to it: [[clients/northwind]]. field is the YAML key the link is on, or "text" in the words.
-export const THING_KINDS = ["clients", "contacts", "team", "services", "projects"] as const;
-export type ThingKind = (typeof THING_KINDS)[number];
-// fields: each value as text (a list's items joined with ", "); problems: what's wrong in the file (line: the file's own)
-export type ThingProblem = { line: number | null; text: string; warning?: true };
-export type Thing = { path: string; kind: ThingKind; title: string; fields: Record<string, string>; body: string; links: { field: string; to: string }[]; problems: ThingProblem[] };
-// one thing (null: no file yet), what it links to (title null: nothing there) and what links to it
-export type ThingPage = {
-  path: string;
-  thing: Thing | null;
-  links: { field: string; to: string; title: string | null }[];
-  linkedFrom: { field: string; from: string; kind: ThingKind; title: string; fields: Record<string, string> }[];
-  // company/meetings/<YYYY-MM-DD>-<name>.md notes that link here, newest first
-  meetings: { path: string; title: string; date: string | null }[];
+export type Contact = {
+  id: string;
+  slug: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  // where they work when it isn't a client (the auditor's firm)
+  org: string | null;
+  clients: (RecordRef & { role: string | null })[];
+  // the business's contact fields this one has filled in
+  details: ClientDetail[];
+  // owners and admins only: nobody else sees it, in the app or from Emplio
+  private: boolean;
+  // private only because every client they're at is (their names): shared again with them, not on their own
+  privateBecause: string | null;
+  archivedAt: string | null;
+  updatedAt: string;
 };
-// details: only the ones changing; "" or null removes one
-// handlers: each a teammate's user id, email or name, or a team file (team/<name>)
-export type ClientInput = { name?: string; stage?: ClientStage; handlers?: string[]; details?: Record<string, string | null> };
+// clients: the whole list it's at, each a client (slug or name) with their role there
+export type ContactInput = {
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  title?: string | null;
+  org?: string | null;
+  clients?: { client: string; role?: string | null }[];
+  details?: Record<string, string | null>;
+  private?: boolean;
+  updatedAt?: string;
+  force?: boolean;
+};
+
+export type Money = { amount: number | null; currency: string | null; period: MoneyPeriod | null };
+export type Service = Money & {
+  id: string;
+  slug: string;
+  name: string;
+  priceNote: string | null;
+  // the process a project of it runs (its file name)
+  process: string | null;
+  activeProjects: number;
+  details: ClientDetail[];
+  // owners and admins only: nobody else sees it, in the app or from Emplio
+  private: boolean;
+  archivedAt: string | null;
+  updatedAt: string;
+};
+// amount: a number, or as written ("18,000", "1.5L"); null clears it
+export type ServiceInput = { name?: string; amount?: number | string | null; period?: MoneyPeriod | null; priceNote?: string | null; process?: string | null; details?: Record<string, string | null>; private?: boolean; updatedAt?: string };
+
+export type Project = Money & {
+  id: string;
+  slug: string;
+  name: string;
+  client: RecordRef;
+  service: RecordRef | null;
+  lead: PersonRef | null;
+  status: ProjectStatus;
+  startOn: string | null;
+  dueOn: string | null;
+  feeNote: string | null;
+  openTasks: number;
+  details: ClientDetail[];
+  // owners and admins only: nobody else sees it, in the app or from Emplio
+  private: boolean;
+  // private only because its client is (the client's name): shared again with it, not on its own
+  privateBecause: string | null;
+  doneAt: string | null;
+  archivedAt: string | null;
+  updatedAt: string;
+};
+// client and service: slug or name; lead: a teammate's id, email or name, "me", or null
+export type ProjectInput = {
+  name?: string;
+  client?: string;
+  service?: string | null;
+  lead?: string | null;
+  status?: ProjectStatus;
+  startOn?: string | null;
+  dueOn?: string | null;
+  amount?: number | string | null;
+  period?: MoneyPeriod | null;
+  feeNote?: string | null;
+  details?: Record<string, string | null>;
+  private?: boolean;
+  updatedAt?: string;
+};
+
+// one change on a record's history
+export type HistoryEntry = { id: string; at: string; who: string | null; via: "app" | "emplio" | "import" | "system" | null; summary: string; changes: RecordChange[] };
+
+// Everything about one client, in one call (the client page)
+// A meeting (meetings.ts): when, about which client or project, who was in it. Its notes: `path` (repo/meetings/<slug>.md)
+export type Meeting = {
+  id: string;
+  slug: string;
+  title: string;
+  on: string;
+  client: RecordRef | null;
+  project: RecordRef | null;
+  team: PersonRef[];
+  contacts: RecordRef[];
+  others: string[];
+  // its own switch; hidden: private for any reason (its client's or project's too)
+  private: boolean;
+  hidden: boolean;
+  path: string;
+  updatedAt: string;
+};
+
+export type ClientPage = {
+  client: Client;
+  contacts: Contact[];
+  projects: Project[];
+  // open work, soonest first: the first 50, and how many in all
+  tasks: Task[];
+  tasksTotal: number;
+  // running ones, then the last 10 finished
+  runs: ProcessRun[];
+  // company/meetings/<YYYY-MM-DD>-<name>.md notes, and other notes, that link to the client
+  // paths start with their folder: company/meetings/...
+  meetings: { path: string; title: string; date: string | null }[];
+  notes: { path: string; title: string }[];
+  history: HistoryEntry[];
+};
+
+// The kinds a note can link to: [[clients/northwind]] opens that client
+export const RECORD_KINDS = ["clients", "contacts", "team", "services", "projects"] as const;
+export type RecordKind = (typeof RECORD_KINDS)[number];
 
 // A file the AI employee made (backend made.ts): the Files page and the previews in the chat.
 export type MadeFile = {

@@ -185,12 +185,12 @@ function FilterMenu({
     <div className="grid gap-2 text-xs">
       <div className="truncate px-2 pt-1 font-medium">{name}</div>
       <div className="grid">
-        <button type="button" className={item} onClick={() => onSort(false)}>
-          <ArrowUpIcon className="size-3.5" /> Sort smallest to largest {sorted === "asc" && <CheckIcon className="ml-auto size-3.5" />}
-        </button>
-        <button type="button" className={item} onClick={() => onSort(true)}>
-          <ArrowDownIcon className="size-3.5" /> Sort largest to smallest {sorted === "desc" && <CheckIcon className="ml-auto size-3.5" />}
-        </button>
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => onSort(false)}>
+          <ArrowUpIcon /> Sort smallest to largest {sorted === "asc" && <CheckIcon className="ml-auto" />}
+        </Button>
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => onSort(true)}>
+          <ArrowDownIcon /> Sort largest to smallest {sorted === "desc" && <CheckIcon className="ml-auto" />}
+        </Button>
       </div>
       <div className="grid gap-1.5 border-t pt-2">
         <Select items={OPS} value={filter.op} onValueChange={(v) => v && set({ op: v as Op })}>
@@ -205,10 +205,10 @@ function FilterMenu({
             ))}
           </SelectContent>
         </Select>
-        <Input className="h-8" value={filter.value} onChange={(e) => set({ value: e.target.value })} placeholder="Value" />
+        <Input value={filter.value} onChange={(e) => set({ value: e.target.value })} placeholder="Value" />
       </div>
       <div className="grid gap-1.5 border-t pt-2">
-        <Input className="h-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search values" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search values" />
         <div className="max-h-56 overflow-y-auto rounded-md border p-1">
           <label className={item}>
             <Checkbox
@@ -453,14 +453,9 @@ function SheetView({ file }: { file: Shown }) {
           {book.data.length > 1 && (
             <div className="flex items-center gap-1">
               {book.data.map((s, i) => (
-                <button
-                  key={s.name}
-                  type="button"
-                  onClick={() => showTab(i)}
-                  className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${s === sheet ? "bg-background font-medium shadow-xs ring-1 ring-border" : "text-muted-foreground hover:text-foreground"}`}
-                >
+                <Button key={s.name} variant={s === sheet ? "outline" : "ghost"} size="xs" aria-pressed={s === sheet} onClick={() => showTab(i)}>
                   {s.name}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -474,9 +469,9 @@ function SheetView({ file }: { file: Shown }) {
           {filtered.length > 0 && (
             <span className="shrink-0 text-xs text-muted-foreground">
               {body.length} of {all.length - 1} rows ·{" "}
-              <button type="button" className="underline underline-offset-2" onClick={() => (setSel(null), setFilters({}))}>
+              <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground" onClick={() => (setSel(null), setFilters({}))}>
                 Clear filters
-              </button>
+              </Button>
             </span>
           )}
           {sheet.rows.length > MAX_ROWS && (
@@ -657,7 +652,7 @@ function Preview({ file }: { file: Shown }) {
     return (
       <div className="grid gap-2">
         {kind === "office" && <p className="text-xs text-muted-foreground">Only the words are shown here. Download it to see it as it looks.</p>}
-        <pre className="overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">{text.data}</pre>
+        <pre className="overflow-auto rounded-md border bg-muted p-3 font-mono text-xs whitespace-pre-wrap">{text.data}</pre>
       </div>
     );
   }
@@ -698,13 +693,13 @@ function Share({ id }: { id: string }) {
   if (made.isPending) return null;
   if (!link)
     return (
-      <Button size="sm" variant="ghost" className="h-8 gap-1.5" disabled={toggle.isPending} onClick={() => toggle.mutate(true)} title="Make a link anyone can open, no sign-in needed" data-tip="file-share" data-tip-side="bottom">
+      <Button variant="ghost" disabled={toggle.isPending} onClick={() => toggle.mutate(true)} title="Make a link anyone can open, no sign-in needed" data-tip="file-share" data-tip-side="bottom">
         <LinkIcon /> Share
       </Button>
     );
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button size="sm" variant="secondary" className="h-8 gap-1.5" />}>
+      <DropdownMenuTrigger render={<Button variant="secondary" />}>
         {copied ? <CheckIcon /> : <UsersIcon />} {copied ? "Link copied" : "Shared"}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -814,7 +809,7 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
         <>
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 max-lg:gap-1 max-lg:pl-1.5">
             {/* on a phone the file covers the page: back first, where a thumb expects it */}
-            <Button size="icon" variant="ghost" onClick={onClose} className="size-10 shrink-0 lg:hidden" aria-label="Back">
+            <Button size="icon-lg" variant="ghost" onClick={onClose} className="shrink-0 lg:hidden" aria-label="Back">
               <ChevronLeftIcon className="size-5" />
             </Button>
             <FileTypeIcon file={file} className="size-4 shrink-0 text-muted-foreground max-lg:hidden" />
@@ -837,7 +832,7 @@ export function FilePanel({ file: given, onClose }: { file: Shown | null; onClos
           </header>
           {/* the page, not a frame inside it, gets the pointer while the edge is dragged */}
           {/* data-quotable: text selected in it can be replied to in the chat beside it (chat/quote.tsx) */}
-          <ZoomFrame key={file.url} zoomable={kindOf(file) === "image" || kindOf(file) === "pdf"} className={`min-h-0 flex-1 overflow-auto bg-muted/40 p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
+          <ZoomFrame key={file.url} zoomable={kindOf(file) === "image" || kindOf(file) === "pdf"} className={`min-h-0 flex-1 overflow-auto bg-muted p-2 lg:p-3 ${dragging ? "pointer-events-none" : ""}`}>
             <Preview file={file} />
           </ZoomFrame>
         </>
@@ -859,7 +854,7 @@ export function MadeCards({ files }: { files: { id?: string; url: string; filena
               <img src={imageHref(f.url, 256)} alt={f.name} loading="lazy" decoding="async" className="h-40 max-w-64 object-cover" />
             </button>
           ) : (
-            <div key={f.url} className="flex w-72 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 hover:bg-accent/50" data-tip={i ? undefined : "made"} data-tip-side="bottom">
+            <div key={f.url} className="flex w-72 max-w-full items-center gap-1 rounded-lg border bg-card pr-1 hover:bg-muted" data-tip={i ? undefined : "made"} data-tip-side="bottom">
               <button type="button" onClick={() => open?.(f)} className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-2.5 text-left">
                 <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
                   <FileTypeIcon file={f} className="size-4.5" />

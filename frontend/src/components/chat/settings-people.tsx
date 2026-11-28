@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ClientPicker as SearchPicker } from "@/components/clients/client-picker";
 import { api, meQueryKey, useMe } from "@/lib/api";
 
 function NameRow({ id, label, help, saved, disabled, save }: { id: string; label: string; help: string; saved: string; disabled?: boolean; save: (name: string) => Promise<unknown> }) {
@@ -36,6 +37,30 @@ function NameRow({ id, label, help, saved, disabled, save }: { id: string; label
   );
 }
 
+// the currency prices and fees are in: picked by typing (USD, euro, rupee)
+const CURRENCIES = (() => {
+  const names = new Intl.DisplayNames(undefined, { type: "currency" });
+  return Intl.supportedValuesOf("currency").map((c) => ({ value: c, label: `${names.of(c) ?? c} (${c})` }));
+})();
+function CurrencyRow({ id, saved, disabled }: { id: string; saved: string; disabled: boolean }) {
+  const queryClient = useQueryClient();
+  const m = useMutation({ mutationFn: (currency: string) => api(`/workspaces/${id}`, { currency }, "PATCH"), onSuccess: () => queryClient.invalidateQueries({ queryKey: meQueryKey }) });
+  return (
+    <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_18rem] sm:gap-6">
+      <div className="grid content-start gap-1">
+        <Label>Currency</Label>
+        <p className="text-xs text-muted-foreground">What your prices and fees are in. Ones already written down keep theirs.</p>
+        {m.error && <p className="text-xs text-destructive">{m.error.message}</p>}
+      </div>
+      {disabled ? (
+        <Input value={CURRENCIES.find((c) => c.value === saved)?.label ?? saved} disabled />
+      ) : (
+        <SearchPicker items={CURRENCIES} value={saved} label="Currency" search="Search currencies" empty="No currency matches." onChange={(c) => c !== saved && m.mutate(c)} className="w-full" />
+      )}
+    </div>
+  );
+}
+
 export function BusinessTab() {
   const business = useMe().data?.workspaces[0];
   if (!business) return null;
@@ -55,6 +80,7 @@ export function BusinessTab() {
             disabled={!canEdit}
             save={(name) => api(`/workspaces/${business.id}`, { name }, "PATCH")}
           />
+          <CurrencyRow id={business.id} saved={business.currency} disabled={!canEdit} />
         </CardContent>
       </Card>
     </>

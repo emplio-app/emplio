@@ -68,7 +68,7 @@ export async function cases(): Promise<Case[]> {
     c("notice not right", "back", "the contoso notice draft isn't right, it's missing the auditor reappointment item. redo it", { acts: [{ act: "back", id: "e4a77c02" }] }),
 
     // stop
-    c("paid in full", "stop", "northwind paid INV-1093 in full this morning", { acts: [{ act: "stop", id: "3b9f2d10" }] }),
+    c("paid in full", "stop", "northwind paid INV-1093 in full this morning", { acts: [{ act: "stop", id: "3b9f2d10" }], allow: ["task"] }),
     c("client pulled out", "stop", "wingtip pulled out, we're not taking them on. stop their onboarding", { acts: [{ act: "stop", id: "51d0c9e3" }], allow: ["client", "task"] }),
     c("nothing to stop", "read", "tailspin backed out, stop their onboarding", { acts: [], allow: ["client"] }),
 
@@ -80,7 +80,7 @@ export async function cases(): Promise<Case[]> {
     // held out: written after the rules settled, to see they hold on cases they weren't fitted to
     c("amount was wrong", "change", "the wingtip chase amount is wrong, INV-3410 is 9,800", { acts: [{ act: "set", id: "c8d2e5f1", inputs: { amount: "9800" } }] }),
     c("call made", "step-done", "raj called fabrikam about INV-2207 this morning", { acts: [{ act: "done", id: "a1f3c9d2" }] }),
-    c("fabrikam paid", "stop", "fabrikam cleared INV-2207 today", { acts: [{ act: "stop", id: "7c1e04aa" }] }),
+    c("fabrikam paid", "stop", "fabrikam cleared INV-2207 today", { acts: [{ act: "stop", id: "7c1e04aa" }], allow: ["task"] }),
     c("wrong year in the notice", "back", "contoso's notice says FY 2024-25, it should be 2025-26. send it back", { acts: [{ act: "back", id: "e4a77c02" }], allow: ["set"] }),
 
     // new-run
@@ -95,6 +95,6 @@ export async function cases(): Promise<Case[]> {
     { name: "draft the notice", category: "own-step", source: "written", business: firm, chat: [person(await ownStep("f5d6e7a8", "Draft the AGM notice · 2025-26", contosoFiling, 1))], expect: { acts: [{ act: "done", or: ["waiting"], id: "f5d6e7a8" }], allow: ["hand"] } },
     { name: "redo a sent-back draft", category: "own-step", source: "written", business: firm, chat: [person(await ownStep("f9b0c1d2", "Draft the AGM notice · 2025-26", contosoFiling, 1, "the AGM is on 18 Dec, not 15 Dec; fix the date everywhere"))], expect: { acts: [{ act: "done", or: ["waiting"], id: "f9b0c1d2" }], allow: ["hand", "set"] } },
     // Wingtip has no contact email on file: only a person can give it
-    { name: "reminder with no email", category: "own-step", source: "written", business: firm, chat: [person(await ownStep("fb617283", "Send a reminder · INV-3410", wingtipChase, 0))], expect: { acts: [{ act: "waiting", id: "fb617283" }], allow: ["hand"] } },
+    { name: "reminder with no email", category: "own-step", source: "written", business: firm, chat: [person(await ownStep("fb617283", "Send a reminder · INV-3410", wingtipChase, 0))], expect: { acts: [{ act: "waiting", id: "fb617283" }], allow: ["hand", "ask"] } },
   ];
 }

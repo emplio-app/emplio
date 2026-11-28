@@ -17,7 +17,7 @@ export function PlanCard({ steps, live }: { steps: PlanStep[]; live: boolean }) 
   if (!steps.length) return null;
   return (
     // mt-2: clear of the copy and edit buttons under their message
-    <div className="mt-2 w-full overflow-hidden rounded-lg border bg-card text-sm">
+    <div className="mt-2 w-full overflow-hidden rounded-xl border bg-card text-sm">
       <button
         type="button"
         onClick={() => setPinned(!open)}
@@ -38,7 +38,7 @@ export function PlanCard({ steps, live }: { steps: PlanStep[]; live: boolean }) 
       {open && (
         <ol className="flex flex-col gap-1.5 px-3 py-2.5">
           {steps.map((s, i) => (
-            <li key={i} className="flex min-w-0 items-start gap-2 text-[0.8rem] leading-snug">
+            <li key={i} className="flex min-w-0 items-start gap-2 text-xs leading-snug">
               <span className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center">
                 {s.status === "done" ? (
                   <CheckIcon className="size-3.5 text-primary" />

@@ -29,6 +29,9 @@ const results = await Promise.all(
     writeFileSync(join(dir, "../.evals", `${name}.log`), log);
     // the run's own column: the last figure on each score's row
     const scores = [...log.matchAll(/^[│|]\s*◯\s+(\w+)\s+(.*?)\s*[│|]\s*$/gm)].filter((m) => m[2]!.includes("%")).map((m) => `${m[1]} ${m[2]!.replace(/^-\s+/, "").trim().split(/\s+/).at(-1)}`);
+    // Braintrust leaves out rows at 0%: say so, or a total failure reads as "no scores"
+    const zero = /hidden rows: (\d+) zero/.exec(log)?.[1];
+    if (zero) scores.push(`${zero} more at 0% (hidden by Braintrust)`);
     console.log(`${name} (${((Date.now() - began) / 60_000).toFixed(1)} min)${code ? `: exit ${code}` : ""}\n  ${scores.join("\n  ") || "(no scores: see .evals/" + name + ".log)"}`);
     return code;
   }),

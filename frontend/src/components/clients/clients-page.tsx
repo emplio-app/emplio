@@ -1,28 +1,54 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { isWorking, type Client, type ClientInput, type ClientStage, type Process, ProcessRun, Task, TeamMember } from "@emplio/shared";
-import { useQuery } from "@tanstack/react-query";
+import type {
+  Client,
+  ClientDetail,
+  ClientField,
+  ClientInput,
+  ClientPage as ClientPageData,
+  ClientStage,
+  Contact,
+  FieldKind,
+  HistoryEntry,
+  Process,
+  ProcessRun,
+  Project,
+  Service,
+  StageCategory,
+  Task,
+  TeamMember,
+} from "@emplio/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpRightIcon,
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   Building2Icon,
   CalendarIcon,
   CheckIcon,
+  ChevronRightIcon,
   FileTextIcon,
+  HistoryIcon,
   HourglassIcon,
   ListTodoIcon,
+  MoreHorizontalIcon,
   PlusIcon,
-  SearchIcon,
+  Settings2Icon,
+  Trash2Icon,
   UserPlusIcon,
   WorkflowIcon,
-  XIcon,
+  ChevronDownIcon,
+  LockIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AskFloat, useAskOpen } from "@/components/chat/composer";
+import { useConfirm } from "@/components/confirm";
+import { StartForm } from "@/components/processes/processes-page";
 import { TaskPanel } from "@/components/tasks/tasks-page";
-import { thingHref } from "@/components/things/things";
+import { Avatar, Due, moneyText, RecordSheet, Search, statusText } from "@/components/things/things";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Combobox,
@@ -36,32 +62,42 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
-import { StartForm } from "@/components/processes/processes-page";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { AskFloat, PageAsk } from "@/components/chat/composer";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, clientsQueryKey, processesQueryKey, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProcesses, useProcessRuns, useTasks, useThingPage } from "@/lib/api";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  api,
+  type Match,
+  matchIn,
+  processesQueryKey,
+  processRunsQueryKey,
+  recordsQueryKey,
+  tasksQueryKey,
+  useArchivedClients,
+  useClientPage,
+  useClients,
+  useFields,
+  useMe,
+  useProcesses,
+  useProcessRuns,
+  useSaveRecord,
+  useSaved,
+  useServices,
+  useStages,
+} from "@/lib/api";
 import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
-import { dateText } from "@/lib/when";
-
-const KNOWN: { value: ClientStage; label: string; hint: string }[] = [
-  { value: "active", label: "Active", hint: "Working with them now" },
-  { value: "prospect", label: "Prospect", hint: "Not won yet" },
-  { value: "past", label: "Past", hint: "No longer working together" },
-];
-// a stage is the business's own word (Emplio picks it): the three above, then any others its clients are at.
-// "active" as a filter means every working stage (onboarding, on hold, ...), not just the word
-const stageLabel = (s: string) => KNOWN.find((k) => k.value === s)?.label ?? s.charAt(0).toUpperCase() + s.slice(1);
-const stagesOf = (all: Client[]) => [...KNOWN, ...[...new Set(all.map((c) => c.stage))].filter((s) => !KNOWN.some((k) => k.value === s)).sort().map((s) => ({ value: s, label: stageLabel(s), hint: "" }))];
+import { dateText, exactDate } from "@/lib/when";
+import { CopyButton } from "./copy-button";
+import { CATEGORY, QUIET, startedText, useStartsProcess } from "./shared";
+import { StageSetup } from "./stage-setup";
 
 export const initials = (name: string) =>
   name
@@ -84,14 +120,23 @@ const TINTS = [
 ];
 const tint = (slug: string) => TINTS[[...slug].reduce((n, c) => n + c.charCodeAt(0), 0) % TINTS.length]!;
 
-const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(`company/clients/${c.slug}/index.md`)}`;
+// a private record's notes are in restricted/ (owners' and admins')
+export const notesFile = (kind: string, r: { slug: string; private?: boolean }) => `${r.private ? "restricted" : "company"}/${kind}/${r.slug}/index.md`;
+const notesHref = (c: Client) => `/knowledge?file=${encodeURIComponent(notesFile("clients", c))}`;
+const useRole = () => {
+  const { data: me } = useMe();
+  // not while still loading: a member would see the owner's buttons for a moment
+  const role = me?.workspaces[0]?.role;
+  return { admin: !!role && role !== "member", owner: role === "owner" };
+};
+export const useTeam = () => useQuery({ queryKey: ["team"], queryFn: () => api<TeamMember[]>("/team") });
 
-export function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">; size?: "sm" | "md" | "lg" }) {
+export function Monogram({ c, size = "md" }: { c: { name: string; slug: string }; size?: "sm" | "md" | "lg" | "xl" }) {
   return (
     <span
       className={cn(
         "grid shrink-0 place-items-center rounded-xl font-semibold",
-        size === "lg" ? "size-12 text-base" : size === "sm" ? "size-9 rounded-lg text-xs" : "size-10 text-sm",
+        size === "xl" ? "size-14 text-lg" : size === "lg" ? "size-12 text-base" : size === "sm" ? "size-9 rounded-lg text-xs" : "size-10 text-sm",
         tint(c.slug),
       )}
       aria-hidden
@@ -101,42 +146,32 @@ export function Monogram({ c, size = "md" }: { c: Pick<Client, "name" | "slug">;
   );
 }
 
-function StagePill({ stage }: { stage: ClientStage }) {
+const DOT: Record<StageCategory, string> = {
+  active: "bg-primary",
+  prospect: "bg-info",
+  past: "bg-muted-foreground/50",
+};
+const PILL: Record<StageCategory, string> = {
+  active: "bg-primary/10 text-primary",
+  prospect: "bg-info/10 text-info",
+  past: "bg-muted text-muted-foreground",
+};
+export function StagePill({ stage, category }: { stage: string; category: StageCategory }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
-        stage === "active" && "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
-        stage === "prospect" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-        stage === "past" && "bg-muted text-muted-foreground",
-        !KNOWN.some((k) => k.value === stage) && "bg-violet-500/12 text-violet-700 dark:text-violet-300",
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          stage === "active" && "bg-emerald-500",
-          stage === "prospect" && "bg-blue-500",
-          stage === "past" && "bg-muted-foreground/50",
-          !KNOWN.some((k) => k.value === stage) && "bg-violet-500",
-        )}
-      />
-      {stageLabel(stage)}
-    </span>
+    <Badge className={PILL[category]}>
+      <span className={cn("size-1.5 rounded-full", DOT[category])} />
+      {stage}
+    </Badge>
   );
 }
 
 function Handlers({ c }: { c: Client }) {
-  if (!c.handlers.length)
-    return <span className="text-xs text-muted-foreground/80 italic">Nobody named yet</span>;
+  if (!c.handlers.length) return <span className="text-xs whitespace-nowrap text-muted-foreground/80 italic">Nobody named yet</span>;
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={c.handlers.map((h) => h.name).join(", ")}>
       <span className="flex -space-x-1.5">
         {c.handlers.slice(0, 3).map((h) => (
-          <span
-            key={h.id}
-            className="grid size-5 place-items-center rounded-full bg-primary/10 text-[0.6rem] font-semibold text-primary ring-2 ring-background"
-          >
+          <span key={h.id} className="grid size-5 place-items-center rounded-full bg-primary/10 text-[0.6rem] font-semibold text-primary ring-2 ring-background">
             {initials(h.name)}
           </span>
         ))}
@@ -149,68 +184,79 @@ function Handlers({ c }: { c: Client }) {
   );
 }
 
-// Who the business works for, read like a book of clients: who they are, how things stand, who looks after them and
-// what's open for them. Emplio keeps it from chats and email; anyone can add one, owners and admins change them.
-export function ClientsPage() {
-  const [taskId, setTaskIdRaw] = useState<string | null>(null);
-  // back from a task: the client's panel slides in from the left (opened fresh, it just appears with the sheet)
-  const [cameBack, setCameBack] = useState(false);
-  const setTaskId = (id: string | null) => {
-    setCameBack(!id && !!taskId);
-    setTaskIdRaw(id);
-  };
-  const { data: me } = useMe();
-  // not while still loading: a member would see the owner's buttons for a moment
-  const role = me?.workspaces[0]?.role;
-  const admin = !!role && role !== "member";
-  const clients = useClients();
-  const tasks = useTasks();
-  const team = useQuery({ queryKey: ["team"], queryFn: () => api<TeamMember[]>("/team") });
-  const queryClient = useQueryClient();
-  const [filter, setFilter] = useState("active");
-  const [query, setQuery] = useState("");
-  // /clients?client=northwind (a client's chip elsewhere) opens theirs
-  const asked = useSearchParams().get("client");
-  const [openId, setOpenId] = useState<string | null>(asked);
-  useEffect(() => void (asked && setOpenId(asked)), [asked]);
-  const router = useRouter();
-  const [adding, setAdding] = useState(false);
+// "Did you mean Northwind?" under an add form: open the one there, or add this one anyway
+export function MatchNote({ match, kind, href, onForce, children }: { match: Match; kind: string; href: string; onForce: () => void; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 px-2.5 py-2 text-xs">
+      <span className="min-w-0 flex-1 text-pretty">
+        {match.archived ? (
+          <>
+            <span className="font-medium">{match.name}</span> is an archived {kind}.
+          </>
+        ) : (
+          <>
+            There&rsquo;s a {kind} called <span className="font-medium">{match.name}</span> already.
+          </>
+        )}
+      </span>
+      {children}
+      <Button size="xs" variant="outline" nativeButton={false} render={<Link href={href} scroll={false} />}>
+        Open {match.name}
+      </Button>
+      <Button size="xs" variant="ghost" onClick={onForce}>
+        Add anyway
+      </Button>
+    </div>
+  );
+}
 
-  const update = useMutation({
-    mutationFn: ({ id, ...body }: ClientInput & { id: string }) => api<Client>(`/clients/${id}`, body, "PATCH"),
-    onMutate: ({ id, ...body }) =>
-      queryClient.setQueryData<Client[]>(clientsQueryKey, (old) =>
-        old?.map((c) =>
-          c.slug === id
-            ? {
-                ...c,
-                ...(body.name !== undefined && { name: body.name }),
-                ...(body.stage !== undefined && { stage: body.stage }),
-                ...(body.handlers !== undefined && {
-                  handlers: body.handlers.map((h) => {
-                    const m = team.data?.find((t) => t.id === h);
-                    return c.handlers.find((x) => x.id === h || x.path === h) ?? { id: h, name: m?.name ?? m?.email ?? "", path: "" };
-                  }),
-                }),
-              }
-            : c,
-        ),
-      ),
-    onError: (e) => toast.error(e.message),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: clientsQueryKey }),
-  });
+// Who the business works for, read like a book of clients: how things stand, who looks after them, what's open.
+// Emplio keeps them from chats and email; anyone can add one, owners and admins change stage and handlers.
+export function ClientsPage() {
+  const { admin } = useRole();
+  const clients = useClients();
+  const stages = useStages();
+  const [filter, setFilter] = useState<StageCategory | "all" | "unhandled" | "archived">("active");
+  const archived = useArchivedClients(true);
+  const [query, setQuery] = useState("");
+  const router = useRouter();
+  // an old /clients?client=northwind link: their page
+  const asked = useSearchParams().get("client");
+  useEffect(() => void (asked && router.replace(`/clients/${asked}`)), [asked, router]);
+  const [adding, setAdding] = useState(false);
+  const [setup, setSetup] = useState(false);
 
   const all = clients.data ?? [];
-  const FILTERS = [{ value: "all", label: "All" }, ...stagesOf(all).map((s) => ({ value: s.value, label: s.value === "prospect" ? "Prospects" : s.label }))];
-  const inFilter = (c: Client, f: string) => (f === "unhandled" ? isWorking(c.stage) && !c.handlers.length : f === "all" || (f === "active" ? isWorking(c.stage) : c.stage === f));
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.value, all.filter((c) => inFilter(c, f.value)).length]));
+  const inFilter = (c: Client, f: typeof filter) =>
+    f === "unhandled" ? c.stageCategory === "active" && !c.handlers.length : f === "all" || f === "archived" || c.stageCategory === f;
+  const FILTERS = [
+    ...(["active", "prospect", "past"] as const).map((k) => ({
+      value: k,
+      label: CATEGORY[k].many,
+      n: all.filter((c) => c.stageCategory === k).length,
+    })),
+    { value: "all" as const, label: "All", n: all.length },
+    ...(archived.data?.length
+      ? [
+          {
+            value: "archived" as const,
+            label: "Archived",
+            n: archived.data.length,
+          },
+        ]
+      : []),
+  ];
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = all
+  const pool = filter === "archived" ? (archived.data ?? []) : all;
+  const shown = pool
     .filter((c) => inFilter(c, filter))
-    .filter((c) => words.every((w) => [c.name, ...c.handlers.map((h) => h.name), ...c.details.map((d) => d.value)].join(" ").toLowerCase().includes(w)));
-  const current = all.find((c) => c.slug === openId) ?? null;
-  const unhandled = all.filter((c) => isWorking(c.stage) && !c.handlers.length).length;
+    .filter((c) => words.every((w) => [c.name, c.stage, ...c.handlers.map((h) => h.name), ...c.details.map((d) => d.value)].join(" ").toLowerCase().includes(w)));
+  const unhandled = all.filter((c) => c.stageCategory === "active" && !c.handlers.length).length;
   const waiting = all.reduce((n, c) => n + c.waitingTasks, 0);
+  const active = all.filter((c) => c.stageCategory === "active").length;
+  const prospects = all.filter((c) => c.stageCategory === "prospect").length;
+  // a stage's own name is worth showing when it says more than the tab does (Onboarding under Active)
+  const showStage = (c: Client) => filter === "all" || filter === "archived" || filter === "unhandled" || c.stage !== CATEGORY[c.stageCategory].label;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -230,8 +276,8 @@ export function ClientsPage() {
                   ? "Loading…"
                   : all.length
                     ? [
-                        `${counts.active} active`,
-                        counts.prospect ? `${counts.prospect} prospect${counts.prospect === 1 ? "" : "s"}` : "",
+                        `${active} active`,
+                        prospects ? `${prospects} prospect${prospects === 1 ? "" : "s"}` : "",
                         waiting ? `${waiting} thing${waiting === 1 ? "" : "s"} waiting on clients` : "",
                       ]
                         .filter(Boolean)
@@ -239,60 +285,57 @@ export function ClientsPage() {
                     : "Who you work for, and who looks after each."}
               </p>
             </div>
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <PlusIcon />
-              Add client
-            </Button>
+            <div className="flex gap-2">
+              {admin && (
+                <Button size="sm" variant="outline" onClick={() => setSetup(true)}>
+                  <Settings2Icon />
+                  Stages and details
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setAdding(true)}>
+                <PlusIcon />
+                Add client
+              </Button>
+            </div>
           </div>
 
-          {adding && <AddClient onDone={() => setAdding(false)} />}
+          {adding && <AddClient stages={stages.data ?? []} category={filter === "prospect" || filter === "past" ? filter : "active"} onDone={() => setAdding(false)} />}
 
           {admin && unhandled > 0 && (
-            <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3 text-sm">
-              <UserPlusIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-card px-3.5 py-3 text-sm">
+              <UserPlusIcon className="mt-0.5 size-4 shrink-0 text-warning" />
               <p className="min-w-0 flex-1 text-pretty">
                 <span className="font-medium">
-                  {unhandled} client{unhandled === 1 ? " has" : "s have"} nobody looking after {unhandled === 1 ? "it" : "them"}.
+                  {unhandled} active client{unhandled === 1 ? " has" : "s have"} nobody looking after {unhandled === 1 ? "it" : "them"}.
                 </span>{" "}
                 <span className="text-muted-foreground">Pick who handles each, so their work and reminders go to the right person.</span>
               </p>
-              {filter !== "unhandled" ? (
-                <Button size="xs" variant="outline" className="shrink-0" onClick={() => setFilter("unhandled")}>
-                  Show them
-                </Button>
-              ) : (
-                <Button size="xs" variant="ghost" className="shrink-0" onClick={() => setFilter("active")}>
-                  Show all
-                </Button>
-              )}
+              <Button
+                size="xs"
+                variant={filter === "unhandled" ? "ghost" : "outline"}
+                className="shrink-0"
+                onClick={() => setFilter(filter === "unhandled" ? "active" : "unhandled")}
+              >
+                {filter === "unhandled" ? "Show all" : "Show them"}
+              </Button>
             </div>
           )}
 
-          {all.length > 0 && (
+          {all.length + (archived.data?.length ?? 0) > 0 && (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Tabs value={filter} onValueChange={(v) => setFilter(v as string)} className="shrink-0">
+              <Tabs value={filter} onValueChange={(v) => setFilter(v as typeof filter)} className="shrink-0">
                 <TabsList aria-label="Stage">
                   {FILTERS.map((f) => (
                     <TabsTrigger key={f.value} value={f.value} className="px-2.5 text-xs">
                       {f.label}
-                      <span className="tabular-nums opacity-60">{counts[f.value]}</span>
+                      <span className="tabular-nums opacity-60">{f.n}</span>
                     </TabsTrigger>
                   ))}
                 </TabsList>
               </Tabs>
-              <InputGroup className="h-8 flex-1">
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search clients or people" aria-label="Search clients" />
-                {query && (
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton size="icon-xs" onClick={() => setQuery("")} aria-label="Clear search">
-                      <XIcon />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                )}
-              </InputGroup>
+              <div className="flex-1">
+                <Search value={query} onChange={setQuery} placeholder="Search clients, people or details" />
+              </div>
             </div>
           )}
 
@@ -302,35 +345,36 @@ export function ClientsPage() {
                 <Skeleton key={i} className="h-16 w-full rounded-xl" />
               ))}
             </div>
-          ) : !all.length ? (
-            <div className="grid justify-items-center gap-2 rounded-2xl border border-dashed px-6 py-14 text-center">
+          ) : !all.length && !archived.data?.length ? (
+            <div className="grid justify-items-center gap-2 rounded-xl border border-dashed px-6 py-14 text-center">
               <span className="grid size-12 place-items-center rounded-full bg-muted">
                 <Building2Icon className="size-5 text-muted-foreground" />
               </span>
               <p className="text-sm font-medium">No clients yet</p>
               <p className="max-w-sm text-sm text-pretty text-muted-foreground">
-                Emplio adds them as they come up in chats and email. You can also add one, or just say
-                &ldquo;Northwind is a new client, Sarah handles them&rdquo;.
+                Emplio adds them as they come up in chats and email. You can also add one, or just say &ldquo;Northwind is a new client, Sarah handles them&rdquo;.
               </p>
             </div>
           ) : !shown.length ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              {words.length ? <>No clients match &ldquo;{query.trim()}&rdquo;.</> : "None here."}
-            </p>
+            <p className="py-12 text-center text-sm text-muted-foreground">{words.length ? <>No clients match &ldquo;{query.trim()}&rdquo;.</> : "None here."}</p>
           ) : (
             <ul className="grid gap-1.5">
               {shown.map((c) => (
                 <li key={c.slug}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setOpenId(c.slug)}
-                    className="h-auto justify-start whitespace-normal font-normal group flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:outline-none"
+                  <Link
+                    href={`/clients/${c.slug}`}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border hover:bg-muted focus-visible:border-ring focus-visible:outline-none",
+                      c.archivedAt && "opacity-60",
+                    )}
                   >
                     <Monogram c={c} />
                     <span className="grid min-w-0 flex-1 gap-1">
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-sm font-medium">{c.name}</span>
-                        {c.stage !== filter && <StagePill stage={c.stage} />}
+                        <span className="truncate text-sm font-medium">
+                          <Named name={c.name} private={c.private} />
+                        </span>
+                        {showStage(c) && <StagePill stage={c.stage} category={c.stageCategory} />}
                       </span>
                       <Handlers c={c} />
                     </span>
@@ -343,102 +387,114 @@ export function ClientsPage() {
                       ) : (
                         <span className="text-muted-foreground/70">Nothing open</span>
                       )}
-                      {c.waitingTasks > 0 && (
-                        <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                      {c.waitingTasks > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-warning">
                           <HourglassIcon className="size-3" />
                           {c.waitingTasks} waiting
                         </span>
-                      )}
+                      ) : c.activeProjects > 0 ? (
+                        <span className="text-muted-foreground">
+                          {c.activeProjects} project
+                          {c.activeProjects === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
                     </span>
-                  </Button>
+                  </Link>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </div>
-
-      <Sheet
-        open={!!current}
-        onOpenChange={(o) => {
-          if (o) return;
-          setOpenId(null);
-          setTaskId(null);
-          // so the same client's link opens them again
-          if (asked) router.replace("/clients", { scroll: false });
-        }}
-      >
-        <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">
-          {/* one panel: a task opened from the client's open work slides in over them, and back slides them back */}
-          {current && taskId ? (
-            <div key={taskId} className="flex min-h-0 flex-1 flex-col duration-200 ease-out animate-in fade-in-0 slide-in-from-right-8 motion-reduce:animate-none">
-              <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} back={{ label: current.name, onClick: () => setTaskId(null) }} />
-            </div>
-          ) : current ? (
-            <div key={current.slug} className={cn("flex min-h-0 flex-1 flex-col", cameBack && "duration-200 ease-out animate-in fade-in-0 slide-in-from-left-8 motion-reduce:animate-none")}>
-              <ClientDetails
-                key={current.slug}
-                c={current}
-                known={[...new Set(all.flatMap((x) => x.details.map((d) => d.name)))]}
-                admin={admin}
-                team={team.data ?? []}
-                tasks={(tasks.data ?? []).filter((t) => t.client === current.slug)}
-                onChange={(body) => update.mutate({ id: current.slug, ...body })}
-                onOpenTask={setTaskId}
-              />
-            </div>
-          ) : null}
-        </SheetContent>
-      </Sheet>
+      <Dialog open={setup} onOpenChange={setSetup}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Stages and details</DialogTitle>
+            <DialogDescription>Your own words for where a client is, and the details you keep on every client.</DialogDescription>
+          </DialogHeader>
+          <StageSetup />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function AddClient({ onDone }: { onDone: () => void }) {
-  const queryClient = useQueryClient();
+function StageSelect({
+  stages,
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  stages: ClientStage[];
+  value: string;
+  onChange: (name: string) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const items = stages.map((s) => ({ value: s.name, label: s.name }));
+  return (
+    <Select items={items} value={value} disabled={disabled} onValueChange={(v) => v && v !== value && onChange(v as string)}>
+      <SelectTrigger size="sm" aria-label="Stage" className={className}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {stages.map((s) => (
+          <SelectItem key={s.id} value={s.name}>
+            <span className="flex items-center gap-2">
+              <span className={cn("size-1.5 rounded-full", DOT[s.category])} />
+              <span>{s.name}</span>
+              {s.name !== CATEGORY[s.category].label && <span className="text-xs text-muted-foreground">{CATEGORY[s.category].label}</span>}
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function AddClient({ stages, category, onDone }: { stages: ClientStage[]; category: StageCategory; onDone: () => void }) {
+  const router = useRouter();
   const [name, setName] = useState("");
-  const [stage, setStage] = useState<ClientStage>("active");
-  const STAGES = stagesOf(useClients().data ?? []);
-  const add = useMutation({
-    mutationFn: (body: ClientInput) => api<Client>("/clients", body),
-    onSuccess: (c) => {
-      queryClient.setQueryData<Client[]>(clientsQueryKey, (old) => [...(old ?? []), c].sort((a, b) => a.name.localeCompare(b.name)));
-      void queryClient.invalidateQueries({ queryKey: clientsQueryKey });
-      toast(`Added ${c.name}`);
+  const [stage, setStage] = useState("");
+  const picked = stage || stages.find((s) => s.category === category)?.name || "";
+  const add = useSaveRecord((body: ClientInput) => api<Client>("/clients", body), {
+    silent: true,
+    done: (c) => {
+      toast.success(`Added ${c.name}`, {
+        action: {
+          label: "Open",
+          onClick: () => router.push(`/clients/${c.slug}`),
+        },
+      });
       onDone();
     },
   });
+  const match = matchIn(add.error);
   return (
     <form
       className="grid gap-2 rounded-xl border bg-background p-2 shadow-xs focus-within:ring-2 focus-within:ring-ring/30"
       onSubmit={(e) => {
         e.preventDefault();
-        if (name.trim()) add.mutate({ name, stage });
+        if (name.trim()) add.mutate({ name, stage: picked });
       }}
     >
       <Input
         autoFocus
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          setName(e.target.value);
+          add.reset();
+        }}
         onKeyDown={(e) => e.key === "Escape" && onDone()}
         placeholder="Client name, e.g. Northwind Traders"
         aria-label="Client name"
-        className="h-9 border-0 bg-transparent px-2 text-sm focus-visible:ring-0 md:text-sm dark:bg-transparent"
+        className="border-0 bg-transparent focus-visible:ring-0 dark:bg-transparent"
       />
+      {match && <MatchNote match={match} kind="client" href={`/clients/${match.slug}`} onForce={() => add.mutate({ name, stage: picked, force: true })} />}
       <div className="flex items-center gap-2">
-        <Select items={STAGES} value={stage} onValueChange={(v) => v && setStage(v as ClientStage)}>
-          <SelectTrigger size="sm" aria-label="Stage" className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STAGES.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {s.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {add.error && <p className="min-w-0 truncate text-xs text-destructive">{add.error.message}</p>}
+        <StageSelect stages={stages} value={picked} onChange={setStage} className="w-40" />
+        {add.error && !match && <p className="min-w-0 truncate text-xs text-destructive">{add.error.message}</p>}
         <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={onDone}>
           Cancel
         </Button>
@@ -456,218 +512,435 @@ function dueText(iso: string) {
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
   if (days === -1) return "Yesterday";
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-// Short facts kept on a client (Contact email, Tax number, Files: monthly): anyone may fill them in. Processes fill an
-// input of the same name from them; Emplio adds them as it learns them. A detail any client has shows on every client,
-// empty until filled in.
-function ClientFacts({ c, known, onChange }: { c: Client; known: string[]; onChange: (details: Record<string, string | null>) => void }) {
-  const has = new Set(c.details.map((d) => d.name.toLowerCase()));
-  const rows = [...c.details, ...known.filter((n) => !has.has(n.toLowerCase())).map((name) => ({ name, value: "" }))];
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const add = () => {
-    if (!name.trim() || !value.trim()) return;
-    onChange({ [name.trim()]: value.trim() });
-    setName("");
-    setValue("");
-  };
-  return (
-    <section className="grid gap-2">
-      <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Details</h2>
-      {rows.length > 0 && (
-        <div className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-x-3 gap-y-1.5">
-          {rows.map((d) => (
-            <Fact key={`${d.name}:${d.value}`} name={d.name} value={d.value} onChange={(v) => onChange({ [d.name]: v })} />
+// One detail of the business's list (Tax number, Files, Renewal): a box of its kind, saved when left. Anyone fills them.
+export function FieldInput({ f, value, onChange, disabled }: { f: ClientField; value: string; onChange: (v: string | null) => void; disabled?: boolean }) {
+  const [v, setV] = useSaved(value);
+  if (f.type === "choice") {
+    const items = [{ value: "", label: "Empty" }, ...f.options.map((o) => ({ value: o, label: o }))];
+    return (
+      <Select items={items} value={value} disabled={disabled} onValueChange={(n) => (n ?? "") !== value && onChange((n as string) || null)}>
+        <SelectTrigger aria-label={f.name} className={cn(QUIET, "w-full", !value && "text-muted-foreground/50")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
           ))}
-        </div>
-      )}
-      <form
-        className="grid grid-cols-[6.5rem_1fr_auto] items-center gap-x-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add();
-        }}
-      >
-        <Input aria-label="Detail" placeholder="Email" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input aria-label="Value" placeholder="sarah@northwind.com" value={value} onChange={(e) => setValue(e.target.value)} />
-        <Button type="submit" variant="ghost" size="icon-sm" aria-label="Add detail" disabled={!name.trim() || !value.trim()}>
-          <PlusIcon />
-        </Button>
-      </form>
+        </SelectContent>
+      </Select>
+    );
+  }
+  const save = () => (v.trim() !== value ? onChange(v.trim() || null) : undefined);
+  return (
+    <div className="group relative">
+      <Input
+        aria-label={f.name}
+        placeholder={disabled ? "—" : "Empty"}
+        disabled={disabled}
+        type={f.type === "date" ? "date" : "text"}
+        inputMode={f.type === "number" ? "decimal" : undefined}
+        value={v}
+        title={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        className={cn(QUIET, "truncate placeholder:text-muted-foreground/50")}
+      />
+      {f.type !== "date" && <CopyButton value={value} label={f.name} />}
+    </div>
+  );
+}
+
+// a client page's box: a small title (and count), then rows
+export function Card({ title, count, action, children }: { title: string; count?: number; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="grid min-w-0 gap-1 rounded-xl border bg-card p-2">
+      <div className="flex h-8 items-center justify-between gap-2 px-2">
+        <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">
+          {title}
+          {!!count && <span className="ml-1.5 tabular-nums opacity-60">{count}</span>}
+        </h2>
+        {action}
+      </div>
+      {children}
     </section>
   );
 }
+export const ROW = "flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
 
-function Fact({ name, value, onChange }: { name: string; value: string; onChange: (v: string | null) => void }) {
-  const [v, setV] = useState(value);
+const pageKey = (slug: string) => [...recordsQueryKey, "client", slug];
+
+// A client's own page (/clients/northwind): how they're handled and what they're like on the side, their work in the
+// middle. Their contacts and projects open in a side panel over it (?open=projects/...).
+export function ClientPage({ slug }: { slug: string }) {
+  const page = useClientPage(slug);
+  const c = page.data?.client;
+  const [taskId, setTaskId] = useState<string | null>(null);
+  useAskOpen(
+    c && {
+      kind: "client",
+      title: c.name,
+      ref: notesFile("clients", c),
+    },
+  );
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+        <SidebarTrigger />
+        <Link href="/clients" className="px-2 font-sans text-sm tracking-normal text-muted-foreground hover:text-foreground">
+          Clients
+        </Link>
+        <ChevronRightIcon className="size-3.5 text-muted-foreground" />
+        <span className="truncate px-2 font-sans text-sm font-medium tracking-normal">{c?.name ?? ""}</span>
+      </header>
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {!page.data ? (
+          <div className="mx-auto grid w-full max-w-5xl gap-3 px-4 py-8">
+            {page.isPending ? <Skeleton className="h-12 w-1/2" /> : <p className="text-sm text-muted-foreground">There&rsquo;s no client called &ldquo;{slug}&rdquo;.</p>}
+          </div>
+        ) : (
+          <ClientDetails key={page.data.client.slug} data={page.data} onOpenTask={setTaskId} />
+        )}
+      </div>
+      <Sheet open={!!taskId} onOpenChange={(o) => !o && setTaskId(null)}>
+        <SheetContent className="w-full gap-0 overflow-x-hidden sm:max-w-md">{taskId && <TaskPanel id={taskId} onRemoved={() => setTaskId(null)} />}</SheetContent>
+      </Sheet>
+      <RecordSheet />
+    </div>
+  );
+}
+
+function ClientDetails({ data, onOpenTask }: { data: ClientPageData; onOpenTask: (id: string) => void }) {
+  const c = data.client;
+  const { admin, owner } = useRole();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const stages = useStages().data ?? [];
+  const team = useTeam().data ?? [];
+  const [dialog, confirm] = useConfirm();
+  const [name, setName] = useSaved(c.name);
+  // the answer has the new updatedAt: kept at once, so a second change right after isn't refused as stale
+  const keep = (out: Client) => qc.setQueryData<ClientPageData>(pageKey(c.slug), (old) => old && { ...old, client: out });
+  const update = useSaveRecord((body: ClientInput) => api<Client>(`/clients/${c.slug}`, { ...body, updatedAt: c.updatedAt }, "PATCH"), { done: keep });
+  const archive = useSaveRecord((withWork: boolean) => api<Client>(`/clients/${c.slug}/archive`, { withWork }), { done: (out) => (keep(out), toast(`Archived ${c.name}`)) });
+  const restore = useSaveRecord(() => api<Client>(`/clients/${c.slug}/restore`, {}), { done: (out) => (keep(out), toast(`${c.name} is back`)) });
+  const purge = useSaveRecord(() => api(`/clients/${c.slug}`, undefined, "DELETE"), { done: () => (toast(`Deleted ${c.name}`), router.replace("/clients")) });
+  const askArchive = () => {
+    const work = [
+      c.openTasks && `${c.openTasks} open task${c.openTasks === 1 ? "" : "s"}`,
+      c.activeProjects && `${c.activeProjects} active project${c.activeProjects === 1 ? "" : "s"}`,
+    ].filter(Boolean);
+    confirm({
+      title: `Archive ${c.name}?`,
+      description: work.length
+        ? `They still have ${work.join(" and ")}. Those stay as they are; ${c.name} leaves your lists and Emplio stops treating them as a client. You can bring them back any time.`
+        : `${c.name} leaves your lists and Emplio stops treating them as a client. Their notes, projects and history are kept, and you can bring them back any time.`,
+      action: "Archive",
+      safe: true,
+      onConfirm: () => archive.mutate(work.length > 0),
+    });
+  };
+  const open = data.tasks;
+  return (
+    <div className="mx-auto grid w-full max-w-5xl grid-cols-[minmax(0,1fr)] gap-6 px-4 py-6 sm:py-10">
+      {dialog}
+      {c.archivedAt && (
+        <div className="flex items-center gap-3 rounded-xl border bg-muted px-3.5 py-2.5 text-sm">
+          <ArchiveIcon className="size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 flex-1">Archived {dateText(c.archivedAt.slice(0, 10))}. Emplio doesn&rsquo;t treat them as a client.</p>
+          {admin && (
+            <Button size="xs" variant="outline" onClick={() => restore.mutate(undefined)}>
+              Bring back
+            </Button>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-4">
+        <Monogram c={c} size="xl" />
+        <div className="grid min-w-[min(100%,14rem)] flex-1 basis-0 gap-1.5">
+          {admin ? (
+            <Input
+              aria-label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => (name.trim() && name.trim() !== c.name ? update.mutate({ name }) : setName(c.name))}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+              className={cn(QUIET, "-ml-2 h-auto py-0.5 font-heading text-2xl font-semibold tracking-tight md:text-2xl")}
+            />
+          ) : (
+            <h1 className="truncate font-heading text-2xl font-semibold tracking-tight">{c.name}</h1>
+          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <StagePill stage={c.stage} category={c.stageCategory} />
+            <Handlers c={c} />
+            <span className="tabular-nums">{data.tasksTotal ? `${data.tasksTotal} open` : "Nothing open"}</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href={notesHref(c)} />}>
+            <FileTextIcon />
+            Notes
+          </Button>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/tasks?client=${c.slug}`} />}>
+            <ListTodoIcon />
+            Their tasks
+          </Button>
+          {admin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label="More" />}>
+                <MoreHorizontalIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {c.archivedAt ? (
+                  <DropdownMenuItem onClick={() => restore.mutate(undefined)}>
+                    <ArchiveRestoreIcon />
+                    Bring back
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onClick={askArchive}>
+                    <ArchiveIcon />
+                    Archive
+                  </DropdownMenuItem>
+                )}
+                {owner && c.archivedAt && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() =>
+                        confirm({
+                          title: `Delete ${c.name} for good?`,
+                          description:
+                            "Only for a client added by mistake: this can't be undone. A client with projects, contacts or tasks can't be deleted; archive them instead.",
+                          action: "Delete for good",
+                          onConfirm: () => purge.mutate(undefined),
+                        })
+                      }
+                    >
+                      <Trash2Icon />
+                      Delete for good
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="grid min-w-0 gap-4">
+          <ClientProcesses slug={c.slug} onOpenTask={onOpenTask} />
+
+          <Card title="Open work" count={data.tasksTotal}>
+            {open.length ? (
+              <ul className="grid">
+                {open.map((t) => (
+                  <li key={t.id}>
+                    <TaskRow t={t} onOpen={onOpenTask} />
+                  </li>
+                ))}
+                {data.tasksTotal > open.length && (
+                  <li>
+                    <Link href={`/tasks?client=${c.slug}`} className={cn(ROW, "text-sm text-muted-foreground")}>
+                      All {data.tasksTotal} open tasks
+                    </Link>
+                  </li>
+                )}
+              </ul>
+            ) : (
+              <p className="flex items-center gap-2 px-2 pb-2 text-sm text-muted-foreground">
+                <CheckIcon className="size-4" />
+                Nothing open for {c.name}.
+              </p>
+            )}
+          </Card>
+
+          <ClientProjects c={c} projects={data.projects} />
+          <History entries={data.history} />
+        </div>
+
+        <aside className="grid min-w-0 gap-4">
+          <Card title="About">
+            <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-0.5 px-2 pb-1 text-sm">
+              <Label className="font-normal text-muted-foreground">Stage</Label>
+              <StageSelect stages={stages} value={c.stage} disabled={!admin} onChange={(stage) => update.mutate({ stage })} className={cn(QUIET, "w-full")} />
+              <Label className="self-start pt-2 font-normal text-muted-foreground">Handled by</Label>
+              <HandlerPicker clientName={c.name} team={team} value={c.handlers.map((h) => h.id)} disabled={!admin} onChange={(handlers) => update.mutate({ handlers })} />
+              <Details kind="client" details={c.details} onSave={(details) => update.mutate({ details })} />
+              <PrivateSwitch on={c.private} what="Only owners, admins and the people who handle it see this client, its projects and the contacts who are only here." onChange={(on) => update.mutate({ private: on })} />
+            </div>
+          </Card>
+
+          <ClientContacts c={c} contacts={data.contacts} />
+
+          {data.meetings.length > 0 && (
+            <Card title="Meetings" count={data.meetings.length}>
+              <ul className="grid">
+                {data.meetings.map((m) => (
+                  <li key={m.path}>
+                    <Link href={`/knowledge?file=${encodeURIComponent(m.path)}`} className={ROW}>
+                      <CalendarIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm">{m.title}</span>
+                      {m.date && <span className="shrink-0 text-xs text-muted-foreground">{dateText(m.date)}</span>}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          {data.notes.length > 0 && (
+            <Card title="Mentioned in" count={data.notes.length}>
+              <ul className="grid">
+                {data.notes.map((n) => (
+                  <li key={n.path}>
+                    <Link href={`/knowledge?file=${encodeURIComponent(n.path)}`} className={ROW}>
+                      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm">{n.title}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// a row as a shadcn button: none of the button's own height, centring or one-line text
+const RAW = "h-auto justify-start whitespace-normal text-left font-normal";
+
+function TaskRow({ t, onOpen }: { t: Task; onOpen: (id: string) => void }) {
+  return (
+    <Button variant="ghost" onClick={() => onOpen(t.id)} className={cn(ROW, RAW, "w-full items-start")}>
+      <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", t.status === "waiting" ? "bg-warning" : t.status === "doing" ? "bg-info" : "bg-muted-foreground/40")} />
+      <span className="grid min-w-0 flex-1 gap-0.5">
+        <span className="truncate text-sm">{t.title}</span>
+        <span className="flex min-w-0 flex-wrap gap-x-3 text-xs text-muted-foreground">
+          <span className="truncate">{t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio")}</span>
+          {t.project && <span className="truncate">{t.project.name}</span>}
+          {t.waitingOn && <span className="truncate text-warning">Waiting on {t.waitingOn}</span>}
+        </span>
+      </span>
+      {t.dueAt && (
+        <span
+          className={cn(
+            "mt-0.5 inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums",
+            new Date(t.dueAt) < new Date() && "font-medium text-destructive",
+          )}
+        >
+          <CalendarIcon className="size-3" />
+          {dueText(t.dueAt)}
+        </span>
+      )}
+    </Button>
+  );
+}
+
+// A name, with a lock when only owners and admins see it
+export function Named({ name, private: on }: { name: string; private?: boolean }) {
   return (
     <>
-      <Label className="truncate text-muted-foreground" title={name}>
-        {name}
-      </Label>
-      <Input
-        aria-label={name}
-        placeholder="Not set"
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        onBlur={() => (v.trim() ? v.trim() !== value && onChange(v.trim()) : setV(value))}
-        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      />
-      {value ? (
-        <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => onChange(null)}>
-          <XIcon />
-        </Button>
-      ) : (
-        <span />
-      )}
+      {name}
+      {on && <LockIcon aria-label="Private" className="ml-1.5 inline size-3.5 align-[-2px] text-muted-foreground" />}
     </>
   );
 }
 
-function ClientDetails({
-  c,
-  known,
-  admin,
-  team,
-  tasks,
-  onChange,
-  onOpenTask,
-}: {
-  c: Client;
-  known: string[];
-  admin: boolean;
-  team: TeamMember[];
-  tasks: Task[];
-  onChange: (body: ClientInput) => void;
-  onOpenTask: (id: string) => void;
-}) {
-  const STAGES = stagesOf(useClients().data ?? []);
-  const [name, setName] = useState(c.name);
-  const open = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
-  // a handler with a team file but not on the team (a freelancer) is picked by their file
-  const handlerIds = c.handlers.map((h) => h.id ?? h.path);
-  const people = [...team, ...c.handlers.flatMap((h) => (h.id ? [] : [{ id: h.path, name: h.name, email: "", role: "member" as const, reportsTo: null }]))];
+// Owners and admins: make a record theirs alone (private.ts: its notes move to restricted/)
+// because: private with its client (that client's name), so only that client's switch shares it
+export function PrivateSwitch({ on, what, because, onChange }: { on: boolean; what: string; because?: string | null; onChange: (on: boolean) => void }) {
+  const { admin } = useRole();
+  if (!admin) return null;
+  return (
+    <label className={cn("col-span-2 flex items-start gap-3 rounded-lg px-2 py-2", because ? "cursor-default" : "cursor-pointer hover:bg-muted/50")}>
+      <Switch checked={on} disabled={!!because} onCheckedChange={onChange} className="mt-0.5" />
+      <span className="grid gap-0.5">
+        <span className="flex items-center gap-1.5 text-sm">
+          <LockIcon className="size-3.5 text-muted-foreground" />
+          Private
+        </span>
+        <span className="text-xs text-pretty text-muted-foreground">{because ? `Private because ${because} is. Share ${because} to share this too.` : what}</span>
+      </span>
+    </label>
+  );
+}
+
+// The business's own details on a record, each saved when left; owners and admins add a new one in place
+export function Details({ kind, details, onSave, disabled }: { kind: FieldKind; details: ClientDetail[]; onSave: (d: Record<string, string | null>) => void; disabled?: boolean }) {
+  const { admin } = useRole();
+  const fields = useFields(kind).data ?? [];
   return (
     <>
-      <SheetHeader className="gap-3 border-b pr-12">
-        <div className="flex items-center gap-3">
-          <Monogram c={c} size="lg" />
-          <div className="grid min-w-0 gap-1">
-            <SheetTitle className="sr-only">{c.name}</SheetTitle>
-            {admin ? (
-              <Input
-                aria-label="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onBlur={() => name.trim() && name.trim() !== c.name && onChange({ name })}
-                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                className="h-auto min-w-0 rounded-none border-0 bg-transparent p-0 font-heading text-lg font-semibold focus-visible:ring-0 md:text-lg dark:bg-transparent"
-              />
-            ) : (
-              <p className="truncate font-heading text-lg font-semibold">{c.name}</p>
-            )}
-            <SheetDescription className="flex items-center gap-2">
-              <StagePill stage={c.stage} />
-              {open.length ? `${open.length} open task${open.length === 1 ? "" : "s"}` : "Nothing open"}
-            </SheetDescription>
-          </div>
+      {fields.map((f) => (
+        <div key={f.id} className="col-span-2 grid grid-cols-subgrid items-center">
+          <Label className="truncate font-normal text-muted-foreground" title={f.name}>
+            {f.name}
+          </Label>
+          <FieldInput f={f} value={details.find((d) => d.key === f.key)?.value ?? ""} disabled={disabled} onChange={(v) => onSave({ [f.key]: v })} />
         </div>
-      </SheetHeader>
-
-      <div className="grid flex-1 content-start gap-6 overflow-y-auto p-4">
-        <div className="grid grid-cols-[6.5rem_1fr] items-center gap-x-3 gap-y-3">
-          <Label className="text-muted-foreground">Stage</Label>
-          <Select items={STAGES} value={c.stage} disabled={!admin} onValueChange={(v) => v && onChange({ stage: v as ClientStage })}>
-            <SelectTrigger aria-label="Stage" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STAGES.map((s) => (
-                <SelectItem key={s.value} value={s.value}>
-                  <span className="grid">
-                    <span>{s.label}</span>
-                    {s.hint && <span className="text-xs text-muted-foreground">{s.hint}</span>}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Label className="text-muted-foreground">Handled by</Label>
-          <HandlerPicker clientName={c.name} team={people} value={handlerIds} disabled={!admin} onChange={(ids) => onChange({ handlers: ids })} />
-        </div>
-
-        <ClientFacts key={c.slug} c={c} known={known} onChange={(details) => onChange({ details })} />
-
-        <ClientLinked slug={c.slug} />
-
-        <ClientProcesses clientId={c.slug} onOpenTask={onOpenTask} />
-
-        <section className="grid gap-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Open work</h2>
-            {tasks.length > 0 && (
-              <Link href={`/tasks?client=${c.slug}`} className="inline-flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground">
-                All their tasks
-                <ArrowUpRightIcon className="size-3" />
-              </Link>
-            )}
-          </div>
-          {open.length ? (
-            <ul className="grid gap-1">
-              {open.slice(0, 12).map((t) => (
-                <li key={t.id}>
-                  <Button variant="ghost" onClick={() => onOpenTask(t.id)} className="h-auto justify-start whitespace-normal font-normal flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-muted/50">
-                    <span
-                      className={cn(
-                        "mt-1 size-2 shrink-0 rounded-full",
-                        t.status === "waiting" ? "bg-amber-500" : t.status === "doing" ? "bg-blue-500" : "bg-muted-foreground/40",
-                      )}
-                    />
-                    <span className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="text-sm">{t.title}</span>
-                      <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                        <span>{t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio")}</span>
-                        {t.waitingOn && <span className="text-amber-700 dark:text-amber-300">Waiting on {t.waitingOn}</span>}
-                        {t.dueAt && (
-                          <span className={cn("inline-flex items-center gap-1", new Date(t.dueAt) < new Date() && "font-medium text-destructive")}>
-                            <CalendarIcon className="size-3" />
-                            {dueText(t.dueAt)}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-3 text-sm text-muted-foreground">
-              <CheckIcon className="size-4" />
-              Nothing open for {c.name}.
-            </p>
-          )}
-        </section>
-      </div>
-
-      <SheetFooter className="flex-row items-center border-t">
-        <Button variant="outline" size="sm" nativeButton={false} render={<Link href={notesHref(c)} />}>
-          <FileTextIcon />
-          Notes
-        </Button>
-        <Button size="sm" className="ml-auto" nativeButton={false} render={<Link href={`/tasks?client=${c.slug}`} />}>
-          <ListTodoIcon />
-          Their tasks
-        </Button>
-      </SheetFooter>
-      <PageAsk sheet open={{ kind: "client", title: c.name, ref: `company/clients/${c.slug}/index.md` }} />
+      ))}
+      {admin && !disabled && <AddField onAdd={(name, value) => onSave({ [name]: value })} />}
     </>
+  );
+}
+
+// a detail not on the list yet: it joins the list for every record of the kind (as text; its kind changes in the details setup)
+function AddField({ onAdd }: { onAdd: (name: string, value: string) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [value, setValue] = useState("");
+  if (!adding)
+    return (
+      <Button variant="ghost" size="sm" onClick={() => setAdding(true)} className="col-span-2 -ml-2 justify-self-start text-muted-foreground">
+        <PlusIcon />
+        Add a detail
+      </Button>
+    );
+  return (
+    <form
+      className="col-span-2 grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-x-2 py-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!name.trim() || !value.trim()) return;
+        onAdd(name.trim(), value.trim());
+        setName("");
+        setValue("");
+        setAdding(false);
+      }}
+      onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+    >
+      <Input autoFocus aria-label="Detail" placeholder="Detail" value={name} onChange={(e) => setName(e.target.value)} />
+      <Input aria-label="Value" placeholder="Value" value={value} onChange={(e) => setValue(e.target.value)} />
+      <Button type="submit" variant="ghost" size="icon-sm" aria-label="Add detail" disabled={!name.trim() || !value.trim()}>
+        <CheckIcon />
+      </Button>
+    </form>
   );
 }
 
 // Who looks after a client: type to find someone, pick as many as handle them, remove with the x.
-function HandlerPicker({ clientName, team, value, disabled, onChange }: { clientName: string; team: TeamMember[]; value: string[]; disabled: boolean; onChange: (ids: string[]) => void }) {
+export function HandlerPicker({
+  clientName,
+  team,
+  value,
+  disabled,
+  onChange,
+}: {
+  clientName: string;
+  team: TeamMember[];
+  value: string[];
+  disabled: boolean;
+  onChange: (ids: string[]) => void;
+}) {
   const anchor = useComboboxAnchor();
   const chosen = team.filter((m) => value.includes(m.id));
   return (
@@ -681,14 +954,14 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
       isItemEqualToValue={(a: TeamMember, b: TeamMember) => a.id === b.id}
       disabled={disabled}
     >
-      <ComboboxChips ref={anchor} className="min-h-9 w-full">
+      <ComboboxChips ref={anchor} className={cn(QUIET, "h-auto min-h-8 w-full px-1 focus-within:border-input")}>
         <ComboboxValue>
           {(picked: TeamMember[]) => (
             <>
               {picked.map((m) => (
                 <ComboboxChip key={m.id}>{m.name ?? m.email}</ComboboxChip>
               ))}
-              <ComboboxChipsInput placeholder={picked.length ? "Add someone" : `Who looks after ${clientName}?`} />
+              <ComboboxChipsInput aria-label={`Who looks after ${clientName}`} placeholder={picked.length ? "Add someone" : disabled ? "Nobody yet" : "Pick someone"} />
             </>
           )}
         </ComboboxValue>
@@ -700,7 +973,7 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
             <ComboboxItem key={m.id} value={m}>
               <span className="grid min-w-0">
                 <span className="truncate">{m.name ?? m.email}</span>
-                {m.name && <span className="truncate text-xs text-muted-foreground">{m.email}</span>}
+                <span className="truncate text-xs text-muted-foreground">{m.title ?? (m.name ? m.email : "")}</span>
               </span>
             </ComboboxItem>
           )}
@@ -710,71 +983,323 @@ function HandlerPicker({ clientName, team, value, disabled, onChange }: { client
   );
 }
 
-// The processes going for this client, the step each is on, and starting another.
-// The files that name this client (company/contacts/, projects/): their people and their projects, each opening its file.
-const LINKED = [
-  { kind: "contacts", label: "Contacts", sub: (f: Record<string, string>) => [f.role, f.email] },
-  { kind: "projects", label: "Projects", sub: (f: Record<string, string>) => [f.due ? `due ${dateText(f.due)}` : f.start ? "ongoing" : "", f.fee] },
-] as const;
-const plain = (v?: string) => v?.replace(/\[\[[a-z]+\/([^\]]+)\]\]/g, (_, p: string) => p.split("/")[0]!);
+// The people at this client, each with their role here; adding one links them to this client.
+function ClientContacts({ c, contacts }: { c: Client; contacts: Contact[] }) {
+  const [adding, setAdding] = useState(false);
+  const [f, setF] = useState({ name: "", role: "", email: "" });
+  const add = useSaveRecord(
+    (force: boolean) =>
+      api<Contact>("/contacts", {
+        name: f.name,
+        email: f.email.trim() || null,
+        clients: [{ client: c.slug, role: f.role.trim() || null }],
+        force,
+      }),
+    {
+      silent: true,
+      done: () => (setF({ name: "", role: "", email: "" }), setAdding(false)),
+    },
+  );
+  // the one already there: linked to this client too, with the role typed
+  const link = useSaveRecord(
+    async (m: Match) => {
+      const { contact } = await api<{ contact: Contact }>(`/contacts/${m.slug}`);
+      return api<Contact>(
+        `/contacts/${m.slug}`,
+        {
+          clients: [...contact.clients.map((x) => ({ client: x.slug, role: x.role })), { client: c.slug, role: f.role.trim() || null }],
+          updatedAt: contact.updatedAt,
+        },
+        "PATCH",
+      );
+    },
+    {
+      done: (out) => (toast(`${out.name} is linked to ${c.name}`), setF({ name: "", role: "", email: "" }), setAdding(false)),
+    },
+  );
+  const match = matchIn(add.error);
+  return (
+    <Card
+      title="Contacts"
+      count={contacts.length}
+      action={
+        !adding && (
+          <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setAdding(true)}>
+            <PlusIcon />
+            Add
+          </Button>
+        )
+      }
+    >
+      {adding && (
+        <form
+          className="grid gap-1.5 px-2 pb-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (f.name.trim()) add.mutate(false);
+          }}
+          onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+        >
+          <Input autoFocus placeholder="Name" aria-label="Name" value={f.name} onChange={(e) => (setF({ ...f, name: e.target.value }), add.reset())} />
+          <div className="grid grid-cols-2 gap-1.5">
+            <Input placeholder="Role here, e.g. Finance lead" aria-label="Role" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} />
+            <Input placeholder="Email" aria-label="Email" type="email" value={f.email} onChange={(e) => (setF({ ...f, email: e.target.value }), add.reset())} />
+          </div>
+          {match ? (
+            <MatchNote match={match} kind="contact" href={`?open=${encodeURIComponent(`contacts/${match.slug}`)}`} onForce={() => add.mutate(true)}>
+              {!match.archived && (
+                <Button size="xs" onClick={() => link.mutate(match)}>
+                  Link to {c.name}
+                </Button>
+              )}
+            </MatchNote>
+          ) : (
+            add.error && <p className="text-xs text-destructive">{add.error.message}</p>
+          )}
+          <div className="flex justify-end gap-1.5">
+            <Button type="button" size="xs" variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="xs" disabled={!f.name.trim() || add.isPending}>
+              Add contact
+            </Button>
+          </div>
+        </form>
+      )}
+      {contacts.length ? (
+        <ul className="grid">
+          {contacts.map((p) => {
+            const role = p.clients.find((x) => x.id === c.id)?.role;
+            return (
+              <li key={p.id}>
+                <Link href={`?open=${encodeURIComponent(`contacts/${p.slug}`)}`} scroll={false} className={ROW}>
+                  <Avatar name={p.name} />
+                  <span className="grid min-w-0 flex-1">
+                    <span className="truncate text-sm">{p.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">{[role ?? p.title, p.email ?? p.phone].filter(Boolean).join(" · ") || "No details yet"}</span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        !adding && <p className="px-2 pb-2 text-sm text-muted-foreground">Nobody yet. Emplio adds people as they write in.</p>
+      )}
+    </Card>
+  );
+}
 
-function ClientLinked({ slug }: { slug: string }) {
-  const page = useThingPage(`clients/${slug}`);
-  const from = page.data?.linkedFrom ?? [];
-  const meetings = page.data?.meetings ?? [];
-  const linked = LINKED.map(({ kind, label, sub }) => {
-    const items = from.filter((l) => l.kind === kind);
-    if (!items.length) return null;
-    return (
-      <section key={kind} className="grid gap-2">
-        <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">{label}</h2>
-        <ul className="grid gap-1">
-          {items.map((l) => (
-            <li key={l.from}>
-              <Link href={thingHref(l.from) ?? `/knowledge?file=${encodeURIComponent(`company/${l.from}/index.md`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
-                <span className="text-sm">{l.title}</span>
-                <span className="text-xs text-muted-foreground">{sub(l.fields).map(plain).filter(Boolean).join(" · ")}</span>
+// What this client is buying: each project with its lead and due date; a new one can start its service's process.
+function ClientProjects({ c, projects }: { c: Client; projects: Project[] }) {
+  const services = useServices().data ?? [];
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [service, setService] = useState("");
+  const add = useSaveRecord(
+    (force: boolean) =>
+      api<Project & { started: string | null }>("/projects", {
+        name,
+        client: c.slug,
+        service: service || null,
+        force,
+      }),
+    {
+      silent: true,
+      done: (p) => {
+        toast.success(`Added ${p.name}`, {
+          description: startedText(p.started),
+        });
+        setName("");
+        setService("");
+        setAdding(false);
+      },
+    },
+  );
+  const match = matchIn(add.error);
+  const starts = useStartsProcess(services.find((s) => s.slug === service));
+  const items = [{ value: "", label: "No service" }, ...services.map((s: Service) => ({ value: s.slug, label: s.name }))];
+  const open = projects.filter((p) => p.status === "active" || p.status === "on_hold");
+  const closed = projects.filter((p) => !open.includes(p));
+  return (
+    <Card
+      title="Projects"
+      count={open.length}
+      action={
+        !adding && (
+          <Button variant="ghost" size="xs" className="text-muted-foreground" onClick={() => setAdding(true)}>
+            <PlusIcon />
+            Add
+          </Button>
+        )
+      }
+    >
+      {adding && (
+        <form
+          className="grid gap-1.5 px-2 pb-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) add.mutate(false);
+          }}
+          onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+        >
+          <div className="grid gap-1.5">
+            <Input
+              autoFocus
+              placeholder="Project, e.g. Website rebuild"
+              aria-label="Project name"
+              value={name}
+              onChange={(e) => (setName(e.target.value), add.reset())}
+            />
+            <Select items={items} value={service} onValueChange={(v) => setService((v as string) ?? "")}>
+              <SelectTrigger size="sm" aria-label="Service" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {items.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {starts && (
+            <p className="px-1 text-xs text-muted-foreground">
+              Adding it starts {starts} for {c.name}.
+            </p>
+          )}
+          {match ? (
+            <MatchNote match={match} kind="project" href={`?open=${encodeURIComponent(`projects/${match.slug}`)}`} onForce={() => add.mutate(true)} />
+          ) : (
+            add.error && <p className="text-xs text-destructive">{add.error.message}</p>
+          )}
+          <div className="flex justify-end gap-1.5">
+            <Button type="button" size="xs" variant="ghost" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" size="xs" disabled={!name.trim() || add.isPending}>
+              Add project
+            </Button>
+          </div>
+        </form>
+      )}
+      {projects.length ? (
+        <ul className="grid">
+          {[...open, ...closed].map((p) => (
+            <li key={p.id}>
+              <Link href={`?open=${encodeURIComponent(`projects/${p.slug}`)}`} scroll={false} className={cn(ROW, closed.includes(p) && "opacity-60")}>
+                <span className="grid min-w-0 flex-1">
+                  <span className="truncate text-sm">{p.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {[p.service?.name, p.lead && `${p.lead.name} leads`, p.status !== "active" && statusText(p.status), moneyText(p)].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs tabular-nums">
+                  <Due due={p.dueOn ?? undefined} done={closed.includes(p)} />
+                </span>
               </Link>
             </li>
           ))}
         </ul>
-      </section>
-    );
-  });
-  return (
-    <>
-      {linked}
-      {meetings.length > 0 && (
-        <section className="grid gap-2">
-          <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Meetings</h2>
-          <ul className="grid gap-1">
-            {meetings.map((m) => (
-              <li key={m.path}>
-                <Link href={`/knowledge?file=${encodeURIComponent(`company/${m.path}`)}`} className="grid gap-0.5 rounded-lg px-2 py-1.5 hover:bg-muted/50">
-                  <span className="text-sm">{m.title}</span>
-                  {m.date && <span className="text-xs text-muted-foreground">{dateText(m.date)}</span>}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+      ) : (
+        !adding && <p className="px-2 pb-2 text-sm text-muted-foreground">No projects yet.</p>
       )}
-    </>
+    </Card>
   );
 }
 
-function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTask: (id: string) => void }) {
-  const runs = useProcessRuns({ client: clientId });
+// what changed, by whom, newest first: the audit trail an owner checks when a number looks wrong
+const VIA: Record<string, string> = {
+  emplio: "via Emplio",
+  import: "imported",
+  system: "automatic",
+};
+const valueText = (v: unknown) =>
+  v === null || v === undefined || v === ""
+    ? "empty"
+    : Array.isArray(v)
+      ? v.join(", ") || "nobody"
+      : typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T|$)/.test(v)
+        ? dateText(v.slice(0, 10))
+        : String(v);
+// folded until asked for: it's for checking, not for reading every time the page opens
+export function History({ entries }: { entries: HistoryEntry[] }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  if (!entries.length) return null;
+  const shown = all ? entries : entries.slice(0, 6);
+  return (
+    <Card
+      title="History"
+      count={entries.length}
+      action={
+        <Button variant="ghost" size="xs" className="text-muted-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Hide" : "Show"}
+          <ChevronDownIcon className={cn("transition-transform", open && "rotate-180")} />
+        </Button>
+      }
+    >
+      {open && (
+        <>
+          <ul className="grid gap-0.5 px-2 pb-1">
+            {shown.map((h) => (
+              <li key={h.id} className="flex items-start gap-3 py-1.5 text-sm">
+                <HistoryIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="text-pretty">{h.summary}</span>
+                  {h.changes.length > 0 && !/^(Added|Moved|Archived|Brought back)/.test(h.summary) && (
+                    <span className="grid text-xs text-muted-foreground">
+                      {h.changes.slice(0, 4).map((c) => (
+                        <span key={c.field} className="truncate">
+                          {c.field}: {valueText(c.from)} → <span className="text-foreground">{valueText(c.to)}</span>
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground" title={exactDate(h.at)}>
+                    {[
+                      h.who ?? (h.via === "emplio" ? "Emplio" : null),
+                      h.via && VIA[h.via],
+                      new Date(h.at).toLocaleString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      }),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {entries.length > shown.length && (
+            <Button variant="ghost" size="xs" className="justify-self-start text-muted-foreground" onClick={() => setAll(true)}>
+              Show all {entries.length}
+            </Button>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+// The processes going for this client, the step each is on, and starting another.
+function ClientProcesses({ slug, onOpenTask }: { slug: string; onOpenTask: (id: string) => void }) {
+  const runs = useProcessRuns({ client: slug });
   const processes = useProcesses();
   const forClients = (processes.data ?? []).filter((p) => p.for === "client" && !p.error);
   // one with inputs asks for them first
   const [starting, setStarting] = useState<Process | null>(null);
   if (!forClients.length && !runs.data?.length) return null;
   return (
-    <section className="grid gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="font-sans text-xs font-medium tracking-normal text-muted-foreground">Processes</h2>
-        {forClients.length > 0 && (
+    <Card
+      title="Processes"
+      count={runs.data?.length}
+      action={
+        forClients.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="ghost" size="xs" className="text-muted-foreground" />}>
               <PlusIcon />
@@ -782,48 +1307,61 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               {forClients.map((p) => (
-                <StartItem key={p.name} p={p} clientId={clientId} onAsk={() => setStarting(p)} />
+                <StartItem key={p.name} p={p} slug={slug} onAsk={() => setStarting(p)} />
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
-      </div>
+        )
+      }
+    >
       {runs.data?.length ? (
-        <ul className="grid gap-1.5">
+        <ul className="grid">
           {runs.data.map((r) => (
             <li key={r.id}>
               <Button
                 variant="ghost"
                 disabled={!r.current}
                 onClick={() => r.current && onOpenTask(r.current.taskId)}
-                className="h-auto justify-start whitespace-normal font-normal grid w-full gap-1.5 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-muted/50 disabled:opacity-100"
+                className={cn(ROW, RAW, "grid w-full gap-2 py-2.5 disabled:opacity-100 disabled:hover:bg-transparent")}
               >
-                <span className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center justify-between gap-3 text-sm">
                   <span className="truncate font-medium">
                     {r.processTitle}
-                    {r.inputs[0]?.value ? <span className="font-normal text-muted-foreground"> · {inputText(r.inputs[0])}</span> : null}
+                    {r.project ? (
+                      <span className="font-normal text-muted-foreground"> · {r.project.name}</span>
+                    ) : r.inputs[0]?.value ? (
+                      <span className="font-normal text-muted-foreground"> · {inputText(r.inputs[0])}</span>
+                    ) : null}
                     {r.period ? <span className="font-normal text-muted-foreground"> · {r.period}</span> : null}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                    {r.step + 1}/{r.steps.length}
+                    Step {r.step + 1} of {r.steps.length}
                   </span>
                 </span>
-                <span className="flex gap-0.5">
+                <span className="flex w-full gap-1">
                   {r.steps.map((_, i) => (
-                    <span key={i} className={cn("h-1 flex-1 rounded-full", i < r.step ? "bg-primary" : i === r.step ? (r.current?.status === "waiting" ? "bg-amber-500" : "bg-primary/40") : "bg-muted")} />
+                    <span
+                      key={i}
+                      className={cn(
+                        "h-1 flex-1 rounded-full",
+                        i < r.step ? "bg-primary" : i === r.step ? (r.current?.status === "waiting" ? "bg-warning" : "bg-primary/40") : "bg-muted",
+                      )}
+                    />
                   ))}
                 </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {r.steps[r.step]?.name}
-                  {r.current && ` · ${r.current.status === "waiting" ? "waiting" : r.current.assigneeName}`}
-                  {r.current?.dueAt && ` · due ${dueText(r.current.dueAt)}`}
+                <span className="flex min-w-0 items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span className="truncate">
+                    {r.steps[r.step]?.name}
+                    {r.current && ` · ${r.current.status === "waiting" ? "waiting" : r.current.assigneeName}`}
+                  </span>
+                  {r.current?.dueAt && <span className="shrink-0 tabular-nums">due {dueText(r.current.dueAt)}</span>}
                 </span>
               </Button>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground">Nothing going. Start one when it&rsquo;s time.</p>
+        <p className="px-2 pb-2 text-sm text-muted-foreground">Nothing ongoing. Start one when it&rsquo;s time.</p>
       )}
       {starting && (
         <Dialog open onOpenChange={(o) => !o && setStarting(null)}>
@@ -832,24 +1370,28 @@ function ClientProcesses({ clientId, onOpenTask }: { clientId: string; onOpenTas
               <DialogTitle>Start {starting.title}</DialogTitle>
               <DialogDescription>Fill in what it needs; step 1, {starting.steps[0]?.name}, starts right away.</DialogDescription>
             </DialogHeader>
-            <StartForm p={starting} clientId={clientId} onDone={() => setStarting(null)} />
+            <StartForm p={starting} clientId={slug} onDone={() => setStarting(null)} />
           </DialogContent>
         </Dialog>
       )}
-    </section>
+    </Card>
   );
 }
 
-function StartItem({ p, clientId, onAsk }: { p: Process; clientId: string; onAsk: () => void }) {
+function StartItem({ p, slug, onAsk }: { p: Process; slug: string; onAsk: () => void }) {
   const queryClient = useQueryClient();
   const start = useMutation({
-    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, client: clientId }),
-    onSuccess: (r) => toast.success(`Started ${r.processTitle}`, { description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined }),
+    mutationFn: () => api<ProcessRun>("/process-runs", { process: p.name, client: slug }),
+    onSuccess: (r) =>
+      toast.success(`Started ${r.processTitle}`, {
+        description: r.current ? `${r.steps[0]!.name}: ${r.current.assigneeName}` : undefined,
+      }),
     onError: (e) => toast.error(e.message),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
       void queryClient.invalidateQueries({ queryKey: processesQueryKey });
       void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      void queryClient.invalidateQueries({ queryKey: recordsQueryKey });
     },
   });
   return (

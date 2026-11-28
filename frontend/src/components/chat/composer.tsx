@@ -5,7 +5,7 @@
 // browser; Composer draws it.
 import type { Mention, SentFrom } from "@emplio/shared";
 import type { ChatStatus, FileUIPart } from "ai";
-import { ArrowUpIcon, AtSignIcon, FileIcon, FolderIcon, PaperclipIcon, PlusIcon, SquareSlashIcon } from "lucide-react";
+import { ArrowUpIcon, AtSignIcon, FileIcon, FolderIcon, PaperclipIcon, PlusIcon, SquareSlashIcon, UploadIcon } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
@@ -26,7 +26,7 @@ import { VoiceInput } from "@/components/chat/voice-input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useConversations } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { zipFolder } from "@/lib/zip-folder";
+import { readDropped, zipFolder } from "@/lib/zip-folder";
 
 // the parts of a draft that aren't text: replies being quoted, files already uploaded, @mentions linked
 export const keptDraft = <T,>(key: string | null): T[] => {
@@ -296,8 +296,8 @@ const mentionOf = (o: Open): Mention => ({
 // open, the box starts with its @mention, theirs to delete; that box isn't kept as a draft, the page's own is.
 export function PageAsk({ open, sheet }: { open?: Open | null; sheet?: boolean }) {
   const page = usePathname().split("/")[1] ?? "";
-  // a fresh box for each thing opened
-  return <PageBox key={open ? `${open.kind}:${open.ref}` : page} page={page} open={open ?? undefined} sheet={sheet} />;
+  const key = open ? `${open.kind}:${open.ref}:${open.title}` : page;
+  return <PageBox key={key} page={page} open={open ?? undefined} sheet={sheet} />;
 }
 
 // Each page puts the box over its own foot (AskFloat), centred on what it's about; a page with a thing open on it (a process, a note,
@@ -335,9 +335,9 @@ export function AskFloat({ className }: { className?: string }) {
     ro.observe(el);
     return () => (ro.disconnect(), set(0));
   }, []);
-  // floating over the page's foot, nothing behind it: the page keeps its whole height; on a phone, above the tabs
+  // floating over the page's foot on a soft fade, so what scrolls under it doesn't show through: the page keeps its whole height; on a phone, above the tabs
   return (
-    <div ref={ref} className={cn("page-ask pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]", className)}>
+    <div ref={ref} className={cn("page-ask pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-linear-to-t from-background from-55% via-background/80 via-75% to-transparent pt-8 pb-[max(0.75rem,var(--safe-bottom))] max-md:pb-[calc(var(--tabs-h)+0.75rem)]", className)}>
       <div id="ask-slot">
         <PageAsk open={open} />
       </div>
@@ -345,21 +345,63 @@ export function AskFloat({ className }: { className?: string }) {
   );
 }
 
+// Files and folders dropped on a box (a folder as one zip). Its entries are read now: they're gone after the first await.
+export function dropInto(c: ReturnType<typeof useComposer>, dt: DataTransfer) {
+  const entries = [...dt.items].map((i) => i.webkitGetAsEntry());
+  const plain = [...dt.files].filter((_, i) => !entries[i]?.isDirectory);
+  if (plain.length) c.attachments.add(plain);
+  for (const dir of entries.filter((x) => x?.isDirectory)) void c.addFolder(readDropped(dir!));
+}
+
+// what shows while files are dragged over a chat or a page
+export function DropOverlay({ className }: { className: string }) {
+  return (
+    <div className={cn("pointer-events-none inset-0 z-50 flex items-center justify-center bg-background/90 md:bg-background/80 md:backdrop-blur-sm animate-in fade-in duration-150", className)}>
+      <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-foreground/20 px-12 py-10 text-center">
+        <UploadIcon className="size-6 text-muted-foreground" />
+        <div className="font-medium">Drop files to attach</div>
+        <div className="text-sm text-muted-foreground">Images, PDFs and text files up to 100 MB</div>
+      </div>
+    </div>
+  );
+}
+
+// what each page's box asks about
+const ABOUT: Record<string, string> = { today: "today", tasks: "your work", clients: "your clients", contacts: "your contacts", projects: "your projects", services: "your services", processes: "your processes", team: "your team", knowledge: "your notes", files: "your files", database: "your tables" };
+
 function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boolean }) {
   const router = useRouter();
   const { data: conversations } = useConversations();
   const main = conversations?.find((x) => x.kind === "main");
   const c = useComposer(open ? null : `page_draft:${page}`);
+  // files dropped anywhere on the page go in its box, as in a chat (the first box to see a drop takes it)
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
-    if (!open) return;
-    const m = mentionOf(open);
-    c.mentionMenu.link(m);
-    c.setInput((t) => (t.trim() ? t : `@${m.label} `));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once: the box is new for each thing
-  }, []);
+    let depth = 0;
+    const files = (e: DragEvent) => !!e.dataTransfer?.types.includes("Files") && !e.defaultPrevented;
+    const enter = (e: DragEvent) => files(e) && (depth++, setDragging(true));
+    const leave = (e: DragEvent) => files(e) && --depth <= 0 && ((depth = 0), setDragging(false));
+    const over = (e: DragEvent) => files(e) && e.preventDefault();
+    const drop = (e: DragEvent) => {
+      depth = 0;
+      setDragging(false);
+      if (!files(e)) return;
+      e.preventDefault();
+      dropInto(c, e.dataTransfer!);
+    };
+    const on = { dragenter: enter, dragleave: leave, dragover: over, drop } as const;
+    for (const [k, f] of Object.entries(on)) document.addEventListener(k, f as EventListener);
+    return () => { for (const [k, f] of Object.entries(on)) document.removeEventListener(k, f as EventListener); };
+  });
   const send = (raw: string) => {
     const m = c.take(raw);
     if (!m) return;
+    // about the thing that's open: the box says so in its placeholder, and what's sent carries its @mention
+    if (open) {
+      const at = mentionOf(open);
+      if (!m.mentions.some((x) => x.id === at.id)) m.mentions = [...m.mentions, at];
+      if (!m.text.includes(`@${at.label}`)) m.text = `@${at.label} ${m.text}`;
+    }
     const from: SentFrom = { page, ...(open && { open }) };
     try {
       sessionStorage.setItem(SAY_TEXT, m.text.trim() || "Here are some files.");
@@ -368,10 +410,22 @@ function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boo
     } catch {}
     router.push(main ? `/chat/${main.id}` : "/chat");
   };
-  const box = <Composer c={c} onSend={send} placeholder="Ask Emplio anything…" />;
-  return sheet ? (
-    <div className="shrink-0 border-t px-3 pt-3 pb-[max(0.75rem,var(--safe-bottom))]">{box}</div>
-  ) : (
-    <div className="pointer-events-auto mx-auto w-full max-w-3xl px-4">{box}</div>
+  const placeholder = open ? `Ask Emplio about ${open.title}…` : ABOUT[page] ? `Ask Emplio about ${ABOUT[page]}…` : "Ask Emplio anything…";
+  // a new page's box writes its words in, left to right (globals.css .type-in), once: not again when it's emptied
+  const [fresh, setFresh] = useState(!c.input);
+  const box = (
+    <div className={cn(fresh && "ask-type")} style={{ "--type-len": placeholder.length } as React.CSSProperties} onAnimationEnd={() => setFresh(false)}>
+      <Composer c={c} onSend={send} placeholder={placeholder} />
+    </div>
+  );
+  return (
+    <>
+      {dragging && <DropOverlay className="fixed" />}
+      {sheet ? (
+        <div className="shrink-0 border-t px-3 pt-3 pb-[max(0.75rem,var(--safe-bottom))]">{box}</div>
+      ) : (
+        <div className="pointer-events-auto mx-auto w-full max-w-3xl px-4">{box}</div>
+      )}
+    </>
   );
 }

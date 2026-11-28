@@ -9,9 +9,11 @@ import type { Case } from "./cases";
 import { marks, scorers, type Input } from "./scorers";
 
 async function work({ business, chat }: Input, name: string): Promise<Said> {
-  const { reply, pretend, counted } = await import("../emplio");
+  const { reply, pretend, counted, memory } = await import("../emplio");
+  const remember = memory();
   const WORLD = await (await import("../client-work/firm")).world();
-  const check = await (await import("../client-work/firm")).checker();
+  const firm = await import("../client-work/firm");
+  const check = await firm.checker();
   const { longRunNote, notCounted, refusal, remindAt, skillNote } = await import("../../src/chat");
   const count = counted();
   const said = await reply(
@@ -22,7 +24,7 @@ async function work({ business, chat }: Input, name: string): Promise<Said> {
       const nth = count(step, !notCounted(command));
       const refused = refusal(command, nth);
       if (refused) return refused;
-      const result = [check(command) ?? pretend(command, WORLD), skillNote(nth, command)].filter(Boolean).join("\n\n");
+      const result = [remember.answer(command, check(command) ?? firm.search(command) ?? pretend(command, WORLD)), skillNote(nth, command)].filter(Boolean).join("\n\n");
       return nth && remindAt(nth) ? `${result}\n\n${longRunNote(nth, false)}` : result;
     },
     12,

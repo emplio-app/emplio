@@ -202,12 +202,53 @@ const one = (c: string): string => {
   if (/^\s*(grep|find)\b/.test(c)) return "";
   return "";
 };
+// What a business's records remember within one reply, as the app's do: a write's own line, and every later
+// list or show carrying the writes made since, so Emplio doesn't take a stand-in's unchanged list for a failed save.
+// failed: the writes the stand-in refused (an "error:" answer), which did nothing
+export const memory = () => {
+  const changes: string[] = [];
+  const failed: string[] = [];
+  // tasks gone with a stopped run (ponytail: known once its runs line was seen)
+  const dropped = new Set<string>();
+  const answer = (command: string, out: string) => {
+    const line = command.split("\n")[0]!;
+    const write = /emplio (clients|contacts|projects|services|meetings|tasks|processes) (add|update|archive|restore|done|set|back|stop|start)\s+(.*)/.exec(line);
+    if (/^error:/m.test(out)) failed.push(command);
+    else if (write) changes.push(`- just now (via Emplio): ${write[1]} ${write[2]} ${write[3]!.slice(0, 200)}`);
+    else if (changes.length && /emplio (clients|contacts|projects|services|meetings|tasks|processes) (show|list|runs|search)/.test(line)) {
+      // a run stopped is gone from the runs, and one set shows what it was set to, as the app's do
+      for (const c of changes) {
+        const run = /processes (stop|set) (\w+)\s*(.*)/.exec(c);
+        const task = /tasks (done|update) (\w+)/.exec(c);
+        if (task && (task[1] === "done" || /cancel/.test(c))) out = out.split("\n").filter((l) => !l.startsWith(task[2]!)).join("\n");
+        if (!run) continue;
+        // a stopped run goes with its detail lines and its open task
+        let gone = false;
+        const taskOf = new RegExp(`^${run[2]}.*task (\\w+)`, "m").exec(out)?.[1];
+        if (run[1] === "stop" && taskOf) dropped.add(taskOf);
+        out = out.split("\n").filter((l) => {
+          if (run[1] !== "stop") return true;
+          if (l.startsWith(run[2]!)) return !(gone = true);
+          if (gone && l.startsWith("\t")) return false;
+          gone = false;
+          return !(taskOf && l.startsWith(taskOf));
+        }).map((l) => (run[1] === "set" && l.startsWith(run[2]!) ? `${l} (now ${run[3]})` : l)).join("\n");
+      }
+      out = out.split("\n").filter((l) => ![...dropped].some((t) => l.startsWith(t))).join("\n");
+      return `${out}\nrecent changes, newer than the lines above (they hold):\n${changes.join("\n")}`;
+    }
+    return out;
+  };
+  return { answer, failed };
+};
+
 // world: what this business's commands answer, first match wins: [words in the command (a regular expression), the result]
 export type World = [string, string][];
 export const pretend = (command: string, world: World = []): string =>
   // a heredoc is one write, whatever is in it; a chain answers part by part, each from the world first
   (/<</.test(command) ? [command] : command.split(/\s*(?:;|&&|\n)\s*/))
-    .map((part) => world.find(([words]) => new RegExp(words).test(part))?.[1] ?? one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
+    // an action's world answer is what running it gives: asking what it takes (apps info) isn't running it
+    .map((part) => world.find(([words]) => new RegExp(words).test(part) && (!/\bapps info\b/.test(part) || /info/.test(words)))?.[1] ?? one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
     .filter(Boolean)
     .join("\n") || "(no output)";
 

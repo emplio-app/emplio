@@ -12,6 +12,7 @@ import { useConfirm } from "@/components/confirm";
 import { imageHref } from "@/components/chat/attachments";
 import { inApp } from "@/lib/save-file";
 import { download, FilePanel, savePdf, FileTypeIcon, kindOf, madeQueryKey, type Shown } from "@/components/files/file-viewer";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -83,7 +84,7 @@ export function FilesPage() {
       </header>
 
       <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="mx-auto grid max-w-3xl grid-cols-1 gap-4 px-4 py-4 sm:py-6">
+        <div className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-4 px-4 py-4 sm:py-6">
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or what's inside" aria-label="Search files" className="h-10 pl-9" />
@@ -118,7 +119,7 @@ export function FilesPage() {
           ) : (
             <ul className="grid grid-cols-1 gap-1">
               {files.data.map((f) => (
-                <li key={f.id} className="group flex items-center gap-2 rounded-lg pr-1 hover:bg-muted/50">
+                <li key={f.id} className="group flex items-center gap-2 rounded-lg pr-1 hover:bg-muted">
                   {renaming === f.id ? (
                     <form
                       className="flex flex-1 items-center gap-3 p-2"
@@ -130,7 +131,7 @@ export function FilesPage() {
                       }}
                     >
                       <FileTypeIcon file={f} className="size-4 shrink-0 text-muted-foreground" />
-                      <Input name="name" defaultValue={f.name} autoFocus aria-label="New name" className="h-8" onBlur={(e) => e.currentTarget.form?.requestSubmit()} />
+                      <Input name="name" defaultValue={f.name} autoFocus aria-label="New name" onBlur={(e) => e.currentTarget.form?.requestSubmit()} />
                     </form>
                   ) : (
                     <button type="button" onClick={() => setOpened(shownOf(f))} className="flex min-w-0 flex-1 items-center gap-3 p-2 text-left">
@@ -154,7 +155,7 @@ export function FilesPage() {
                       <span className="grid min-w-0 gap-0.5">
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="truncate text-sm font-medium">{f.name}</span>
-                          {f.version > 1 && <span className="shrink-0 rounded bg-muted px-1 text-[0.65rem] text-muted-foreground">v{f.version}</span>}
+                          {f.version > 1 && <Badge variant="secondary">v{f.version}</Badge>}
                           {f.shareUrl && <UsersIcon className="size-3 shrink-0 text-muted-foreground" aria-label="Shared" />}
                         </span>
                         <span className="truncate text-xs text-muted-foreground">

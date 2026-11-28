@@ -135,7 +135,7 @@ export function JobCards({ onPick, paused }: { onPick: (job: string) => void; pa
           );
         })}
       </div>
-      <div key={`${card.title}${shuffle}`} className="mt-3 animate-[fade-in_250ms_ease-out] overflow-hidden rounded-2xl border bg-card motion-reduce:animate-none">
+      <div key={`${card.title}${shuffle}`} className="mt-3 animate-[fade-in_250ms_ease-out] overflow-hidden rounded-xl border bg-card motion-reduce:animate-none">
         {jobs.map((job) => (
           <button
             key={job}
@@ -148,14 +148,15 @@ export function JobCards({ onPick, paused }: { onPick: (job: string) => void; pa
           </button>
         ))}
       </div>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="xs"
         onClick={() => setShuffle((n) => n + 1)}
-        className="mx-auto mt-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="mx-auto mt-3 flex text-muted-foreground"
       >
         <ShuffleIcon className="size-3.5" />
         Show other ideas
-      </button>
+      </Button>
     </div>
   );
 }
@@ -224,7 +225,7 @@ export function WelcomeDialog({ onTry, busy }: { onTry: (job: string) => void; b
           </DialogDescription>
         </DialogHeader>
         {paused && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+          <div className="rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm">
             {owner ? "Free trials are paused right now. Pick a plan and Emplio starts work straight away." : "Emplio is paused until the owner picks a plan."}
           </div>
         )}
@@ -305,15 +306,15 @@ export function Offers({ messages }: { messages: UIMessage[] }) {
   const notify = useNotifyOffer(messages.filter((m) => m.role === "user").length);
   if (!notify.ask) return <TelegramOffer messages={messages} />;
   return (
-    <div className="mb-2 flex items-center gap-3 rounded-2xl border bg-card px-4 py-2.5 text-sm shadow-sm">
+    <div className="mb-2 flex items-center gap-3 rounded-xl border bg-card px-4 py-2.5 text-sm shadow-sm">
       <BellIcon className="size-4 shrink-0 text-primary" />
       <span className="min-w-0 flex-1 text-muted-foreground">Get a ping when Emplio finishes a job or needs your OK.</span>
-      <Button size="sm" className="shrink-0 rounded-full" onClick={() => notify.answer(true)}>
+      <Button size="sm" className="shrink-0" onClick={() => notify.answer(true)}>
         Turn on
       </Button>
-      <button type="button" onClick={() => notify.answer(false)} aria-label="Not now" className="grid size-8 place-items-center rounded-full text-muted-foreground hover:text-foreground">
+      <Button variant="ghost" size="icon-xs" onClick={() => notify.answer(false)} aria-label="Not now" className="text-muted-foreground">
         <XIcon className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -342,15 +343,15 @@ export function TelegramOffer({ messages }: { messages: UIMessage[] }) {
   if (gone || sent < 2 || !data || data.telegram.connected || !bot) return <ChannelsDialog open={open} onOpenChange={setOpen} />;
   return (
     <>
-      <div className="mb-2 flex items-center gap-3 rounded-2xl border bg-card px-4 py-2.5 text-sm shadow-sm">
+      <div className="mb-2 flex items-center gap-3 rounded-xl border bg-card px-4 py-2.5 text-sm shadow-sm">
         <SendIcon className="size-4 shrink-0 text-[#229ED9]" />
         <span className="min-w-0 flex-1 text-muted-foreground">Get Emplio on your phone: chat in Telegram and get its reports there.</span>
-        <Button size="sm" className="shrink-0 rounded-full" onClick={() => (track("telegram_offer_clicked"), close(), setOpen(true))}>
+        <Button size="sm" className="shrink-0" onClick={() => (track("telegram_offer_clicked"), close(), setOpen(true))}>
           Connect
         </Button>
-        <button type="button" onClick={close} aria-label="Not now" className="rounded p-0.5 text-muted-foreground hover:text-foreground">
+        <Button variant="ghost" size="icon-xs" onClick={close} aria-label="Not now" className="text-muted-foreground">
           <XIcon className="size-3.5" />
-        </button>
+        </Button>
       </div>
       <ChannelsDialog open={open} onOpenChange={setOpen} />
     </>

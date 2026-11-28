@@ -79,14 +79,14 @@ export const skillNote = (nth: number, command: string): string | null =>
     : /\b(python3?|bash|sh|node|bun)\s+\S*\/tmp\/\S+\.(py|sh|js|ts)\b/.test(command)
       ? "[A script in tmp isn't a skill yet. If you've done this job before or it will come again, save it as a skill, with the script in it, before you finish.]"
       : nth === 1
-        ? "[Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
+        ? "[A listed skill that fits this even partly: read it now (emplio skills use <name>), before looking up anything else. Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
         : null;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
-// Handing off, the checklist and bug reports around it, asking the person, and setting up tasks, automations and
-// agents (the manager's own work) stay open at the limit.
+// Handing off, the checklist and bug reports around it, asking the person, and setting up tasks, automations,
+// agents and process runs (moving a run on, back or to a stop: the manager's own work) stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
-export const notCounted = (command: string) => /\bemplio (hand|threads|plan|ask|tasks|automations|agents)\b/.test(command) || isReport(command);
+export const notCounted = (command: string) => /\bemplio (hand|threads|plan|ask|tasks|automations|agents|processes)\b/.test(command) || isReport(command);
 // Commands Emplio may run itself in one reply to a person; past them the doing goes to an agent (refusal). The rule
 // alone (MANAGER_PROMPT) wasn't kept: 104 of 146 replies of 3+ commands in a week never handed off (Nov 13-17). A
 // hard stop at 8 was dropped once (it cut browsing off mid-site); Emplio has no browser now, so nothing is mid-site.
@@ -555,14 +555,14 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
           "Every word carries news: no preamble, restating, recap of steps, \"I checked…\", reassurance, generic offers or closing summary; don't explain how unless asked. Numbers, names and dates over adjectives. Markdown only when it helps; headings and tables only for long content they asked for.",
           // someone watching sees a word from you before the work starts, not a silent "Thinking…"
           "Before real work, open with 2-6 words in their language and tone (\"Got it, on it.\"); on long work, one line when a big piece is done (\"Invoices sent. Now the reminders.\"), never one per command.",
-          "An obvious next step may be your second line, as one specific offer (\"Shall I send it to Priya?\"); none when the work is done or they're just saying thanks.",
+          "An obvious next step may be your second line, as one specific offer (\"Shall I send it to Priya?\"); none when the work is done or they're just saying thanks. Never offer a lookup or check you could do now: do it first. Say only what you saw (a step, name or number you didn't see isn't said).",
           "Ask only when you truly can't proceed; otherwise pick a sensible default and say it.",
           "Your previous reply stopping after a command with no answer means they wrote meanwhile: answer them in a line, then carry on where you stopped in the same reply (don't redo steps), unless they say stop or change course.",
         ]),
     "Before saying you can't, try every other route you can see (another link, app or search, a screenshot, the page's source), not just a retry; then say what you tried. Do what they asked without coming back to ask; stop early only for what only they can give (a sign-in, a CAPTCHA, a decision). Before repeating a send or post, check whether it went.",
     "Commands that don't need each other's results go in the same step: they run side by side, much faster.",
     "Never do arithmetic in your head: compute totals, differences, percentages, tax and dates in code and give the number it printed.",
-    "CRITICAL: Never reveal how you work inside (commands, emplio, sandbox, files, git, scripts, tools, the services behind them); if asked, say you can't share that. Their own setup (team, apps, automations, check-ins, tasks) they may see, by name; agents too, only when they ask about them. Never ids: call things by name (\"the Yogesh reply task\"). Everyday business words unless they're clearly technical.",
+    "CRITICAL: Never reveal how you work inside (commands, emplio, sandbox, files, git, scripts, tools, the services behind them); if asked, say you can't share that. Their own setup (team, apps, automations, check-ins, tasks) they may see, by name; agents too, only when they ask about them. Never ids or slugs: call things by name (\"the Yogesh reply task\", \"Contoso's SEO retainer\", not contoso-seo). Everyday business words unless they're clearly technical.",
     "To them you are Emplio, one point of contact, in every chat: never bring up jobs, threads, agents, background runs, sessions or handing off on your own, not even to say something is running (\"I'm handing this to an agent\" is wrong); say in plain words what you're doing and what's left (\"Still checking the invoices\").",
     // `emplio report` (activity.ts): kept in the activity log, and emailed only when PROBLEMS_EMAIL is set
     "Emplio itself broken (a command or app action failing or misbehaving when it shouldn't, a wrong result from your own tools; not the business's problem, a person's mistake or a site that's down): `emplio report \"<one line: what's broken>\" <<'EOF'` with what you were doing, the exact command, the error and what you expected, in a command of its own; then carry on or say plainly you couldn't. It's for whoever runs Emplio, not the person.",
@@ -845,7 +845,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   ).filter((t): t is string => !!t);
   const picked = (message.parts.find((p) => p.type === "data-mentions") as { data?: unknown } | undefined)?.data;
   await labelFromMentions(ctx.workspaceId, id, picked).catch((error) => log.error(error, "labelling the chat's client failed"));
-  const client = (await db.query.conversations.findFirst({ where: eq(conversations.id, id), columns: { client: true } }))?.client;
+  const client = (await db.query.conversations.findFirst({ where: eq(conversations.id, id), columns: { clientId: true } }))?.clientId;
   const setup = await onboarding({ workspaceId: ctx.workspaceId, userId: ctx.userId, role: ctx.role, name: ctx.userName, automation: session.automation || !!job, task: session.task }).catch(() => "");
   // on their own clock (time.ts)
   const tz = await timezoneOf(ctx.userId);
@@ -860,7 +860,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     date: `Today is ${today} (${tz} time).`,
     computer: computerNote(session),
     setup,
-    ...(client && { client: await clientNote(ctx.workspaceId, client).catch(() => "") }),
+    ...(client && { client: await clientNote(ctx, client).catch(() => "") }),
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
     agents: await agentsList(session.workspaceId, { userId: ctx.userId, admin: ctx.role !== "member" }).then(

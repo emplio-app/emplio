@@ -114,7 +114,7 @@ export function DatabasePage() {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <SidebarTrigger />
         {open && (
-          <Button size="icon" variant="ghost" className="size-8 md:hidden" aria-label="All tables" onClick={() => setOpen(null)}>
+          <Button size="icon" variant="ghost" className="md:hidden" aria-label="All tables" onClick={() => setOpen(null)}>
             <ChevronLeftIcon />
           </Button>
         )}
@@ -133,7 +133,7 @@ export function DatabasePage() {
               type="button"
               onClick={() => pick(t.name)}
               aria-current={open === t.name}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/60 aria-[current=true]:bg-accent aria-[current=true]:font-medium"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted aria-[current=true]:bg-accent aria-[current=true]:font-medium"
             >
               <TableIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <Heading name={t.name} className="min-w-0 flex-1 truncate" />
@@ -225,7 +225,7 @@ export function DatabasePage() {
                                         onChange={(e) => filter(c, e.target.value)}
                                         placeholder={`${heading(c)} contains…`}
                                         aria-label={`${heading(c)} contains`}
-                                        className="h-8 pr-8 text-sm"
+                                        className="pr-8"
                                       />
                                       {filters[c] && (
                                         <Button

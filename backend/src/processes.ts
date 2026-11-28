@@ -15,10 +15,10 @@ import { INPUT_TYPES, type Process, type ProcessInput, type ProcessRun, type Pro
 import { record } from "./activity";
 import { context, type Ctx } from "./auth";
 import { db } from "./db";
-import { automations, processes, processRuns, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
+import { automations, clients, processes, processRuns, projects, tasks, workspaceMembers, type ProcessStepDef } from "./db/schema";
 import { findAgent } from "./agents";
 import { detailOf, findClient, listClients } from "./clients";
-import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
+import { ensureRepo, lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { listTeam } from "./team";
 import { DEFAULT_ZONE } from "./time";
 
@@ -26,6 +26,9 @@ type Who = { workspaceId: string; userId: string; role: Role };
 type Run = typeof processRuns.$inferSelect;
 
 const REPO = "company";
+// a private one (owners and admins only) is kept in their folder instead
+const PRIVATE_REPO = "restricted";
+const repoOf = (p: { private: boolean }) => (p.private ? PRIVATE_REPO : REPO);
 const FOLDER = "processes";
 const NAME = /^[a-z0-9][a-z0-9-]{0,50}$/;
 const DAY = 86_400_000;
@@ -40,7 +43,7 @@ const pathOf = (name: string) => {
 
 // --- the file ---
 
-type Parsed = Omit<Process, "name" | "error" | "active" | "startedBy">;
+type Parsed = Omit<Process, "name" | "error" | "active" | "startedBy" | "private">;
 
 // Its settings, inputs and steps, or what's wrong with it. Steps refer to each other by number (1 = the first) or
 // by name, and to a date input by its name.
@@ -199,20 +202,24 @@ type ProcessRow = typeof processes.$inferSelect;
 const syncing = new Map<string, Promise<unknown>>();
 export function syncProcesses(workspaceId: string): Promise<void> {
   const run = (syncing.get(workspaceId) ?? Promise.resolve()).then(async () => {
-    const files = (await listFolder(workspaceId, REPO, FOLDER).catch(() => [])).filter((f) => f.name.endsWith(".md") && NAME.test(f.name.slice(0, -3)));
+    const folder = async (repo: string, priv: boolean) =>
+      (await listFolder(workspaceId, repo, FOLDER).catch(() => [])).filter((f) => f.name.endsWith(".md") && NAME.test(f.name.slice(0, -3))).map((f) => ({ ...f, private: priv }));
+    // the same name in both: the owners' one
+    const owners = await folder(PRIVATE_REPO, true);
+    const files = [...owners, ...(await folder(REPO, false)).filter((f) => !owners.some((o) => o.name === f.name))];
     const rows = await db.select().from(processes).where(eq(processes.workspaceId, workspaceId));
     for (const row of rows)
       if (!files.some((f) => f.name === `${row.name}.md`)) await db.delete(processes).where(eq(processes.id, row.id));
     for (const f of files) {
       const name = f.name.slice(0, -3);
       const old = rows.find((r) => r.name === name);
-      if (old?.sha === f.sha) continue;
-      const text = (await readFile(workspaceId, REPO, `${FOLDER}/${f.name}`)) ?? "";
+      if (old?.sha === f.sha && old.private === f.private) continue;
+      const text = (await readFile(workspaceId, repoOf(f), `${FOLDER}/${f.name}`)) ?? "";
       const parsed = parseProcess(text);
       const values =
         "error" in parsed
-          ? { workspaceId, name, sha: f.sha, title: name, for: "client", inputs: [], steps: [], about: "", error: parsed.error, updatedAt: new Date() }
-          : { workspaceId, name, sha: f.sha, ...parsed, steps: parsed.steps as ProcessStepDef[], error: null, updatedAt: new Date() };
+          ? { workspaceId, name, sha: f.sha, private: f.private, title: name, for: "client", inputs: [], steps: [], about: "", error: parsed.error, updatedAt: new Date() }
+          : { workspaceId, name, sha: f.sha, private: f.private, ...parsed, steps: parsed.steps as ProcessStepDef[], error: null, updatedAt: new Date() };
       await db.insert(processes).values(values).onConflictDoUpdate({ target: [processes.workspaceId, processes.name], set: values });
     }
   });
@@ -228,14 +235,16 @@ const toProcess = (r: ProcessRow, active: number, startedBy: Process["startedBy"
   startedBy,
   steps: r.steps,
   about: r.about,
+  private: r.private,
   error: r.error,
   active,
 });
 
-export async function listProcesses(workspaceId: string): Promise<Process[]> {
+// viewer: a team member doesn't see private ones; none: the server, sees all
+export async function listProcesses(workspaceId: string, viewer?: Pick<Who, "role">): Promise<Process[]> {
   await syncProcesses(workspaceId);
   const [rows, counts, starters] = await Promise.all([
-    db.select().from(processes).where(eq(processes.workspaceId, workspaceId)).orderBy(processes.title),
+    db.select().from(processes).where(and(eq(processes.workspaceId, workspaceId), viewer && !isAdmin(viewer) ? eq(processes.private, false) : undefined)).orderBy(processes.title),
     db
       .select({ process: processRuns.process, n: sql<number>`count(*)`.mapWith(Number) })
       .from(processRuns)
@@ -251,27 +260,29 @@ export async function listProcesses(workspaceId: string): Promise<Process[]> {
   return rows.map((r) => toProcess(r, n.get(r.name) ?? 0, starters.filter((a) => a.process === r.name).map(({ process: _, ...a }) => a)));
 }
 
-async function getProcess(workspaceId: string, name: string) {
+async function getProcess(workspaceId: string, name: string, viewer?: Partial<Pick<Who, "role">>) {
   pathOf(name);
   await syncProcesses(workspaceId);
   const row = await db.query.processes.findFirst({ where: and(eq(processes.workspaceId, workspaceId), eq(processes.name, name)) });
-  if (!row) throw new ProcessError(`no process ${name} (emplio processes list)`);
+  if (!row || (row.private && viewer?.role === "member")) throw new ProcessError(`no process ${name} (emplio processes list)`);
   if (row.error) throw new ProcessError(`${name} can't run: ${row.error}`);
   return toProcess(row, 0);
 }
 
 // Saved by the owner or an admin.
-export async function saveProcess(who: Ctx, name: string, text: string, mode: "add" | "update") {
+export async function saveProcess(who: Ctx, name: string, text: string, mode: "add" | "update", priv = false) {
   if (!isAdmin(who)) throw new ProcessError("only the owner or an admin can change processes");
   const path = pathOf(name);
-  const exists = (await readFile(who.workspaceId, REPO, path)) !== null;
+  const had = await db.query.processes.findFirst({ where: and(eq(processes.workspaceId, who.workspaceId), eq(processes.name, name)) });
+  const repo = repoOf({ private: had?.private ?? priv });
+  const exists = (await readFile(who.workspaceId, repo, path)) !== null;
   if (mode === "add" && exists) throw new ProcessError(`${name} already exists; change it with update`);
   if (mode === "update" && !exists) throw new ProcessError(`no process ${name}; create it with add`);
   const p = parseProcess(text);
   if ("error" in p) throw new ProcessError(p.error);
   await checkWho(who.workspaceId, p.steps);
   const author = { name: who.userName, email: who.userEmail };
-  await writeFile(who.workspaceId, REPO, path, text.endsWith("\n") ? text : `${text}\n`, `${exists ? "Edited" : "Added"} process ${name}\n\nBy ${who.userName}`, author);
+  await writeFile(who.workspaceId, repo, path, text.endsWith("\n") ? text : `${text}\n`, `${exists ? "Edited" : "Added"} process ${name}\n\nBy ${who.userName}`, author);
   await syncProcesses(who.workspaceId);
   return p;
 }
@@ -279,7 +290,28 @@ export async function saveProcess(who: Ctx, name: string, text: string, mode: "a
 export async function removeProcess(who: Ctx, name: string) {
   if (!isAdmin(who)) throw new ProcessError("only the owner or an admin can change processes");
   const author = { name: who.userName, email: who.userEmail };
-  if (!(await writeFile(who.workspaceId, REPO, pathOf(name), null, `Removed process ${name}\n\nBy ${who.userName}`, author))) throw new ProcessError(`no process ${name}`);
+  const had = await db.query.processes.findFirst({ where: and(eq(processes.workspaceId, who.workspaceId), eq(processes.name, name)) });
+  if (!(await writeFile(who.workspaceId, repoOf({ private: !!had?.private }), pathOf(name), null, `Removed process ${name}\n\nBy ${who.userName}`, author))) throw new ProcessError(`no process ${name}`);
+  await syncProcesses(who.workspaceId);
+}
+
+// Private (owners and admins only) or everyone's: its file moves to the owners' folder or back. Written there first,
+// then removed here, so a failure halfway leaves a copy in both, never none.
+export async function setProcessPrivate(who: Ctx, name: string, on: boolean) {
+  if (!isAdmin(who)) throw new ProcessError("only the owner or an admin can make a process private");
+  const path = pathOf(name);
+  await syncProcesses(who.workspaceId);
+  const had = await db.query.processes.findFirst({ where: and(eq(processes.workspaceId, who.workspaceId), eq(processes.name, name)) });
+  if (!had) throw new ProcessError(`no process ${name}`);
+  if (had.private === on) return;
+  const [from, to] = on ? [REPO, PRIVATE_REPO] : [PRIVATE_REPO, REPO];
+  const text = await readFile(who.workspaceId, from, path);
+  if (text === null) throw new ProcessError(`no process ${name}`);
+  const author = { name: who.userName, email: who.userEmail };
+  const why = `${on ? "Made private" : "Shared with everyone"}: process ${name}\n\nBy ${who.userName}`;
+  await ensureRepo(who.workspaceId, to, to === PRIVATE_REPO ? "Finance, HR and owner notes" : "Shared company files");
+  await writeFile(who.workspaceId, to, path, text, why, author);
+  await writeFile(who.workspaceId, from, path, null, why, author);
   await syncProcesses(who.workspaceId);
 }
 
@@ -304,12 +336,14 @@ const person = (team: { id: string; name: string | null; email: string }[], q: s
 // Start one: for a client (subject is their name) or for anything else named by subject (else by its first input),
 // with its inputs filled in. A repeatKey already used starts nothing (null).
 export async function startRun(
-  w: { workspaceId: string; userId: string },
+  w: { workspaceId: string; userId: string; role?: Role },
   name: string,
-  o: { client?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
+  // client: a slug or name; projectId: the project it's part of (its client's)
+  o: { client?: string | null; projectId?: string | null; subject?: string; inputs?: Record<string, unknown>; period?: string | null; repeatKey?: string },
 ): Promise<Run | null> {
-  const p = await getProcess(w.workspaceId, name);
-  const c = p.for === "client" && o.client ? (await listClients(w)).find((x) => x.slug === o.client) : null;
+  const p = await getProcess(w.workspaceId, name, w);
+  const found = p.for === "client" && o.client ? await findClient(w, o.client) : null;
+  const c = found && typeof found !== "string" && !found.archivedAt ? found : null;
   // an input not given, filled in from the client's detail of the same name (their Tax number), when it fits its type
   const fromClient = Object.fromEntries(
     p.inputs.flatMap((x) => {
@@ -326,11 +360,17 @@ export async function startRun(
   const inputs: RunInput[] = p.inputs.map((x) => ({ ...x, value: given[x.key] ?? null }));
   let subject = o.subject?.trim() || (p.for === "other" ? (inputs[0]?.value ?? "") : "");
   let client: string | null = null;
+  let projectId: string | null = null;
   if (p.for === "client") {
     if (!o.client) throw new ProcessError(`"${p.title}" is done for a client: say which (--client <name>)`);
     if (!c) throw new ProcessError("no such client (emplio clients list)");
     subject = c.name;
-    client = c.slug;
+    client = c.id;
+    if (o.projectId) {
+      const [pr] = await db.select({ clientId: projects.clientId }).from(projects).where(eq(projects.id, o.projectId));
+      if (pr?.clientId !== c.id) throw new ProcessError("that project isn't this client's");
+      projectId = o.projectId;
+    }
   } else if (!subject) throw new ProcessError(`say who or what this "${p.title}" is for (--for "Sarah Lee, React developer"${p.inputs[0] ? `, or its ${p.inputs[0].name}: --${p.inputs[0].key}` : ""})`);
   const [run] = await db
     .insert(processRuns)
@@ -339,7 +379,8 @@ export async function startRun(
       process: name,
       processTitle: p.title,
       subject: subject.slice(0, 200),
-      client,
+      clientId: client,
+      projectId,
       inputs,
       period: o.period ?? null,
       steps: p.steps as ProcessStepDef[],
@@ -375,7 +416,7 @@ export async function assign(workspaceId: string, who: string, handlerId: string
 // The task for step i of a run: who does it, when it's due, and what it's part of.
 async function makeStep(run: Run, i: number, note?: string) {
   const step = run.steps[i]!;
-  const client = run.client ? (await listClients(run)).find((c) => c.slug === run.client) : null;
+  const client = run.clientId ? (await listClients(run.workspaceId, { ids: [run.clientId] }))[0] : null;
   // the first handler who's on the team
   const { assigneeId, agent, missing } = await assign(run.workspaceId, step.who, client?.handlers.find((h) => h.id)?.id, run.startedBy);
   const dueAt = dueOf(run, step);
@@ -391,7 +432,8 @@ async function makeStep(run: Run, i: number, note?: string) {
     assigneeId,
     agent,
     requesterId: run.startedBy,
-    client: run.client,
+    clientId: run.clientId,
+    projectId: run.projectId,
     dueAt,
     runId: run.id,
     stepIndex: i,
@@ -418,7 +460,7 @@ export function stepNotes(run: Pick<Run, "id" | "steps" | "inputs" | "processTit
 // for one its first input instead, if any), then the period.
 function taskTitle(run: Run, i: number) {
   const first = run.inputs[0]?.value;
-  const label = run.client ? (first ? ` · ${first}` : "") : ` · ${run.subject}`;
+  const label = run.clientId ? (first ? ` · ${first}` : "") : ` · ${run.subject}`;
   return `${run.steps[i]!.name}${label}${run.period ? ` · ${run.period}` : ""}`.slice(0, 300);
 }
 
@@ -549,7 +591,7 @@ export async function stopRun(w: Who, id: string) {
 }
 
 // viewer: a member, who sees only the runs they started or have a step in (inputs can be amounts, salaries)
-export async function listRuns(workspaceId: string, f: { process?: string; client?: string; all?: boolean; viewer?: Pick<Who, "userId" | "role"> } = {}): Promise<ProcessRun[]> {
+export async function listRuns(workspaceId: string, f: { process?: string; clientId?: string; all?: boolean; viewer?: Pick<Who, "userId" | "role"> } = {}): Promise<ProcessRun[]> {
   const member = f.viewer && !isAdmin(f.viewer) ? f.viewer.userId : null;
   const rows = await db
     .select()
@@ -558,7 +600,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       and(
         eq(processRuns.workspaceId, workspaceId),
         f.process ? eq(processRuns.process, f.process) : undefined,
-        f.client ? eq(processRuns.client, f.client) : undefined,
+        f.clientId ? eq(processRuns.clientId, f.clientId) : undefined,
         f.all ? undefined : eq(processRuns.status, "active"),
         member ? sql`(${processRuns.startedBy} = ${member} or exists (select 1 from ${tasks} where ${tasks.runId} = ${processRuns.id} and ${tasks.assigneeId} = ${member}))` : undefined,
       ),
@@ -572,6 +614,11 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
     .from(tasks)
     .where(and(inArray(tasks.runId, rows.map((r) => r.id)), inArray(tasks.status, ["todo", "doing", "waiting"])));
   const names = new Map((await listTeam(workspaceId)).map((m) => [m.id, m.name ?? m.email]));
+  const ids = (k: "clientId" | "projectId") => [...new Set(rows.flatMap((r) => (r[k] ? [r[k]!] : [])))];
+  const [cs, ps] = await Promise.all([
+    ids("clientId").length ? db.select({ id: clients.id, slug: clients.slug }).from(clients).where(inArray(clients.id, ids("clientId"))) : [],
+    ids("projectId").length ? db.select({ id: projects.id, slug: projects.slug, name: projects.name }).from(projects).where(inArray(projects.id, ids("projectId"))) : [],
+  ]);
   return rows.map((r) => {
     const t = open.find((x) => x.runId === r.id && x.stepIndex === r.step);
     return {
@@ -579,7 +626,8 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
       process: r.process,
       processTitle: r.processTitle,
       subject: r.subject,
-      client: r.client,
+      client: cs.find((c) => c.id === r.clientId)?.slug ?? null,
+      project: ps.filter((x) => x.id === r.projectId).map(({ slug, name }) => ({ slug, name }))[0] ?? null,
       inputs: r.inputs,
       period: r.period,
       status: r.status,
@@ -606,6 +654,7 @@ export const USAGE = `usage: emplio processes list                              
        emplio processes show <name>                            one, with its file
        emplio processes add <name> - <<'MD' ... MD             a new one (owner or admin): company/processes/<name>.md, as below
        emplio processes update <name> - <<'MD' ... MD          change it (runs already going keep their steps and inputs)
+       emplio processes private <name> yes|no                  owners and admins only (its file in restricted/processes/), or everyone's again
        emplio processes remove <name>                          remove it (runs going carry on)
        emplio processes start <name> --client <name> [--<input> <value>]...   start one for a client, its inputs filled in
        emplio processes start <name> --for "<who or what>" [--<input> <value>]...   one not for a client
@@ -656,38 +705,47 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
     else words.push(a);
   }
   // every other --flag is an input (start, set)
-  const { client: _client, for: _for, all: _all, note: _note, ...inputFlags } = opts;
+  const { client: _client, for: _for, all: _all, note: _note, private: _private, ...inputFlags } = opts;
   const clientOf = async (q: string | undefined) => {
     if (!q) return undefined;
-    const c = await findClient(who.workspaceId, q);
+    const c = await findClient(who, q);
     if (typeof c === "string") throw new ProcessError(c);
-    return c.slug;
+    return c;
   };
   try {
     switch (sub) {
       case undefined:
       case "list": {
-        const list = await listProcesses(who.workspaceId);
+        const list = await listProcesses(who.workspaceId, who);
         if (data) return JSON.stringify(list);
         if (!list.length) return "No processes yet. Write one with emplio processes add (emplio processes help).";
         return list
-          .map((p) => `${p.name}\t${p.error ? `BROKEN: ${p.error}` : `${p.steps.length} steps`}\t${p.startedBy.length ? `started by automation ${p.startedBy.map((a) => a.name).join(", ")}` : "by hand"}\t${p.active} going\t${p.title}`)
+          .map((p) => `${p.name}${p.private ? " (private)" : ""}\t${p.error ? `BROKEN: ${p.error}` : `${p.steps.length} steps`}\t${p.startedBy.length ? `started by automation ${p.startedBy.map((a) => a.name).join(", ")}` : "by hand"}\t${p.active} going\t${p.title}`)
           .join("\n");
       }
       case "show": {
         if (!words[0]) break;
-        const text = await readFile(who.workspaceId, REPO, pathOf(words[0]));
+        const p = (await listProcesses(who.workspaceId, who)).find((x) => x.name === words[0]);
+        const text = p ? await readFile(who.workspaceId, repoOf(p), pathOf(words[0])) : null;
         if (text === null) return `error: no process ${words[0]}`;
-        return `company/processes/${words[0]}.md:\n${text}`;
+        return `${repoOf(p!)}/processes/${words[0]}.md${p!.private ? " (private: owners and admins only)" : ""}:\n${text}`;
       }
       case "add":
       case "update": {
         const [name, text] = words;
         if (!name) break;
         if (!text?.trim()) return `error: ${name} needs its file: emplio processes ${sub} ${name} - <<'MD' ... MD (emplio processes help)`;
-        const p = await saveProcess(who, name, text, sub);
+        const p = await saveProcess(who, name, text, sub, opts.private !== undefined && !/^(no|false|off|0)$/i.test(opts.private.trim()));
         await caughtUp();
-        return `Saved: company/processes/${name}.md, ${p.steps.length} steps; start it with emplio processes start, or on a schedule or for each new client with an automation (process: ${name})`;
+        const saved = (await listProcesses(who.workspaceId, who)).find((x) => x.name === name);
+        return `Saved: ${saved ? repoOf(saved) : REPO}/processes/${name}.md, ${p.steps.length} steps; start it with emplio processes start, or on a schedule or for each new client with an automation (process: ${name})`;
+      }
+      case "private": {
+        if (!words[0]) break;
+        const on = !/^(no|false|off|0)$/i.test((words[1] ?? "yes").trim());
+        await setProcessPrivate(who, words[0], on);
+        await caughtUp();
+        return on ? `${words[0]} is private now: restricted/processes/${words[0]}.md, owners and admins only` : `${words[0]} is everyone's now: company/processes/${words[0]}.md`;
       }
       case "remove":
         if (!words[0]) break;
@@ -696,7 +754,7 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Removed ${words[0]}; runs going carry on.`;
       case "start": {
         if (!words[0]) break;
-        const run = await startRun(who, words[0], { client: await clientOf(opts.client), subject: opts.for, inputs: inputFlags });
+        const run = await startRun(who, words[0], { client: (await clientOf(opts.client))?.slug, subject: opts.for, inputs: inputFlags });
         const [r] = await listRuns(who.workspaceId, { process: words[0], all: true, viewer: who }).then((l) => l.filter((x) => x.id === run!.id));
         const details = inputsLine(run!.inputs);
         return `Started ${run!.id.slice(0, 8)}: "${run!.processTitle}" for ${run!.subject}${details ? ` (${details})` : ""}. Step 1, ${r?.steps[0]?.name}: ${r?.current ? `${r.current.assigneeName}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}` : "made"}.`;
@@ -707,14 +765,16 @@ export async function processesCommand(who: Ctx, args: string[], caughtUp: () =>
         return `Now: ${inputsLine(run.inputs) || "nothing filled in"}.`;
       }
       case "runs": {
-        const runs = await listRuns(who.workspaceId, { process: words[0], client: await clientOf(opts.client), all: !!opts.all, viewer: who });
+        const runs = await listRuns(who.workspaceId, { process: words[0], clientId: (await clientOf(opts.client))?.id, all: !!opts.all, viewer: who });
         if (data) return JSON.stringify(runs);
         if (!runs.length) return opts.all ? "No runs." : "Nothing going. (--all for finished ones)";
         return runs
           .map((r) => {
             const at = r.status === "active" ? `step ${r.step + 1}/${r.steps.length} ${r.steps[r.step]?.name}${r.current ? ` (${r.current.assigneeName}, ${r.current.status}${r.current.dueAt ? `, due ${r.current.dueAt.slice(0, 10)}` : ""}, task ${r.current.taskId.slice(0, 8)})` : ""}` : r.status;
             const details = inputsLine(r.inputs);
-            return `${r.id.slice(0, 8)}\t${r.processTitle}\t${r.subject}${r.period ? ` · ${r.period}` : ""}\t${at}${details ? `\n\t${details}` : ""}`;
+            // an OK step's fix goes back through the run, so whoever drafted it redoes it (not a fresh hand-off)
+            const back = r.status === "active" && r.steps[r.step]?.back ? `\n\tan OK step: not right? emplio processes back ${r.id.slice(0, 8)} --note "<what to fix>" (step ${r.steps[r.step]!.back} redoes it)` : "";
+            return `${r.id.slice(0, 8)}\t${r.processTitle}\t${r.subject}${r.period ? ` · ${r.period}` : ""}\t${at}${details ? `\n\t${details}` : ""}${back}`;
           })
           .join("\n");
       }
@@ -748,12 +808,24 @@ export async function processRoutes(app: FastifyInstance) {
   app.get("/processes", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listProcesses(ctx.workspaceId);
+    return listProcesses(ctx.workspaceId, ctx);
+  });
+  app.post<{ Params: { name: string }; Body: { private?: boolean } }>("/processes/:name/private", async (req, reply) => {
+    const ctx = await context(req, reply);
+    if (!ctx) return;
+    try {
+      await setProcessPrivate(ctx, req.params.name, !!req.body?.private);
+      return { ok: true };
+    } catch (error) {
+      return fail(reply, error);
+    }
   });
   app.get<{ Querystring: { process?: string; client?: string; all?: string } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
-    return listRuns(ctx.workspaceId, { process: req.query.process, client: req.query.client, all: req.query.all === "1", viewer: ctx });
+    const c = req.query.client ? await findClient(ctx, req.query.client, true) : null;
+    if (typeof c === "string") return reply.code(400).send({ error: c });
+    return listRuns(ctx.workspaceId, { process: req.query.process, clientId: c?.id, all: req.query.all === "1", viewer: ctx });
   });
   app.post<{ Body: { process?: string; client?: string | null; subject?: string; inputs?: Record<string, unknown> } }>("/process-runs", async (req, reply) => {
     const ctx = await context(req, reply);

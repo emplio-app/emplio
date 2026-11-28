@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context } from "./auth";
 import { db } from "./db";
+import { currencyOf } from "./records";
 import { record } from "./activity";
 import { users, workspaces } from "./db/schema";
 import { customImageModelProblem, customModelProblem, listImageModels, listModels } from "./models";
@@ -150,6 +151,7 @@ export async function settingsRoutes(app: FastifyInstance) {
 const SETTINGS_USAGE = `usage: emplio settings                          every setting: its value and what it can be
        emplio settings set <setting> <value>    change one ("default" puts it back); they tap Allow first
        emplio settings set name "<name>"        rename the business (e.g. once you learn its real name in setup)
+       emplio settings set currency <code>      what prices and fees are in (USD, GBP, INR); ones already kept stay as they are
        emplio settings set my-name "<name>"     the person's own name, as the team sees it`;
 
 const shownValue = (k: string, v: unknown) => (KEYS.has(k) ? (v ? "(set)" : "(none)") : typeof v === "boolean" ? (v ? "on" : "off") : String(v));
@@ -191,6 +193,7 @@ export async function settingsCommand(who: Who, args: string[], allow: Allow) {
     return [
       `my-name: ${me?.name}   This person's own name (they can change it)`,
       `name: ${w?.name}   The business's name`,
+      `currency: ${await currencyOf(who.workspaceId)}   What prices and fees are in (an ISO code)`,
       ...lines,
       ...(canEdit(who.role) ? [] : ["Only the owner or an admin can change the business's settings and name."]),
       ...(lock ? [`Note: ${lock.why} Until then the models run as "save" (Standard), whatever these say.`] : []),
@@ -216,6 +219,16 @@ export async function settingsCommand(who: Who, args: string[], allow: Allow) {
       record({ workspaceId: who.workspaceId, userId: who.userId, kind: "settings", summary: `Renamed the business from ${w?.name} to ${text}` });
     };
     return asked(allow, `Rename the business to ${text}`, { business: `${w?.name} → ${text}` }, run, `The business is now called ${text}.`);
+  }
+  if (key === "currency") {
+    const code = text.toUpperCase();
+    if (!Intl.supportedValuesOf("currency").includes(code)) return `error: ${text} isn't a currency code (USD, GBP, EUR, INR, AUD...)`;
+    const from = await currencyOf(who.workspaceId);
+    const run = async () => {
+      await db.update(workspaces).set({ currency: code }).where(eq(workspaces.id, who.workspaceId));
+      record({ workspaceId: who.workspaceId, userId: who.userId, kind: "settings", summary: `Changed the currency from ${from} to ${code}` });
+    };
+    return asked(allow, `Use ${code} for prices and fees`, { currency: `${from} → ${code}` }, run, `Prices and fees are now in ${code}; ones already kept stay in ${from}.`);
   }
   const f = SETTING_FIELDS.find((f) => f.key === key);
   if (!f) return `error: there's no setting called "${key}". emplio settings lists them.`;

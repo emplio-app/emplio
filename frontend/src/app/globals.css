@@ -39,6 +39,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -90,6 +92,9 @@
   --accent: oklch(0.955 0.005 85);
   --accent-foreground: oklch(0.25 0.006 85);
   --destructive: oklch(0.577 0.215 27);
+  /* status colours: warning = waiting on someone / running low, info = being worked on */
+  --warning: oklch(0.6 0.15 62);
+  --info: oklch(0.55 0.16 255);
   --border: oklch(0.91 0.006 85);
   --input: oklch(0.89 0.007 85);
   --ring: oklch(0.44 0.09 158);
@@ -135,6 +140,8 @@
   --accent: oklch(0.27 0.006 85);
   --accent-foreground: oklch(0.94 0.004 85);
   --destructive: oklch(0.66 0.19 25);
+  --warning: oklch(0.8 0.14 75);
+  --info: oklch(0.72 0.13 250);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.64 0.11 158);
@@ -156,8 +163,9 @@
   --sidebar-ring: oklch(0.64 0.11 158);
 }
 
-/* A press answers right away, on the way down, and lets go gently. */
-.group\/button:active:not(:disabled),
+/* A press answers right away, on the way down, and lets go gently. A whole row (a Button made h-auto to hold a
+   list item) doesn't shrink: on something that wide even 3% is a jump. */
+.group\/button:active:not(:disabled, .h-auto),
 [data-slot="input-group-button"]:active:not(:disabled) {
   transform: scale(0.97);
   transition-duration: 100ms;
@@ -228,7 +236,7 @@
     font-size: 1.125rem;
   }
   /* a finger covers more of the button than a cursor: a little more give, a little sooner */
-  .group\/button:active:not(:disabled),
+  .group\/button:active:not(:disabled, .h-auto),
   [data-slot="input-group-button"]:active:not(:disabled) {
     transform: scale(0.96);
     transition-duration: 60ms;
@@ -627,6 +635,10 @@ html[data-keyboard-app] :is([data-slot="dialog-content"], [data-slot="sheet-cont
    is streaming. After the sweep the clip is gone, so the text shows in full. */
 @media (prefers-reduced-motion: no-preference) {
   .type-in {
+    animation: type-in calc(var(--type-len, 40) * 25ms + 200ms) linear backwards;
+  }
+  /* a page's message box: its placeholder writes itself in when the page opens (composer.tsx PageBox) */
+  .ask-type textarea {
     animation: type-in calc(var(--type-len, 40) * 25ms + 200ms) linear backwards;
   }
 }

@@ -5,6 +5,7 @@ import type { Automation } from "@emplio/shared";
 import { Building2Icon, RepeatIcon, ZapIcon } from "lucide-react";
 import { useState } from "react";
 import { AutomationsDialog } from "@/components/chat/automations-dialog";
+import { Badge } from "@/components/ui/badge";
 import { api, useMe } from "@/lib/api";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -53,7 +54,7 @@ export function Repeating() {
               type="button"
               onClick={() => setOpen(true)}
               disabled={me?.workspaces[0]?.role === "member"}
-              className="flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:hover:bg-transparent"
+              className="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted disabled:hover:bg-transparent"
             >
               {a.when === "schedule" ? <RepeatIcon className="size-4 shrink-0 text-muted-foreground" /> : <ZapIcon className="size-4 shrink-0 text-muted-foreground" />}
               <span className="min-w-0 flex-1">
@@ -64,10 +65,10 @@ export function Repeating() {
                     {a.agent ? ` · ${a.agent}` : a.who ? ` · ${a.who}` : ""}
                   </span>
                   {a.clients && (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[0.7rem] font-medium text-foreground/80">
-                      <Building2Icon className="size-3 text-muted-foreground" />
+                    <Badge variant="secondary">
+                      <Building2Icon className="text-muted-foreground" />
                       {a.clients.includes("*") ? "Each active client" : `For ${a.clients.length} client${a.clients.length === 1 ? "" : "s"}`}
-                    </span>
+                    </Badge>
                   )}
                 </span>
               </span>

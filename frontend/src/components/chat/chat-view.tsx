@@ -19,9 +19,7 @@ import {
   RefreshCcwIcon,
   SendIcon,
   TriangleAlertIcon,
-  Undo2Icon,
-  UploadIcon,
-  XIcon,
+  Undo2Icon,  XIcon,
   ArrowLeftIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -49,15 +47,15 @@ import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
 import { ReportButton } from "@/components/chat/report-reply";
-import { ASK_FOOT, Composer, keepDraft, keptDraft, useComposer } from "@/components/chat/composer";
+import { ASK_FOOT, Composer, DropOverlay, dropInto, keepDraft, keptDraft, useComposer } from "@/components/chat/composer";
 import { MessageAttachments, SAY_FILES, SAY_META, SAY_TEXT } from "@/components/chat/attachments";
 import { QuoteButton, QuotedText, addQuote } from "@/components/chat/quote";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
-import { readDropped } from "@/lib/zip-folder";
 
 // The server words the common failures for people (chat.ts replyError); anything else (a browser's "Failed to
 // fetch", a JSON body) gets the general line.
@@ -661,11 +659,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       e.stopPropagation();
       dragDepth.current = 0;
       setDragging(false);
-      // a dropped folder goes as one zip, like a picked one; grab the entries now, they're gone after the first await
-      const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry());
-      const plain = [...e.dataTransfer.files].filter((_, i) => !entries[i]?.isDirectory);
-      if (plain.length) attachments.add(plain);
-      for (const dir of entries.filter((x) => x?.isDirectory)) void composer.addFolder(readDropped(dir!));
+      dropInto(composer, e.dataTransfer);
     },
   };
 
@@ -935,7 +929,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         {fromEmplio && <span className="self-end text-xs text-muted-foreground">Emplio</span>}
         {message.role === "user" && <MessageAttachments parts={filesOf(message)} />}
         {editing === message.id ? (
-          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
+          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-xl border bg-card p-3">
             <textarea
               autoFocus
               // cursor after the text, ready to go on typing
@@ -1134,8 +1128,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     </Link>
                     {/* a question they won't answer: stop it waiting, and the line goes */}
                     {w.status === "asking" && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
                         aria-label={`Stop ${w.agent} waiting`}
                         title="Stop waiting"
                         onClick={() =>
@@ -1144,10 +1139,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                             void queryClient.invalidateQueries({ queryKey: ["jobs"] });
                           })
                         }
-                        className="mr-1 grid size-6 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-foreground"
+                        className="mr-1"
                       >
                         <XIcon className="size-3.5" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {/* its question, to answer right here: the answer goes to the agent, not to Emplio */}
@@ -1171,13 +1166,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       <div className="flex min-h-0 flex-1">
         <div className="relative flex h-full min-w-0 flex-1 flex-col" {...dropZone}>
           {dragging && (
-            <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/90 md:bg-background/80 md:backdrop-blur-sm animate-in fade-in duration-150">
-              <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-foreground/20 px-12 py-10 text-center">
-                <UploadIcon className="size-6 text-muted-foreground" />
-                <div className="font-medium">Drop files to attach</div>
-                <div className="text-sm text-muted-foreground">Images, PDFs and text files up to 100 MB</div>
-              </div>
-            </div>
+            <DropOverlay className="absolute" />
           )}
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
@@ -1232,13 +1221,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </Button>
               )}
               {onTelegram && (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground"
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground"
                   title="This chat is on Telegram; reply there"
                 >
-                  <SendIcon className="size-3.5 text-[#229ED9]" />
+                  <SendIcon className="text-[#229ED9]" />
                   Telegram
-                </span>
+                </Badge>
               )}
               <BrowserChip />
               {/* finished with it: into the sidebar's Done list and back to the main chat; anything new brings it back */}
@@ -1421,7 +1411,7 @@ function QueuePanel({
   onSendNow?: (item: Queued) => void;
 }) {
   return (
-    <div className="mx-3 rounded-t-xl border border-b-0 bg-muted/50 px-1.5 pt-1.5 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-150">
+    <div className="mx-3 rounded-t-xl border border-b-0 bg-muted px-1.5 pt-1.5 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-150">
       <div className="px-2 pt-0.5 pb-1 text-xs text-muted-foreground">
         {paused ? "Paused · press Continue or Try again to send these" : "Queued · sent after the current step"}
       </div>
@@ -1429,7 +1419,7 @@ function QueuePanel({
         {queue.map((item) => (
           <li
             key={item.id}
-            className="group/q flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-background/60 animate-in fade-in duration-150"
+            className="group/q flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-background animate-in fade-in duration-150"
           >
             <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">
@@ -1516,9 +1506,9 @@ function LongText({ children, markdown }: { children: React.ReactNode; markdown?
         {children}
       </div>
       {long && (
-        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+        <Button variant="link" size="sm" onClick={() => setOpen(!open)} className="mt-1 h-auto p-0 text-muted-foreground hover:text-foreground">
           {open ? "Show less" : "Show more"}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -1591,11 +1581,11 @@ function TelegramOnly() {
   // the bot itself, without the one-time link code
   const bot = data?.telegram.url?.split("?")[0];
   return (
-    <div className="flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 text-sm shadow-sm">
+    <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm shadow-sm">
       <SendIcon className="size-4 shrink-0 text-[#229ED9]" />
       <span className="min-w-0 flex-1 text-muted-foreground">This chat lives in Telegram. Reply there.</span>
       {bot && (
-        <Button size="sm" variant="outline" className="shrink-0 rounded-full" nativeButton={false} render={<a href={bot} target="_blank" rel="noreferrer" />}>
+        <Button size="sm" variant="outline" className="shrink-0" nativeButton={false} render={<a href={bot} target="_blank" rel="noreferrer" />}>
           Open Telegram
         </Button>
       )}

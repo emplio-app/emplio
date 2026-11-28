@@ -16,6 +16,8 @@ evals/
                             (src/sandbox.ts clients and processes rules; firm.ts is the made-up firm both use)
   process-steps/            work inside a process already going: set, send back, stop, finish a step, Emplio's own
                             steps (src/tasks.ts taskMessage, src/processes.ts stepNotes)
+  client-records/           an agency's records kept right: meetings and their notes, contacts, projects, services,
+                            privacy, long pasted call notes; the reply judged for truth (firm.ts is a made-up agency)
   hand-off/                 does it do the work itself or hand it off, and to whom (src/jobs.ts MANAGER_PROMPT)
   job-report/               a job at the end of its work: checks before calling it done, reports what's true in the
                             shape the manager reads, asks when only the person can decide (src/jobs.ts RULES,
