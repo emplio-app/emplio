@@ -2,6 +2,29 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.20 (2026-11-28)
+
+### What's new
+
+- After logging out (or deleting your account), the sign-in page starts fresh with an empty email box, instead of the old code screen with the last code still filled in.
+
+### For developers
+
+- `login/page.tsx`: with `cacheComponents` the page stays mounted (hidden) after sign-in, so its email, code and code-sent state came back on the next visit; they are cleared once signed in.
+
+## 1.4.19 (2026-11-27)
+
+### What's new
+
+- In the iPhone and Android apps, a paused business now just says Emplio is paused, without talk of picking a plan. Plans are still chosen on the website.
+- The app refreshes only what changed instead of reloading every list, and the chat glides to new lines while a reply comes in.
+- The Android app no longer closes right after you allow notifications.
+
+### For developers
+
+- `first-run.tsx` and `settings-dialog.tsx`: in the store apps (`inApp()`), no plan wording or See plans link when paused or on the trial's model lock (Apple 3.1.3(f)). Cloud: `pausedNote` gives the plain paused line in the apps, and the paused chat post no longer links to Billing.
+- Also ships #384: `/events` nudges name what changed (`{type: changed, what}`), the app refetches only those; push registration is iPhone-only.
+
 ## 1.4.18 (2026-11-26)
 
 ### What's new
