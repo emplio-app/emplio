@@ -2,6 +2,16 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.20 (2026-11-28)
+
+### What's new
+
+- After logging out (or deleting your account), the sign-in page starts fresh with an empty email box, instead of the old code screen with the last code still filled in.
+
+### For developers
+
+- `login/page.tsx`: with `cacheComponents` the page stays mounted (hidden) after sign-in, so its email, code and code-sent state came back on the next visit; they are cleared once signed in.
+
 ## 1.4.19 (2026-11-27)
 
 ### What's new
