@@ -135,14 +135,13 @@ const findConversation = (id: string, ctx: Ctx) =>
     ),
   });
 
-// The chat as it is now: from its newest message (headId) back to the first. Editing a message forks the
-// chat there (the new one gets the old one's parent), so each message carries the versions of its spot, for
-// the "‹ 1 / 2 ›" switcher. Anything a version did (emails sent, files changed) stays done in the others.
-// ponytail: versions found by scanning every message per message; index by parent if chats get very long
-export const loadMessages = async (conversationId: string) => {
+// The chat as it is now, without its parts: from its newest message (headId) back to the first. Editing a message
+// forks the chat there (the new one gets the old one's parent), so each message carries the versions of its spot,
+// for the "‹ 1 / 2 ›" switcher. Anything a version did (emails sent, files changed) stays done in the others.
+const chatPath = async (conversationId: string) => {
   const [rows, conversation] = await Promise.all([
     db
-      .select({ id: messages.id, role: messages.role, parts: messages.parts, parentId: messages.parentId, createdAt: messages.createdAt })
+      .select({ id: messages.id, role: messages.role, parentId: messages.parentId, createdAt: messages.createdAt })
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(asc(messages.createdAt)),
@@ -151,16 +150,35 @@ export const loadMessages = async (conversationId: string) => {
   const byId = new Map(rows.map((r) => [r.id, r]));
   const path: typeof rows = [];
   for (let m = byId.get(conversation?.headId ?? ""); m && path.length < rows.length; m = byId.get(m.parentId ?? "")) path.unshift(m);
-  return path.map(
+  const spot = (m: { parentId: string | null; role: string }) => `${m.parentId}\n${m.role}`;
+  const versions = new Map<string, string[]>();
+  for (const r of rows) versions.set(spot(r), [...(versions.get(spot(r)) ?? []), r.id]);
+  return { path, versionsOf: (m: (typeof rows)[number]) => versions.get(spot(m))! };
+};
+
+// The chat as it is now, with its parts; from `from` on (the message the notes end at, compact.ts) when it's on
+// the chat, so a long chat doesn't read every old message's parts for each reply.
+export const loadMessages = async (conversationId: string, from?: string | null) => {
+  const { path, versionsOf } = await chatPath(conversationId);
+  const kept = path.slice(from ? Math.max(0, path.findIndex((m) => m.id === from)) : 0);
+  if (!kept.length) return [];
+  const parts = new Map((await db.select({ id: messages.id, parts: messages.parts }).from(messages).where(inArray(messages.id, kept.map((m) => m.id)))).map((r) => [r.id, r.parts]));
+  return kept.map(
     (m) =>
       ({
         id: m.id,
         role: m.role,
-        parts: m.parts,
-        metadata: { parentId: m.parentId, versions: rows.filter((r) => r.parentId === m.parentId && r.role === m.role).map((r) => r.id), createdAt: m.createdAt },
+        parts: parts.get(m.id) ?? [],
+        metadata: { parentId: m.parentId, versions: versionsOf(m), createdAt: m.createdAt },
       }) as UIMessage,
   );
 };
+
+// Every file attached anywhere in the chat, old ones too, without reading the rest of its messages.
+export const chatFiles = async (conversationId: string, workspaceId: string) =>
+  (await db.select({ parts: messages.parts }).from(messages).where(and(eq(messages.conversationId, conversationId), sql`${messages.parts} @> '[{"type":"file"}]'`))).flatMap((r) =>
+    (r.parts as UIMessage["parts"]).flatMap((p) => (p.type === "file" && isOwnFile(p.url, workspaceId) ? [{ url: p.url, filename: p.filename }] : [])),
+  );
 
 // How many messages a chat sends at a time; scrolling up asks for more.
 const PAGE = 60;
@@ -221,17 +239,7 @@ export const forScreen = (id: string, parts: ScreenPart[]) =>
 // the start of the chat. Only the page's parts are read, not the whole chat's. Rounds with nothing to say are hidden
 // where people talk (hide), and a stretch of them mustn't leave a page empty, so it goes back until it has enough.
 export async function chatPage(conversationId: string, { before, limit = PAGE, hide }: { before?: string; limit?: number; hide: boolean }) {
-  const [rows, conversation] = await Promise.all([
-    db
-      .select({ id: messages.id, role: messages.role, parentId: messages.parentId, createdAt: messages.createdAt })
-      .from(messages)
-      .where(eq(messages.conversationId, conversationId))
-      .orderBy(asc(messages.createdAt)),
-    db.query.conversations.findFirst({ columns: { headId: true }, where: eq(conversations.id, conversationId) }),
-  ]);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const path: typeof rows = [];
-  for (let m = byId.get(conversation?.headId ?? ""); m && path.length < rows.length; m = byId.get(m.parentId ?? "")) path.unshift(m);
+  const { path, versionsOf } = await chatPath(conversationId);
   let start = before ? Math.max(0, path.findIndex((m) => m.id === before)) : path.length;
   let shown: UIMessage[] = [];
   while (start > 0 && shown.length < limit) {
@@ -246,7 +254,7 @@ export async function chatPage(conversationId: string, { before, limit = PAGE, h
           id: m.id,
           role: m.role,
           parts: forScreen(m.id, parts.get(m.id) ?? []),
-          metadata: { parentId: m.parentId, versions: rows.filter((r) => r.parentId === m.parentId && r.role === m.role).map((r) => r.id), createdAt: m.createdAt },
+          metadata: { parentId: m.parentId, versions: versionsOf(m), createdAt: m.createdAt },
         }) as UIMessage,
     );
     shown = [...(hide ? hideSilent(built) : built), ...shown];
@@ -341,7 +349,7 @@ export const idleChat = (now: number) =>
 // every minute; the next message estimates instead.
 export async function foldIdle(chat: typeof conversations.$inferSelect, takeNotes = summarise) {
   if (await cloud.credit.pausedReason(chat.workspaceId)) return;
-  const history = await loadMessages(chat.id);
+  const history = await loadMessages(chat.id, chat.summaryUpto);
   const upto = chat.summaryUpto ? history.findIndex((m) => m.id === chat.summaryUpto) : -1;
   if (chat.summaryUpto && upto < 0) return; // the notes are from another version of the chat: its next reply drops them
   const sent = history.slice(upto + 1);
@@ -760,12 +768,14 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   if (attached.length)
     void recordUploads(ctx, id, attached).catch((error) => console.error("recording attachments failed", error));
 
-  const history = await loadMessages(id);
   // read once per reply: a change on the Settings screen applies from the next message
   const settings = await settingsFor(ctx.workspaceId);
   // Notes standing in for older messages (compact.ts). A regenerate that dropped the message they end at, or
   // another version of the chat that doesn't have it, drops them too; either makes the last measured size wrong.
   const chat = (await db.query.conversations.findFirst({ where: eq(conversations.id, id) }))!;
+  // from where the notes end: what's before them isn't sent. A regenerate may drop the notes, so it reads it all
+  // (so does notes from another version: their message isn't on this one's path)
+  const [history, attachments] = await Promise.all([loadMessages(id, dropped.length ? null : chat.summaryUpto), chatFiles(id, ctx.workspaceId)]);
   let { summary: notes, summaryUpto, contextTokens } = chat;
   // a job's own chat: it replies as the job (jobs.ts), whoever wrote
   const job = chat.kind === "job" ? await jobReply(id) : null;
@@ -804,11 +814,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     thinker: automation === HEARTBEAT && ctx.role === "owner",
     background: automation === HEARTBEAT,
     channel,
-    attachments: history.flatMap((m) =>
-      m.parts.flatMap((p) =>
-        p.type === "file" && isOwnFile(p.url, ctx.workspaceId) ? [{ url: p.url, filename: p.filename }] : [],
-      ),
-    ),
+    attachments,
   };
 
   // the Stop button aborts through here; closing the tab doesn't (the reply finishes and is saved)
