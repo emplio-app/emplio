@@ -2706,6 +2706,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
 // so nothing waits here. Only where someone is there to answer.
 // Removing, archiving or deleting a client, contact, project, service, meeting, process, stage or field, and making
 // one private or shared, always waits for the person's Allow, whatever "Just do it" says (adding and editing don't).
+// An automation's run does it when the automation lists it (emplio.clients_archive) and an owner or admin allowed that.
 // What the card says, or null when the command needs no OK.
 export function recordAsk(kind: string, args: string[]): string | null {
   const [sub = "", ...rest] = args;
@@ -2728,7 +2729,7 @@ export function recordAsk(kind: string, args: string[]): string | null {
 async function askFirst(s: Session, kind: string, args: string[], run: () => Promise<string>) {
   const title = recordAsk(kind, args);
   if (!title) return run();
-  const refused = await approve(s, `emplio.${kind}_${args[0]}`, { command: `emplio ${kind} ${args.join(" ")}` }, { own: { title, readOnly: false, appName: "Emplio", alwaysAsk: true, run } });
+  const refused = await approve(s, `emplio.${kind}_${args[0]}`, { command: `emplio ${kind} ${args.join(" ")}` }, { own: { title, readOnly: false, appName: "Emplio", alwaysAsk: !s.automation, run } });
   return refused ?? run();
 }
 
