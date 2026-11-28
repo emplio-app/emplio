@@ -24,7 +24,7 @@ import { QuoteChips, withQuotes, type Quote } from "@/components/chat/quote";
 import { useSkillMenu } from "@/components/chat/skill-menu";
 import { VoiceInput } from "@/components/chat/voice-input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { useConversations } from "@/lib/api";
+import { fetchChatEarly, useConversations } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { readDropped, zipFolder } from "@/lib/zip-folder";
 
@@ -374,6 +374,11 @@ function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boo
   const { data: conversations } = useConversations();
   const main = conversations?.find((x) => x.kind === "main");
   const c = useComposer(open ? null : `page_draft:${page}`);
+  // the main chat loads while they type, so sending doesn't wait for it to open (chat-page.tsx)
+  const typed = !!c.input.trim();
+  useEffect(() => {
+    if (typed && main) fetchChatEarly(main.id);
+  }, [typed, main]);
   // files dropped anywhere on the page go in its box, as in a chat (the first box to see a drop takes it)
   const [dragging, setDragging] = useState(false);
   useEffect(() => {
@@ -408,6 +413,7 @@ function PageBox({ page, open, sheet }: { page: string; open?: Open; sheet?: boo
       sessionStorage.setItem(SAY_FILES, JSON.stringify(m.files));
       sessionStorage.setItem(SAY_META, JSON.stringify({ mentions: m.mentions, command: m.command, from }));
     } catch {}
+    if (main) fetchChatEarly(main.id);
     router.push(main ? `/chat/${main.id}` : "/chat");
   };
   const placeholder = open ? `Ask Emplio about ${open.title}…` : ABOUT[page] ? `Ask Emplio about ${ABOUT[page]}…` : "Ask Emplio anything…";
