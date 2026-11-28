@@ -1,4 +1,4 @@
-import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo, RecordChange } from "@emplio/shared";
+import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo, RecordChange, NextStep } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
 import { type AnyPgColumn, bigint, boolean, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
@@ -219,6 +219,8 @@ export const messages = pgTable(
     parts: jsonb().notNull(),
     // the message it follows; null for the first. Two with the same parent are two versions of that spot (an edit)
     parentId: text(),
+    // a reply's next-step card (chat.ts nextStep), once decided: card null when it got none or the person closed it
+    nextStep: jsonb().$type<{ card: NextStep | null }>(),
     createdAt: timestamp({ withTimezone: true, precision: 6 }).notNull().defaultNow(),
     // for searching old chats (search.ts); 'simple': no stemming, so names and Hindi words match as typed
     search: tsvector().generatedAlwaysAs((): SQL => sql`to_tsvector('simple', ${messageText(sql`parts`)})`),

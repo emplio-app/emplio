@@ -20,7 +20,7 @@ const apps = new Map<string, Map<WebSocket, string | null>>();
 
 type Note = { title: string; body: string; path: string };
 // what an app shows that can change without it asking: the chat list, the jobs list, the task list, OK cards
-export type Changed = "chats" | "jobs" | "tasks" | "approvals";
+export type Changed = "chats" | "jobs" | "tasks" | "approvals" | "nextStep";
 export const send = (socket: WebSocket, frame: WebSocketChatTransportResponse | { type: "changed"; what: Changed[] } | ({ type: "note" } & Note)) => {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
 };

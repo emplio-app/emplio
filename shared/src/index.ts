@@ -141,6 +141,8 @@ export type Approval = {
   expiresAt?: string;
   // asked every time: no "Always allow" (installing a skill from the public store)
   oneOff?: boolean;
+  // its text fields can be changed before allowing (app actions: an email's body, a message)
+  editable?: boolean;
   // skipped: they wrote a message instead of answering
   decision?: "once" | "always" | "deny" | "timeout" | "skipped";
   // how the action went once it was allowed; text: why it failed

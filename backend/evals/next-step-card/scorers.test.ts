@@ -3,7 +3,7 @@ import { cases } from "./cases";
 import { limitsOf, offersNamed, rightCall, withinLimits } from "./scorers";
 
 const card = { summary: "Invoice sent to Acme, payment pending.", question: "Should I remind them on Friday?", buttons: ["Yes, remind them", "Not yet"] };
-const args = (output: { card: typeof card | null }, expected: { card: boolean; offers?: string[] }) => ({ input: [], output: { ...output, said: "" }, expected });
+const args = (output: { card: typeof card | null }, expected: { card: boolean; offers?: string[] }) => ({ input: { chat: [] }, output: { ...output, said: "" }, expected });
 
 test("a card when none was wanted, or none when one was, is the wrong call", () => {
   expect(rightCall(args({ card }, { card: true })).score).toBe(1);

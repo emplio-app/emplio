@@ -124,8 +124,29 @@ const metering = (bill: Bill, id: string, ownKey: boolean): LanguageModelMiddlew
   },
 });
 
+// The provider puts a cache mark on an assistant message beside its text, where OpenRouter doesn't pass it on to
+// Anthropic; inside the text it does. Only the next-step card marks one (next-step.ts): checked Nov 28, the card read
+// the chat from the cache with this and nothing without it.
+// ponytail: a rewrite of the request body; drop it once the provider marks assistant text itself
+export function markInText(body: string) {
+  const b = JSON.parse(body) as { messages?: { role: string; content: unknown; cache_control?: unknown }[] };
+  let moved = false;
+  for (const m of b.messages ?? [])
+    if (m.role === "assistant" && m.cache_control && typeof m.content === "string") {
+      m.content = [{ type: "text", text: m.content, cache_control: m.cache_control }];
+      delete m.cache_control;
+      moved = true;
+    }
+  return moved ? JSON.stringify(b) : body;
+}
+const markingFetch: typeof fetch = Object.assign(
+  (url: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    fetch(url, typeof init?.body === "string" && init.body.includes('"cache_control"') ? { ...init, body: markInText(init.body) } : init),
+  { preconnect: fetch.preconnect },
+);
+
 // Names the app on OpenRouter (its activity page and app rankings) for every request
-const attribution = { appName: "Emplio", appUrl: "https://emplio.app" };
+const attribution = { appName: "Emplio", appUrl: "https://emplio.app", fetch: markingFetch };
 // ours reads OPENROUTER_API_KEY from the environment, like the provider's default instance did
 const ours = createOpenRouter(attribution);
 

@@ -132,3 +132,35 @@ test("a message in the chat a job's card is shown in skips that card too, not on
     await db.delete(users).where(eq(users.id, user!.id));
   }
 });
+
+test("an editable card's text fields can be changed before allowing, and the action runs what was allowed", async () => {
+  const tag = crypto.randomUUID().slice(0, 8);
+  const [ws] = await db.insert(workspaces).values({ name: `approvals-test-${tag}` }).returning();
+  const [user] = await db.insert(users).values({ email: `approvals-test-${tag}@example.com` }).returning();
+  const who = { workspaceId: ws!.id, userId: user!.id };
+  try {
+    const chat = crypto.randomUUID();
+    await db.insert(conversations).values({ id: chat, ...who, title: "main", kind: "main" });
+    const shown: Approval[] = [];
+    const s = { conversationId: chat, workspaceId: ws!.id, user: { id: user!.id, name: "Asha" }, settings: { approvals: "ask" }, notify: (a: Approval) => shown.push(a) } as unknown as Session;
+    const own = { title: "Send the email", readOnly: false, appName: "Mail", run: async () => {} };
+    const input: Record<string, unknown> = { to: "sarah@northwind.com", body: "Hi Sarah", count: 2 };
+    const notes: string[] = [];
+    const asked = approve(s, "mail.send", input, { own, editable: (n) => notes.push(n) });
+    while (!shown.length) await new Promise((r) => setTimeout(r, 10));
+    expect(shown[0]!.editable).toBe(true);
+    // text fields change; a number, or a field that wasn't there, doesn't
+    await decide(shown[0]!.id, ws!.id, user!.id, "once", { body: "Hi Sarah, see you Monday", count: "9", bcc: "x@y.com" });
+    expect(await asked).toBeNull();
+    expect(input).toEqual({ to: "sarah@northwind.com", body: "Hi Sarah, see you Monday", count: 2 });
+    // Emplio is told what they changed, and only that
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("body: Hi Sarah, see you Monday");
+    expect(notes[0]).not.toContain("count");
+    const row = await db.query.approvals.findFirst({ where: eq(approvals.id, shown[0]!.id) });
+    expect((row!.card as Approval).input).toEqual(input);
+  } finally {
+    await db.delete(workspaces).where(eq(workspaces.id, ws!.id));
+    await db.delete(users).where(eq(users.id, user!.id));
+  }
+});

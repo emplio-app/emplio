@@ -2,6 +2,23 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.22 (2026-11-28)
+
+### What's new
+
+- Allow cards have an Edit button: change the wording of an email or message before allowing it, and Emplio is told exactly what you changed.
+- The card under a reply that suggests your next step now comes up whenever there's a clear one, even if you weren't watching when the reply ended, and stays until you answer or close it.
+- It guesses your next move better: once an invoice or quote you asked for is ready, it offers to send it; while an agent is busy on one part of your request, it can offer to start another part.
+- No more "Should I go ahead?" card while an agent is already doing that work, and no card in agents' own chats.
+
+### For developers
+
+- Approvals: an `editable` card takes changed string fields with the decision (`POST /approvals/:id` `input`); the new wording is saved on the card and a note of the changes goes back to Emplio with the result.
+- Next-step card (`next-step.ts`): written by the reply's own model as a fork of the reply's request (Claude Code style), cache marked on the reply's last message so the ask itself is never cache-written; made on the server at each reply's end and kept in `messages.next_step` (new migration), sent live as `nextStep`. Skipped for silent, failed or stopped replies, non-web channels and job/background chats.
+- `models.ts`: a cache mark on an assistant message is moved inside its text, where OpenRouter passes it on.
+- `jobs.ts`: a carried-on job is marked working at once, not when its run begins.
+- Evals: next-step-card 62 cases, right_call 94.9% on Haiku (Sonnet 100% on the new "meanwhile" cases).
+
 ## 1.4.21 (2026-11-28)
 
 ### What's new

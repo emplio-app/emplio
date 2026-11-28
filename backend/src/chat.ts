@@ -35,7 +35,7 @@ import { recordUploads } from "./made";
 import { listTeam } from "./team";
 import { onboarding } from "./setup";
 import { businessInstructions, codeMode, computerNote, inPython, personalFiles, pythonCommand, runBash, skillsList, sandboxPrompt, saveChanges, type Session } from "./sandbox";
-import { CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld, trimSteps } from "./compact";
+import { type Fork, CONTEXT_MARK, foldingStep, notesBlock, RECENT_TOKENS, recentStart, summarise, trimOld, trimSteps } from "./compact";
 import { settingsFor } from "./settings";
 import { model, modelForJob } from "./models";
 import { timezoneOf, when } from "./time";
@@ -52,7 +52,7 @@ import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
 import { sendEmail } from "./mail";
 import { HEARTBEAT, hideSilent } from "./heartbeat";
-import { NEXT_STEP_MODEL, writeNextStep } from "./next-step";
+import { writeNextStep } from "./next-step";
 import { holdRead, readLater, SILENT } from "./reader";
 import { TASK } from "./tasks";
 import { pushTo } from "./push";
@@ -640,40 +640,51 @@ export const withoutCards = (output: unknown) => {
 };
 
 // A closable card after a reply in a web chat: where things stand, the question that moves the work on, and answers
-// to tap. The writer itself is next-step.ts; here is when a card is wanted, and one answer per reply kept.
-// ponytail: in memory, by the reply it follows; lost on restart, which only means one more cheap call
-const nextSteps = new Map<string, NextStep | null>();
+// to tap. The writer itself is next-step.ts; here is when a card is wanted, and one answer per reply kept on the
+// reply's row (messages.nextStep). Made when a reply ends (runReply), watched or not, so opening the chat later, on
+// any device, shows it.
+// the call under way per reply, so a page asking while it's written gets it when it's ready
+const making = new Map<string, Promise<NextStep | null>>();
+const keptStep = async (messageId: string) =>
+  (await db.query.messages.findFirst({ where: eq(messages.id, messageId), columns: { nextStep: true } }))?.nextStep ?? undefined;
+const keepStep = (messageId: string, card: NextStep | null) => db.update(messages).set({ nextStep: { card } }).where(eq(messages.id, messageId));
 
 async function lastTurns(conversationId: string) {
   return (await loadMessages(conversationId)).filter((m) => m.role === "user" || m.role === "assistant");
 }
 
-export async function nextStep(bill: Bill & { conversationId: string }, peek: boolean) {
-  const all = await lastTurns(bill.conversationId);
-  const last = all.at(-1);
+// The card for the chat's last reply, for the page: the one kept, or the one being written. Never a new call: it's
+// written when the reply ends (makeNextStep), from the reply's own request.
+export async function nextStep(bill: Bill & { conversationId: string }) {
+  const last = (await lastTurns(bill.conversationId)).at(-1);
   if (last?.role !== "assistant") return null;
-  // only once everything is done and Emplio waits on the person: the reply after the agents' reports gets the card
-  if (await stillWorking(bill.conversationId)) return null;
-  if (nextSteps.has(last.id) || peek) return nextSteps.get(last.id) ?? null;
+  return making.get(last.id) ?? (await keptStep(last.id))?.card ?? null;
+}
+
+// The card for a reply that just ended, written on its own request (next-step.ts) and kept on its row.
+async function makeNextStep(bill: Bill & { conversationId: string; userId: string }, reply: UIMessage, fork: Fork, instructions: SystemModelMessage[], sent: ModelMessage[]) {
+  // agents still at it: the writer sees them in the request, and cards only separate work they asked for (next-step.ts)
   // it already put a question or button in the chat that's waiting on them: a second one would compete with it
-  if ((last.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return null;
+  if ((reply.parts as unknown as ScreenPart[]).some((p) => p.output?.asks || p.output?.connect || p.output?.logins)) return;
   // so would an Allow card still waiting for their tap
-  if (await waitingIn(bill.conversationId)) return null;
-  try {
-    const turns = all.map((m) => ({ role: m.role as "user" | "assistant", text: textOf(m) }));
-    const { card } = await writeNextStep(turns, model({ openrouterKey: "" }, NEXT_STEP_MODEL, bill));
-    nextSteps.set(last.id, card);
-    if (nextSteps.size > 2000) nextSteps.delete(nextSteps.keys().next().value!);
-    return card;
-  } catch {
-    return null;
-  }
+  if (await waitingIn(bill.conversationId)) return;
+  const made = writeNextStep(fork, instructions, sent)
+    .then(async ({ card }) => {
+      await keepStep(reply.id, card);
+      // an open page that didn't ask (the reply came while it wasn't following one) shows it now
+      if (card) notify(bill.userId, ["nextStep"]);
+      return card;
+    })
+    .catch((error) => (console.error("next-step card failed", error), null))
+    .finally(() => making.delete(reply.id));
+  making.set(reply.id, made);
+  await made;
 }
 
 // closed by the person: it stays closed when they come back to this chat
 export async function closeNextStep(conversationId: string) {
   const last = (await lastTurns(conversationId)).at(-1);
-  if (last?.role === "assistant") nextSteps.set(last.id, null);
+  if (last?.role === "assistant") await keepStep(last.id, null);
 }
 
 type Log = { error(obj: unknown, msg: string): void };
@@ -1140,13 +1151,14 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     : { model: model(settings, notesId, bill), tools, providerOptions: { openrouter: { reasoning: { enabled: false } } } },
   );
 
+  const asSent = [...(await toModel(trimOld(sent).slice(0, -1))), ...turn];
   const result = streamText({
     model: replyModel,
     // Anthropic automatic caching: the whole prompt so far (system + history + this reply's tool steps) is
     // cached and the breakpoint moves forward each step, so long chats and tool loops aren't re-billed in full
     providerOptions,
     instructions: withNotes(notes),
-    messages: [...(await toModel(trimOld(sent).slice(0, -1))), ...turn],
+    messages: asSent,
     prepareStep: unlessStuck(async (step: Parameters<typeof folding.prepareStep>[0]) => {
       if ((step.steps.at(-1) as { text?: string } | undefined)?.text?.trim()) heard = Date.now();
       // older outputs cut down first (compact.ts trimSteps); the fold waits a step, until the smaller size is measured
@@ -1254,6 +1266,14 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
           // people's chats are read for the background agent, and threads for what they teach (reader.ts); automations,
           // tasks and check-ins are its own doing
           if (!automation) void readLater(id, settings.readAfter).catch((error) => log.error(error, "scheduling a read failed"));
+          // the next-step card, made now rather than when a page asks, so a reply nobody watched (after an agent's
+          // report, say) has one too. A job's own replies get one only when someone's watching (the page asks)
+          // only the person's own chats: never a job's chat or the background agent's
+          // and not after a reply that said nothing ([SILENT], after a job's report) or failed
+          if (!automation && !job && (chat.kind === "main" || chat.kind === "chat") && chat.channel === "web" && !stopper.signal.aborted && !answer.includes(SILENT) && outcome.status !== "failed" && outcome.status !== "aborted")
+            void Promise.resolve(result.response)
+              .then((r) => makeNextStep({ ...bill, userId: ctx.userId }, responseMessage, { model: replyModel, tools, providerOptions }, withNotes(notes), [...asSent, ...r.messages]))
+              .catch((error) => log.error(error, "next-step card failed"));
         });
     },
   });
@@ -1372,15 +1392,15 @@ export async function chatRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // ?peek=1 (opening a chat): only one already made, never a new call
+  // the last reply's card, kept or being written (?peek=1 from older pages means the same now)
   app.get<{ Params: { id: string }; Querystring: { peek?: string } }>("/conversations/:id/next-step", async (req, reply) => {
     const ctx = await context(req, reply);
     if (!ctx) return;
     const conversation = await findConversation(req.params.id, ctx);
     if (!conversation) return reply.code(404).send({ error: "Not found" });
     // channel chats are answered on the phone, where there's no room for a card
-    if (conversation.channel !== "web" || running.has(req.params.id)) return { card: null };
-    return { card: await nextStep({ workspaceId: ctx.workspaceId, userId: ctx.userId, conversationId: req.params.id }, !!req.query.peek) };
+    if (conversation.channel !== "web" || (conversation.kind !== "main" && conversation.kind !== "chat") || running.has(req.params.id)) return { card: null };
+    return { card: await nextStep({ workspaceId: ctx.workspaceId, userId: ctx.userId, conversationId: req.params.id }) };
   });
 
   app.delete<{ Params: { id: string } }>("/conversations/:id/next-step", async (req, reply) => {
