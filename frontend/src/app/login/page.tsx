@@ -49,6 +49,11 @@ export default function LoginPage() {
   // where they were going before being sent here (only a page of this app)
   useEffect(() => {
     if (!me?.user.name) return;
+    // cacheComponents keeps this page alive, hidden, after leaving it: start from a blank email next time
+    // (after logging out or deleting the account), not the old code step with its code filled in
+    setEmail("");
+    setCode("");
+    setCodeSent(false);
     if (joined) {
       track("signed_up", { google: new URLSearchParams(location.search).has("joined") });
       try {
