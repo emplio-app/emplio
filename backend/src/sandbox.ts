@@ -7,7 +7,7 @@ import { MAX_SIDE as SHOT_SIDE, MODEL_MAX, inName, readStored, storeFile } from 
 import { addMember, changeMember, listTeam, setManager, setTitle } from "./team";
 import { BOX_EMAIL, bundleFor, createFile, ensureRepo, listPaths, pushBundle, readFile, writeFiles } from "./gitea";
 import { sharedWith, writableRegex } from "./private";
-import { handles, meetingOf, meetingPrivate, projectPrivate } from "./records";
+import { handles, meetingOf, meetingPrivate, parseArgs, privateOf, projectPrivate } from "./records";
 import { db } from "./db";
 import { clients, meetings, projects } from "./db/schema";
 import { and, eq, sql } from "drizzle-orm";
@@ -2579,7 +2579,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
     else if (line.startsWith(`PROC:${key}\t`)) {
       const args = Buffer.from(line.slice(`PROC:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
       const who = { workspaceId: s.workspaceId, workspaceName: s.workspaceName, userId: s.user.id, userName: s.user.name, userEmail: s.user.email, role: s.role };
-      lines.push(await processesCommand(who, args, () => catchUp(box, s, reposFor(s)[0]!), s.data));
+      lines.push(await askFirst(s, "processes", args, () => processesCommand(who, args, () => catchUp(box, s, reposFor(s)[0]!), s.data)));
     }
     else if (line.startsWith(`CLIENT:${key}\t`)) {
       const args = Buffer.from(line.slice(`CLIENT:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
@@ -2587,7 +2587,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
       if (kind === "search") lines.push(await searchRecords({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, rest));
       else {
         const run = kind === "contacts" ? contactsCommand : kind === "projects" ? projectsCommand : kind === "services" ? servicesCommand : kind === "meetings" ? meetingsCommand : clientsCommand;
-        lines.push(await run({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, s.conversationId, rest, s.data));
+        lines.push(await askFirst(s, kind ?? "clients", rest, () => run({ workspaceId: s.workspaceId, userId: s.user.id, role: s.role }, s.conversationId, rest, s.data)));
         // a meeting just added is theirs to write notes for, in this reply
         if (kind === "meetings") writable.delete(s);
       }
@@ -2704,6 +2704,34 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
 
 // `emplio ask <question> [answer]...`: a card in the chat; the answer comes back as the person's next message,
 // so nothing waits here. Only where someone is there to answer.
+// Removing, archiving or deleting a client, contact, project, service, meeting, process, stage or field, and making
+// one private or shared, always waits for the person's Allow, whatever "Just do it" says (adding and editing don't).
+// What the card says, or null when the command needs no OK.
+export function recordAsk(kind: string, args: string[]): string | null {
+  const [sub = "", ...rest] = args;
+  const one = ({ clients: "client", contacts: "contact", projects: "project", services: "service", meetings: "meeting", processes: "process" } as Record<string, string>)[kind] ?? kind;
+  if (sub === "stages" || sub === "fields") {
+    const [op, ...more] = rest;
+    const name = parseArgs(more).words.join(" ");
+    return op === "remove" && name ? `Remove the ${one} ${sub === "stages" ? "stage" : "field"} ${name}` : null;
+  }
+  const { words, opts, flags } = parseArgs(rest);
+  const name = words.join(" ");
+  if (!name) return null;
+  if (sub === "archive" || sub === "remove" || sub === "delete") return `${kind === "meetings" || kind === "processes" ? "Delete" : "Archive"} the ${one} ${name}`;
+  if (kind === "processes")
+    return sub === "private" ? (/^(no|false|off|0)$/i.test(words[1] ?? "") ? `Share the process ${words[0]} with everyone` : `Make the process ${words[0]} private`) : null;
+  const priv = sub === "update" ? privateOf(opts, flags) : undefined;
+  return priv === undefined ? null : priv ? `Make the ${one} ${name} private` : `Share the ${one} ${name} with everyone`;
+}
+
+async function askFirst(s: Session, kind: string, args: string[], run: () => Promise<string>) {
+  const title = recordAsk(kind, args);
+  if (!title) return run();
+  const refused = await approve(s, `emplio.${kind}_${args[0]}`, { command: `emplio ${kind} ${args.join(" ")}` }, { own: { title, readOnly: false, appName: "Emplio", alwaysAsk: true, run } });
+  return refused ?? run();
+}
+
 export function ask(s: Pick<Session, "automation" | "task" | "notify" | "user">, input: string[]): AskCard | string {
   // what came on stdin (the emplio script puts it first)
   const text = input[0] === "--text" ? input[1]?.trim() : undefined;
