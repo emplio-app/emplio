@@ -5,7 +5,9 @@
 // - trigger:  an app event (a new email, ...) its provider watches for and posts to our webhook, or one we
 //             poll for ourselves (integrations/polls/): the timer checks the app and fires only on new items
 // - manual:   only when someone runs it (Run in the app, `emplio automations run`)
-// A run is a new chat, as whoever last saved the file (with their apps), with the prompt (and the event)
+// - new client: each client added as active, or won (a prospect made active)
+// A run makes tasks (tasks.ts makeTask, the one way any task is made) when it's for clients, for each new client, or
+// names who: does it: one task per client (or one), or a process started for each (process:). Otherwise a run is a new chat, as whoever last saved the file (with their apps), with the prompt (and the event)
 // as its first message. Every run is recorded in automation_runs.
 // ponytail: runs aren't capped; a burst of events starts that many chats (queue per business if it bites)
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -21,6 +23,7 @@ import { SILENT } from "./reader";
 import { db } from "./db";
 import { record } from "./activity";
 import { activity, automationRuns, automations, connections, conversations, jobs, users, workspaceMembers, workspaces } from "./db/schema";
+import { listClients, pickClients } from "./clients";
 import { lastAuthor, listFolder, readFile, writeFile } from "./gitea";
 import { connectCard, getAction, getTrigger, listTriggers, runAction, startTrigger, stopTrigger, triggerPlan } from "./integrations";
 import { APPS as OWN_APPS, freshSecret, type Delivery, type WebhookEvent } from "./integrations/own";
@@ -41,7 +44,7 @@ const FOLDER = "automations";
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const ACTION = /^[a-z0-9_]+\.[a-z0-9_]+$/i;
 // ponytail: every business is in India for now (same as AGENT.md's default)
-const WHEN = ["trigger", "schedule", "manual"] as const;
+const WHEN = ["trigger", "schedule", "manual", "new client"] as const;
 type Row = typeof automations.$inferSelect;
 
 export class AutomationError extends Error {}
@@ -65,7 +68,7 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
   const timezone = typeof s.timezone === "string" ? s.timezone : zone;
   const enabled = s.enabled ?? true;
   const config = s.config ?? {};
-  if (!WHEN.includes(when)) return { error: "when: must be trigger, schedule or manual" } as const;
+  if (!WHEN.includes(when)) return { error: "when: must be trigger, schedule, manual or new client" } as const;
   if (!prompt) return { error: "the prompt (after the settings) is empty" } as const;
   if (typeof enabled !== "boolean") return { error: "enabled: must be true or false" } as const;
   if (when === "trigger" && typeof s.trigger !== "string") return { error: "trigger: is missing (like gmail.new_gmail_message)" } as const;
@@ -75,6 +78,22 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
   const actions = s.actions ?? [];
   if (!Array.isArray(actions) || actions.some((a) => typeof a !== "string" || !ACTION.test(a)))
     return { error: "actions: must be a list of app actions, like [gmail.send_email, todoist.create_task]" } as const;
+  // clients: all (every active client) or a list of them; due: days after each run
+  const clients = s.clients === undefined || s.clients === null ? null : s.clients === "all" ? ["*"] : s.clients;
+  if (clients !== null && (!Array.isArray(clients) || !clients.length || clients.some((c) => typeof c !== "string" || !c.trim())))
+    return { error: 'clients: must be all, or a list of clients, like [Northwind Traders, Contoso], or of details, like [Files=monthly]' } as const;
+  if (clients && when !== "schedule") return { error: "clients: only goes with when: schedule (when: new client is for each new one)" } as const;
+  const due = s.due === undefined ? null : s.due;
+  const perClient = !!clients || when === "new client";
+  if (s.process !== undefined && (typeof s.process !== "string" || !perClient))
+    return { error: "process: goes with clients: or when: new client (start that process for each of them)" } as const;
+  if (s.who !== undefined && (typeof s.who !== "string" || !s.who.trim())) return { error: "who: is handler, owner, a person's name or email, or an agent's name" } as const;
+  if (s.who !== undefined && s.process !== undefined) return { error: "who: goes with a task; a process's steps say who does each" } as const;
+  if (due !== null && (!Number.isInteger(due) || (due as number) < 0 || (due as number) > 400)) return { error: "due: must be a number of days, like 30" } as const;
+  // who: emplio for clients makes Emplio's own task per client; alone it's the same as leaving it out (a chat)
+  const who = typeof s.who === "string" && !(s.who.trim().toLowerCase() === "emplio" && !perClient) ? s.who.trim() : null;
+  // each run makes tasks (for clients, for each new one, or for who:), not a chat
+  const makesTasks = perClient || !!who;
   if (when === "schedule") {
     if (typeof s.schedule !== "string") return { error: 'schedule: is missing (cron, like "0 9 * * 1-5")' } as const;
     try {
@@ -94,8 +113,97 @@ export function parseAutomation(text: string, zone = DEFAULT_ZONE) {
     prompt,
     agent: typeof s.agent === "string" ? s.agent : null,
     actions: [...new Set(actions as string[])],
+    clients: clients ? (clients as string[]).map((c) => c.trim()) : null,
+    dueDays: makesTasks ? ((due as number | null) ?? (perClient ? 7 : 1)) : null,
+    process: typeof s.process === "string" ? s.process : null,
+    who,
   };
 }
+
+// What a run of a schedule is for: "Nov 2026" when it runs about monthly, "2026" yearly, "week of 23 Nov" weekly,
+// else the day. Part of each task's title and of the key that stops a run adding it twice.
+export function periodOf(schedule: string, timezone: string, at = new Date()) {
+  const [a, b] = new Cron(schedule, { timezone }).nextRuns(2, at);
+  const gap = a && b ? (b.getTime() - a.getTime()) / 86_400_000 : 1;
+  const part = (o: Intl.DateTimeFormatOptions) => at.toLocaleDateString("en-GB", { timeZone: timezone, ...o });
+  if (gap > 300) return part({ year: "numeric" });
+  if (gap > 80) return `Q${Math.floor(Number(part({ month: "numeric" })) / 3.01) + 1} ${part({ year: "numeric" })}`;
+  if (gap > 25) return part({ month: "short", year: "numeric" });
+  if (gap > 5) return `week of ${part({ day: "numeric", month: "short" })}`;
+  return part({ day: "numeric", month: "short", year: "numeric" });
+}
+
+// Runs that make tasks rather than a chat (for clients, for each new client, or with who:).
+export const makesTasks = (row: Pick<Row, "clients" | "when" | "who">) => !!row.clients || row.when === "new client" || !!row.who;
+
+// One run that makes work: for each client it's for (clients:, or just the new one), or once, either a go of its process
+// or one task (the first line its title, the rest how; who: does it, else whoever handles the client, or the agent
+// named), due dueDays later, titled with the period on a schedule. Never twice for one client and period. Every task
+// is made by makeTask (tasks.ts), as any task is.
+async function makeWork(row: Row, reason: (typeof WHEN)[number], o: { event?: unknown; client?: string } = {}) {
+  const paused = await heldBack(row.workspaceId);
+  if (paused || !row.userId) {
+    await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason, status: "failed", error: paused ?? "nobody to run it as", finishedAt: new Date() });
+    return;
+  }
+  // as the person behind it sees them: a member's never reach a private client
+  const as = row.clients || o.client ? await personFor(row.workspaceId, row.userId) : null;
+  const all = as ? await listClients(as) : [];
+  const targets = o.client ? all.filter((c) => c.slug === o.client) : row.clients ? pickClients(all, row.clients) : [null];
+  const period = row.when === "schedule" ? periodOf(row.schedule!, row.timezone ?? DEFAULT_ZONE) : null;
+  // what stops a second one: per client and period, or per new client; a task on an event or by hand isn't kept from repeating
+  const keyOf = (slug: string) => (o.client ? `${row.name}/new/${o.client}` : period ? `${row.name}/${slug}/${period}` : undefined);
+  const { assign, startRun } = await import("./processes");
+  const { makeTask } = await import("./tasks");
+  const [title, ...rest] = row.prompt.split("\n");
+  const how = [rest.join("\n").trim(), ...(o.event === undefined ? [] : [`The event that started it:\n\`\`\`json\n${clip(JSON.stringify(o.event, null, 2), 20_000)}\n\`\`\``])].filter(Boolean).join("\n\n");
+  const due = new Date(Date.now() + (row.dueDays ?? 7) * 86_400_000);
+  let made = 0;
+  let error: string | null = null;
+  for (const c of targets) {
+    try {
+      if (row.process) {
+        if (await startRun({ workspaceId: row.workspaceId, userId: row.userId }, row.process, { client: c?.slug, period, repeatKey: keyOf(c?.slug ?? "-") })) made++;
+        continue;
+      }
+      const a = row.agent ? { assigneeId: null, agent: row.agent, missing: "" } : await assign(row.workspaceId, row.who ?? "handler", c?.handlers.find((h) => h.id)?.id, row.userId);
+      const t = await makeTask({
+        workspaceId: row.workspaceId,
+        // the client is on the task itself (shown beside the title everywhere)
+        title: `${title!.trim()}${period ? ` · ${period}` : ""}`.slice(0, 300),
+        notes: [how, a.missing].filter(Boolean).join("\n\n") || null,
+        assigneeId: a.assigneeId,
+        agent: a.agent,
+        requesterId: row.userId,
+        clientId: c?.id ?? null,
+        dueAt: due,
+        repeatKey: keyOf(c?.slug ?? "-"),
+      });
+      if (t) made++;
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  const what = row.process ? `started ${row.process}` : "made a task";
+  await db.insert(automationRuns).values({ workspaceId: row.workspaceId, automationId: row.id, name: row.name, reason, status: error && !made ? "failed" : "done", error, finishedAt: new Date() });
+  record({ workspaceId: row.workspaceId, userId: row.userId, kind: "automation", summary: `"${row.name}" ${what} ${made} time${made === 1 ? "" : "s"}${period ? ` (${period})` : ""}${error ? `; ${error}` : ""}` });
+  // the person behind it hears of a round for many clients, or of one that failed; a single task speaks for itself
+  const name = row.process ? `"${row.process}"` : `**${title!.trim()}**`;
+  if (error && !made) await post(row.workspaceId, row.userId, `**Automation "${row.name}"** failed: ${error}`).catch(() => {});
+  else if (made && row.clients) await post(row.workspaceId, row.userId, `${name}${period ? ` for ${period}` : ""}: ${row.process ? "started" : "a task added"} for ${made} client${made === 1 ? "" : "s"}${row.process ? "" : `, due ${due.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}. It's on the Work page.`).catch(() => {});
+}
+
+// A client added at, or moved into, an active stage from a prospect one (clients.ts): the automations for each new client, for them.
+export async function forNewClient(workspaceId: string, client: string) {
+  const rows = await db
+    .select()
+    .from(automations)
+    .where(and(eq(automations.workspaceId, workspaceId), eq(automations.when, "new client"), eq(automations.enabled, true), isNull(automations.error)));
+  for (const row of rows) await makeWork(row, "new client", { client }).catch((error) => console.error("a new-client automation failed", row.name, error));
+}
+
+// What a run does: makes tasks, or Emplio does it in a chat of its own.
+const start = (row: Row, reason: (typeof WHEN)[number], event?: unknown) => (makesTasks(row) ? makeWork(row, reason, { event }) : fire(row, reason, event));
 
 const nextRun = (row: { schedule?: string | null; timezone?: string | null }) => new Cron(row.schedule!, { timezone: row.timezone ?? DEFAULT_ZONE }).nextRun();
 
@@ -243,7 +351,7 @@ export async function woke(conversationId: string, error: string | null) {
 }
 
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max)}\n... (${text.length - max} more characters cut)`);
-const LABEL = { trigger: "an app event", schedule: "its schedule", manual: "someone ran it" };
+const LABEL = { trigger: "an app event", schedule: "its schedule", manual: "someone ran it", "new client": "a new client" };
 
 // A run's first message: the automation's prompt, the event that started it, and how to end.
 export const runMessage = (row: Pick<Row, "name" | "agent" | "prompt">, userName: string, reason: (typeof WHEN)[number], event?: unknown) =>
@@ -343,6 +451,9 @@ export async function listAutomations(workspaceId: string): Promise<Automation[]
     owner: a.userId ? { id: a.userId, name: ownerName ?? ownerEmail ?? "" } : null,
     nextRunAt: a.enabled && !a.error ? (a.nextRunAt?.toISOString() ?? null) : null,
     lastRun: runs.find((r) => r.name === a.name) ?? null,
+    clients: a.clients,
+    process: a.process,
+    who: a.who,
   })));
 }
 
@@ -479,6 +590,11 @@ export async function runAutomation(who: Ctx, name: string) {
   if (row.error && !row.userId) throw new AutomationError(`it can't run: ${row.error}`);
   const paused = await heldBack(who.workspaceId);
   if (paused) throw new AutomationError(paused);
+  if (row.when === "new client") throw new AutomationError("it runs by itself for each new client; add one (or make a prospect active) to see it");
+  if (makesTasks(row)) {
+    await makeWork(row, "manual");
+    return { runId: null, conversationId: null, perClient: true };
+  }
   return fire(row, "manual");
 }
 
@@ -497,7 +613,7 @@ async function tick() {
       .set({ nextRunAt: nextRun(row) })
       .where(and(eq(automations.id, row.id), lte(automations.nextRunAt, new Date())))
       .returning();
-    if (claimed) await fire(claimed, "schedule").catch((error) => console.error("automation run failed to start", row.name, error));
+    if (claimed) await start(claimed, "schedule").catch((error) => console.error("automation run failed to start", row.name, error));
   }
   const polls = await db
     .select()
@@ -533,7 +649,7 @@ async function poll(row: Row) {
   }
   await db.update(automations).set({ pollState: { key: claimed.pollState.key, seen: result.seen } }).where(eq(automations.id, row.id));
   // ponytail: at most 10 runs per check, the rest are marked seen; a queue if bursts matter
-  for (const event of result.fresh.slice(0, 10)) await fire(claimed, "trigger", event);
+  for (const event of result.fresh.slice(0, 10)) await start(claimed, "trigger", event);
 }
 
 let webhookSecret: string | null = null;
@@ -607,7 +723,7 @@ async function onEvent(event: { type?: string; metadata?: { trigger_id?: string 
     .select()
     .from(automations)
     .where(and(eq(automations.externalId, externalId), eq(automations.enabled, true), isNull(automations.error)));
-  for (const row of rows) await fire(row, "trigger", event.data);
+  for (const row of rows) await start(row, "trigger", event.data);
 }
 
 // An event from a business's own Razorpay account; the automations on that connection waiting for it run.
@@ -618,7 +734,7 @@ async function onRazorpayEvent(connection: string, event: { event?: string; payl
     .select()
     .from(automations)
     .where(and(eq(automations.externalId, watchId(connection)), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
-  for (const row of rows) await fire(row, "trigger", eventData(event.payload));
+  for (const row of rows) await start(row, "trigger", eventData(event.payload));
 }
 
 // An event from a GitHub repository; the automations watching it on that connection, whose settings want it, run.
@@ -630,7 +746,7 @@ async function onGithubEvent(id: string, event: string, payload: Record<string, 
     .from(automations)
     .where(and(eq(automations.externalId, id), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
   const data = githubHooks.eventData(payload);
-  for (const row of rows) if (githubHooks.wanted(row.triggerConfig, payload)) await fire(row, "trigger", data);
+  for (const row of rows) if (githubHooks.wanted(row.triggerConfig, payload)) await start(row, "trigger", data);
 }
 
 // Events from an app on the shared webhook route: the automations on that id waiting for them, whose settings want them, run.
@@ -650,7 +766,7 @@ async function onAppEvents(app: string, fallback: string[], events: WebhookEvent
       .select()
       .from(automations)
       .where(and(inArray(automations.externalId, ids), inArray(automations.trigger, names), eq(automations.enabled, true), isNull(automations.error)));
-    for (const row of rows) if (push?.wanted?.(row.triggerConfig, event.data) ?? true) await fire(row, "trigger", event.data);
+    for (const row of rows) if (push?.wanted?.(row.triggerConfig, event.data) ?? true) await start(row, "trigger", event.data);
   }
 }
 
@@ -799,7 +915,7 @@ export async function automationRoutes(app: FastifyInstance) {
 
 // --- `emplio automations ...` from a chat ---
 
-const USAGE = `usage: emplio automations list                    all of this business's automations, with status
+export const USAGE = `usage: emplio automations list                    all of this business's automations, with status
        emplio automations show <name>             its file
        emplio automations add <name> - <<'MD'     create one (the file: settings, then the prompt; see below)
        emplio automations update <name> - <<'MD'  replace its file
@@ -812,7 +928,7 @@ const USAGE = `usage: emplio automations list                    all of this bus
 
 The file (names: lowercase-with-dashes):
 ---
-when: trigger                      # trigger | schedule | manual
+when: trigger                      # trigger | schedule | manual | new client (each client added or won)
 trigger: gmail.new_gmail_message   # when: trigger
 config:                            # the trigger's settings (emplio automations trigger <trigger>), e.g. a Gmail search
   query: "from:@acme.com"
@@ -821,9 +937,16 @@ schedule: "0 9 * * 1-5"            # when: schedule; cron, minute hour day month
 agent: Supplier Finder             # optional: each run hands the work to this agent (emplio agents list)
 actions: [gmail.send_email]        # every app action its runs take that sends or changes something
 timezone: Asia/Kolkata             # for schedule; leave out for the clock of whoever saves it
+clients: [Files=monthly]           # schedule only: once for each client: all, names, or a detail (emplio clients help)
+process: monthly-books             # with clients: or when: new client: start that process for each (its steps are tasks)
+who: Sarah                         # instead: a task for them each run (handler: whoever looks after the client, the
+                                   #   default with clients; owner; a person; an agent); left out: you do it in a chat
+due: 7                             # days each task has (default 7 per client, 1 otherwise)
 enabled: true
 ---
 The prompt: what to do each time, as you'd tell a new employee. The event (the email, ...) is added below it.
+With who:, clients: or process:, a run makes tasks instead of a chat: the first line is each task's title, the rest
+how to do it. Every timed or event start lives in an automation: a process file never says when it starts.
 
 Setting one up so it runs well:
 - Find the event with emplio automations triggers <app> [words] and its settings with emplio automations trigger <trigger>.
@@ -888,6 +1011,7 @@ export async function automationsCommand(who: Ctx, args: string[], caughtUp: () 
       case "run": {
         if (!name) break;
         const started = await runAutomation(who, name);
+        if ("perClient" in started) return "Done: its tasks are added (emplio tasks list --all; a process's first steps: emplio processes runs); a client who already had one this period isn't given another.";
         return started.conversationId
           ? `Started: it runs in its own chat, "Automation: ${name}". Check how it went with emplio automations history ${name}.`
           : "error: it has nobody to run as.";

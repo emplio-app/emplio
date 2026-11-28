@@ -229,9 +229,9 @@ export function ImportPanel({ done: after }: { done?: { label: string; go: () =>
             {paste.error && <p className="mt-2 text-destructive">{paste.error.message}</p>}
           </div>
           {steps && !chatsToo && (
-            <button type="button" className="justify-self-start text-xs text-muted-foreground underline underline-offset-2" onClick={() => setChatsToo(true)}>
+            <Button variant="link" size="xs" className="h-auto justify-self-start p-0 text-muted-foreground" onClick={() => setChatsToo(true)}>
               Want your old {label} chats too? Bring its export instead
-            </button>
+            </Button>
           )}
         </div>
       )}

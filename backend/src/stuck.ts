@@ -58,10 +58,13 @@ export type FailureGuard = ReturnType<typeof failureGuard>;
 // tick what's done (as Claude Code reminds about its to-do list). Never stops the job: its time limit and the
 // failure guard do that. Commands that only manage (emplio plan, hand, ask) aren't counted.
 const EVERY = 10;
+const WRITE_FIRST = "[No checklist yet. Work of 3 or more steps, or several asks: write it now, on its own (emplio plan set 'First step' 'Second step' ..., a step for each part of the brief), then give each command the step it works on (step: <n>).]";
 const WRITE_PLAN = "[Reminder: no checklist yet. If this takes more than a few steps, write one (emplio plan set ...), ticking what's done already.]";
 // names the open step: a bare "tick what's done" was acted on about 1 time in 5 (live, Nov 24)
+// with a list, ticking is nagged sooner: jobs that batch their work in a few runs never reached 10 (evals, Nov 28)
+const TICK_EVERY = 4;
 const TICK = (n: number, text: string) =>
-  `[Checklist: step ${n} "${text}" is still open after ${EVERY} commands. If it's done, tick it now (emplio plan done ${n}). Give each command the step it works on (step: <n>): that ticks as you go.]`;
+  `[Checklist: step ${n} "${text}" is still open after ${TICK_EVERY} commands. If it's done, tick it now (emplio plan done ${n}). Give each command the step it works on (step: <n>): that ticks as you go.]`;
 export function progressGuard(plan: PlanStep[] | null | undefined) {
   let since = 0;
   let steps = plan ?? [];
@@ -69,7 +72,11 @@ export function progressGuard(plan: PlanStep[] | null | undefined) {
     // what to add to a command's output, if anything; moved: the checklist as the command left it, when it changed
     check(moved: PlanStep[] | null | undefined, counted: boolean): string | null {
       if (moved) return (since = 0), (steps = moved), null;
-      if (!counted || ++since % EVERY) return null;
+      if (!counted) return null;
+      // no checklist at the first real command: the list is written first, not 10 commands in (live and evals: most
+      // jobs that skipped it never wrote one)
+      if (++since === 1 && !steps.length) return WRITE_FIRST;
+      if (since % (steps.length ? TICK_EVERY : EVERY)) return null;
       if (!steps.length) return WRITE_PLAN;
       const open = steps.findIndex((s) => s.status !== "done");
       return open < 0 ? null : TICK(open + 1, steps[open]!.text);

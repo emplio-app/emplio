@@ -24,13 +24,15 @@ test("the same read with the same result a third time gets a note, and never sto
 test("a job's checklist gets a reminder every 10 commands it doesn't move, and is never stopped", () => {
   const g = progressGuard(null);
   const notes = Array.from({ length: 30 }, () => g.check(null, true));
+  // the first real command is told to write one, then every 10th
+  expect(notes[0]).toContain("No checklist yet");
   expect(notes[9]).toContain("no checklist");
-  expect(notes.filter(Boolean).length).toBe(3);
+  expect(notes.filter(Boolean).length).toBe(4);
   expect(g.check([{ text: "Read mail", status: "done" }, { text: "Draft reply", status: "todo" }], true)).toBeNull();
-  const after = Array.from({ length: 10 }, () => g.check(null, true));
-  // names the open step and how to tick it
-  expect(after[9]).toContain('step 2 "Draft reply"');
-  expect(after[9]).toContain("emplio plan done 2");
+  const after = Array.from({ length: 4 }, () => g.check(null, true));
+  // names the open step and how to tick it, after 4 commands
+  expect(after[3]).toContain('step 2 "Draft reply"');
+  expect(after[3]).toContain("emplio plan done 2");
   // managing commands (emplio plan, hand, ask) aren't counted
   expect(Array.from({ length: 20 }, () => g.check(null, false)).filter(Boolean)).toEqual([]);
 });

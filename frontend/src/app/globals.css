@@ -39,6 +39,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -90,6 +92,9 @@
   --accent: oklch(0.955 0.005 85);
   --accent-foreground: oklch(0.25 0.006 85);
   --destructive: oklch(0.577 0.215 27);
+  /* status colours: warning = waiting on someone / running low, info = being worked on */
+  --warning: oklch(0.6 0.15 62);
+  --info: oklch(0.55 0.16 255);
   --border: oklch(0.91 0.006 85);
   --input: oklch(0.89 0.007 85);
   --ring: oklch(0.44 0.09 158);
@@ -135,6 +140,8 @@
   --accent: oklch(0.27 0.006 85);
   --accent-foreground: oklch(0.94 0.004 85);
   --destructive: oklch(0.66 0.19 25);
+  --warning: oklch(0.8 0.14 75);
+  --info: oklch(0.72 0.13 250);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.64 0.11 158);
@@ -156,8 +163,9 @@
   --sidebar-ring: oklch(0.64 0.11 158);
 }
 
-/* A press answers right away, on the way down, and lets go gently. */
-.group\/button:active:not(:disabled),
+/* A press answers right away, on the way down, and lets go gently. A whole row (a Button made h-auto to hold a
+   list item) doesn't shrink: on something that wide even 3% is a jump. */
+.group\/button:active:not(:disabled, .h-auto),
 [data-slot="input-group-button"]:active:not(:disabled) {
   transform: scale(0.97);
   transition-duration: 100ms;
@@ -228,7 +236,7 @@
     font-size: 1.125rem;
   }
   /* a finger covers more of the button than a cursor: a little more give, a little sooner */
-  .group\/button:active:not(:disabled),
+  .group\/button:active:not(:disabled, .h-auto),
   [data-slot="input-group-button"]:active:not(:disabled) {
     transform: scale(0.96);
     transition-duration: 60ms;
@@ -275,6 +283,31 @@ html[data-typing] body {
 html[data-typing] .bottom-tabs {
   display: none;
 }
+/* a side panel slides in from its edge (sheet.tsx), above the motion everything else gets (:where([data-slot]),
+   which would otherwise win over the utility classes); a phone's rises from the bottom instead (below) */
+@media (min-width: 640px) and (prefers-reduced-motion: no-preference) {
+  [data-slot="sheet-content"] {
+    transition-property: translate, opacity;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  [data-slot="sheet-content"][data-ending-style] {
+    transition-duration: 200ms;
+    transition-timing-function: ease-in;
+  }
+}
+/* an empty chat keeps its box in the middle, with its greeting: nothing at the foot */
+.page-ask:has(#ask-slot:empty) {
+  display: none;
+}
+/* Emplio's message box floats over a page's foot (composer.tsx LayoutAsk sets --ask-h to its height, 0 when it's
+   not there): a page's lists (.under-tabs) end above it, so nothing is left hidden under it. */
+:root {
+  --ask-h: 0px;
+}
+.under-tabs {
+  padding-bottom: var(--ask-h);
+}
 /* In the iPhone app the page makes room for the keyboard as it rises and falls (providers.tsx), gliding with it
    instead of jumping. ponytail: the keyboard's own timing isn't passed on, so this is a close match; tune here. */
 html[data-keyboard-app] {
@@ -298,7 +331,7 @@ html[data-keyboard-app] :is([data-slot="dialog-content"], [data-slot="sheet-cont
   }
   .page-in:not(:has(.under-tabs)),
   .under-tabs {
-    padding-bottom: var(--tabs-h);
+    padding-bottom: max(var(--tabs-h), var(--ask-h));
   }
 }
 
@@ -602,6 +635,10 @@ html[data-keyboard-app] :is([data-slot="dialog-content"], [data-slot="sheet-cont
    is streaming. After the sweep the clip is gone, so the text shows in full. */
 @media (prefers-reduced-motion: no-preference) {
   .type-in {
+    animation: type-in calc(var(--type-len, 40) * 25ms + 200ms) linear backwards;
+  }
+  /* a page's message box: its placeholder writes itself in when the page opens (composer.tsx PageBox) */
+  .ask-type textarea {
     animation: type-in calc(var(--type-len, 40) * 25ms + 200ms) linear backwards;
   }
 }

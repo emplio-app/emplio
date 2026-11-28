@@ -71,6 +71,97 @@
       "when": 1795030376837,
       "tag": "20261118193256_connection_problems",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795341615547,
+      "tag": "20261122100015_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795342313300,
+      "tag": "20261122101153_repeat_for_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795345944565,
+      "tag": "20261122111224_processes",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795355483664,
+      "tag": "20261122135123_processes_inputs",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795584847667,
+      "tag": "20261125053407_client_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795598258153,
+      "tag": "20261125091738_one_way_to_make_work",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795628939539,
+      "tag": "20261125174859_clients_to_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795628958744,
+      "tag": "20261125174918_drop_clients_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795753073011,
+      "tag": "20261127041753_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795764627080,
+      "tag": "20261127073027_record_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795766118960,
+      "tag": "20261127075518_private_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795796767800,
+      "tag": "20261127162607_private_tasks_processes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795804433823,
+      "tag": "20261127183353_meetings",
+      "breakpoints": true
     }
   ]
 }

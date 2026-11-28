@@ -24,6 +24,10 @@ export type Business = {
   agents?: string[];
   // "- <id> · <agent or myself> · <name> · <status>, <when>"
   threads?: string[];
+  // another made-up business than the shop (the clients evals: a firm that works for clients)
+  firm?: { name: string; about: string };
+  // the chat is about this client: the note the app adds (src/clients.ts clientNoteText)
+  client?: string;
 };
 
 export const CHAT_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.chatModel;
@@ -37,15 +41,15 @@ export const BACKGROUND_MODEL = process.env.EVAL_MODEL || MODEL_SETS.save.backgr
 // automation whose run this is (nobody watches it either, and it hands off like Emplio in a chat)
 export const system = (b: Business, round: boolean | string) => [
   emplioPrompt({
-    rules: agentRules(ctx, typeof round === "string" ? round : round ? HEARTBEAT : undefined),
+    rules: agentRules(b.firm ? { ...ctx, workspaceName: b.firm.name } : ctx, typeof round === "string" ? round : round ? HEARTBEAT : undefined),
     computer: sandboxPrompt(
       typeof round === "string" ? { ...session, automation: true, watched: false } : round ? { ...session, automation: true, thinker: true, background: true, watched: false } : session,
     ),
     team: ["- Meera <meera@kaveri.example>, owner", "- Raj <raj@kaveri.example>, member", "- Priya <priya@kaveri.example>, admin"],
     connected: "- Gmail (meera@kaveri.example)\n- Google Sheets\n- Zoho Books\n- WhatsApp Business",
-    business: "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
+    business: b.firm?.about ?? "We sell curtains, cushions and bed linen from one shop in Pune and online. GST is 12% on linen, 18% on cushions. Quotes are valid 15 days.",
     userName: ctx.userName,
-    personal: "Runs the shop. Prefers short answers. Hindi or English.",
+    personal: b.firm ? "Runs the firm. Prefers short answers." : "Runs the shop. Prefers short answers. Hindi or English.",
     skills: b.skills?.length ? b.skills : ["(none yet)"],
     // a background round hands nothing off (chat.ts)
     agent: round === true,
@@ -81,6 +85,7 @@ const note = (b: Business) =>
     {
       channel: "They're in the web app.",
       date: "Today is Tuesday, 10 November 2026 (Asia/Kolkata time).",
+      client: b.client ?? "",
       chats: "",
       agents: [AGENTS_HEADING, ...(b.agents?.length ? b.agents : ["(none yet)"])].join("\n"),
       threads: b.threads?.length ? [THREADS_HEADING, ...b.threads].join("\n") : "",
@@ -197,12 +202,53 @@ const one = (c: string): string => {
   if (/^\s*(grep|find)\b/.test(c)) return "";
   return "";
 };
+// What a business's records remember within one reply, as the app's do: a write's own line, and every later
+// list or show carrying the writes made since, so Emplio doesn't take a stand-in's unchanged list for a failed save.
+// failed: the writes the stand-in refused (an "error:" answer), which did nothing
+export const memory = () => {
+  const changes: string[] = [];
+  const failed: string[] = [];
+  // tasks gone with a stopped run (ponytail: known once its runs line was seen)
+  const dropped = new Set<string>();
+  const answer = (command: string, out: string) => {
+    const line = command.split("\n")[0]!;
+    const write = /emplio (clients|contacts|projects|services|meetings|tasks|processes) (add|update|archive|restore|done|set|back|stop|start)\s+(.*)/.exec(line);
+    if (/^error:/m.test(out)) failed.push(command);
+    else if (write) changes.push(`- just now (via Emplio): ${write[1]} ${write[2]} ${write[3]!.slice(0, 200)}`);
+    else if (changes.length && /emplio (clients|contacts|projects|services|meetings|tasks|processes) (show|list|runs|search)/.test(line)) {
+      // a run stopped is gone from the runs, and one set shows what it was set to, as the app's do
+      for (const c of changes) {
+        const run = /processes (stop|set) (\w+)\s*(.*)/.exec(c);
+        const task = /tasks (done|update) (\w+)/.exec(c);
+        if (task && (task[1] === "done" || /cancel/.test(c))) out = out.split("\n").filter((l) => !l.startsWith(task[2]!)).join("\n");
+        if (!run) continue;
+        // a stopped run goes with its detail lines and its open task
+        let gone = false;
+        const taskOf = new RegExp(`^${run[2]}.*task (\\w+)`, "m").exec(out)?.[1];
+        if (run[1] === "stop" && taskOf) dropped.add(taskOf);
+        out = out.split("\n").filter((l) => {
+          if (run[1] !== "stop") return true;
+          if (l.startsWith(run[2]!)) return !(gone = true);
+          if (gone && l.startsWith("\t")) return false;
+          gone = false;
+          return !(taskOf && l.startsWith(taskOf));
+        }).map((l) => (run[1] === "set" && l.startsWith(run[2]!) ? `${l} (now ${run[3]})` : l)).join("\n");
+      }
+      out = out.split("\n").filter((l) => ![...dropped].some((t) => l.startsWith(t))).join("\n");
+      return `${out}\nrecent changes, newer than the lines above (they hold):\n${changes.join("\n")}`;
+    }
+    return out;
+  };
+  return { answer, failed };
+};
+
 // world: what this business's commands answer, first match wins: [words in the command (a regular expression), the result]
 export type World = [string, string][];
 export const pretend = (command: string, world: World = []): string =>
   // a heredoc is one write, whatever is in it; a chain answers part by part, each from the world first
   (/<</.test(command) ? [command] : command.split(/\s*(?:;|&&|\n)\s*/))
-    .map((part) => world.find(([words]) => new RegExp(words).test(part))?.[1] ?? one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
+    // an action's world answer is what running it gives: asking what it takes (apps info) isn't running it
+    .map((part) => world.find(([words]) => new RegExp(words).test(part) && (!/\bapps info\b/.test(part) || /info/.test(words)))?.[1] ?? one(part.split(/\s*\|\s*/)[0]!.replace(/\s+2>(&1|\/dev\/null)/g, "")))
     .filter(Boolean)
     .join("\n") || "(no output)";
 

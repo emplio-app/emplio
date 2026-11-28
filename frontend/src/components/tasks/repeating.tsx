@@ -2,9 +2,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { Automation } from "@emplio/shared";
-import { RepeatIcon, ZapIcon } from "lucide-react";
+import { Building2Icon, RepeatIcon, ZapIcon } from "lucide-react";
 import { useState } from "react";
 import { AutomationsDialog } from "@/components/chat/automations-dialog";
+import { Badge } from "@/components/ui/badge";
 import { api, useMe } from "@/lib/api";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -14,8 +15,12 @@ const time = (h: string, m: string) => new Date(2000, 0, 1, +h, +m).toLocaleTime
 // ponytail: five cron shapes cover what Emplio writes; a cron library if owners see "On a schedule" often
 export function everyWords(cron: string) {
   const [m, h, dom, mon, dow] = cron.trim().split(/\s+/);
-  if (!m || !h || !/^\d+$/.test(m) || !/^\d+$/.test(h) || mon !== "*") return "On a schedule";
+  if (!m || !h || !/^\d+$/.test(m) || !/^\d+$/.test(h)) return "On a schedule";
   const at = time(h, m);
+  if (/^\d+$/.test(dom!) && /^\d+$/.test(mon!) && dow === "*")
+    return `Every year on ${new Date(2000, +mon! - 1, +dom!).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
+  if (/^\d+$/.test(dom!) && /^\d+(,\d+){3}$/.test(mon!) && dow === "*") return `Every quarter on day ${dom}`;
+  if (mon !== "*") return "On a schedule";
   if (dom === "*" && dow === "*") return `Every day at ${at}`;
   if (dom === "*" && dow === "1-5") return `Weekdays at ${at}`;
   if (dom === "*" && /^[0-6]$/.test(dow!)) return `Every ${DAYS[+dow!]} at ${at}`;
@@ -24,7 +29,11 @@ export function everyWords(cron: string) {
 }
 
 const whenWords = (a: Automation) =>
-  a.when === "schedule" ? everyWords(a.schedule ?? "") : `When ${(a.trigger ?? "").replace(/^([a-z]+)\./, "$1: ").replace(/_/g, " ")}`;
+  a.when === "schedule"
+    ? everyWords(a.schedule ?? "")
+    : a.when === "new client"
+      ? "For each new client"
+      : `When ${(a.trigger ?? "").replace(/^([a-z]+)\./, "$1: ").replace(/_/g, " ")}`;
 
 // The work that repeats or waits for an event (automations underneath), on the Work page under the tasks.
 export function Repeating() {
@@ -45,14 +54,22 @@ export function Repeating() {
               type="button"
               onClick={() => setOpen(true)}
               disabled={me?.workspaces[0]?.role === "member"}
-              className="flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted/60 disabled:hover:bg-transparent"
+              className="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-muted disabled:hover:bg-transparent"
             >
               {a.when === "schedule" ? <RepeatIcon className="size-4 shrink-0 text-muted-foreground" /> : <ZapIcon className="size-4 shrink-0 text-muted-foreground" />}
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">{a.prompt.split("\n")[0]}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {whenWords(a)}
-                  {a.agent ? ` · ${a.agent}` : ""}
+                <span className="block truncate text-sm">{a.process ? `Start ${a.process}` : a.prompt.split("\n")[0]}</span>
+                <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                  <span className="truncate">
+                    {whenWords(a)}
+                    {a.agent ? ` · ${a.agent}` : a.who ? ` · ${a.who}` : ""}
+                  </span>
+                  {a.clients && (
+                    <Badge variant="secondary">
+                      <Building2Icon className="text-muted-foreground" />
+                      {a.clients.includes("*") ? "Each active client" : `For ${a.clients.length} client${a.clients.length === 1 ? "" : "s"}`}
+                    </Badge>
+                  )}
                 </span>
               </span>
             </button>

@@ -94,15 +94,16 @@ export function AskCard({ cards }: { cards: Card[] }) {
   return (
     <div ref={box} className="flex w-full max-w-md scroll-mb-40 flex-col gap-3 rounded-xl border bg-card p-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={() => setStep((s) => s - 1)}
           disabled={step === 0}
           aria-label="Previous question"
-          className="-ml-1 flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:invisible"
+          className="-ml-1 disabled:invisible"
         >
           <ChevronLeftIcon className="size-4" />
-        </button>
+        </Button>
         <span className="tabular-nums">{card ? `Question ${step + 1} of ${cards.length}` : "Your answers"}</span>
         <div className="ml-auto flex gap-1" aria-hidden>
           {cards.map((c, i) => (
@@ -143,7 +144,7 @@ export function AskCard({ cards }: { cards: Card[] }) {
                 key={c.id}
                 type="button"
                 onClick={() => setStep(i)}
-                className="flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-accent"
+                className="flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
               >
                 <span className="text-muted-foreground">{c.question}</span>
                 <span className={answers[c.id]?.trim() ? "font-medium" : "text-destructive"}>{answers[c.id]?.trim() || "Not answered yet"}</span>
@@ -211,7 +212,7 @@ function Question({
   };
   return (
     <div className="flex flex-col gap-2" role="group" aria-label={card.question}>
-      {card.text && <p className="max-h-72 overflow-y-auto rounded-lg bg-muted/50 px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">{card.text}</p>}
+      {card.text && <p className="max-h-72 overflow-y-auto rounded-lg bg-muted px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap">{card.text}</p>}
       <p className="text-[0.9rem] leading-snug font-medium">{card.question}</p>
       {card.multi && !locked && <p className="-mt-1 text-xs text-muted-foreground">Pick all that apply</p>}
       {!!card.options.length && (
@@ -230,12 +231,12 @@ function Question({
                     ? "border-primary bg-primary/10 font-medium text-foreground"
                     : locked
                       ? "text-muted-foreground opacity-60"
-                      : "hover:border-primary/50 hover:bg-accent active:scale-[.99]"
+                      : "hover:border-primary/50 hover:bg-muted active:scale-[.99]"
                 }`}
               >
                 {card.multi && (
                   <span
-                    className={`flex size-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors ${chosen ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}
+                    className={`flex size-4 shrink-0 items-center justify-center rounded border transition-colors ${chosen ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}
                   >
                     {chosen && <CheckIcon className="size-3" strokeWidth={3} />}
                   </span>
@@ -285,25 +286,26 @@ function Question({
             }}
           />
           {instant && !card.multi && (
-            <button
+            <Button
               type="submit"
+              size="icon-sm"
               disabled={!own.trim()}
               onMouseDown={(e) => e.preventDefault()} // keeps the focus: see the chat box's footer in chat-view.tsx
               aria-label="Send answer"
-              className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity disabled:opacity-30"
             >
               <ArrowUpIcon className="size-4" />
-            </button>
+            </Button>
           )}
         </form>
       ) : (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => setWriting(true)}
-          className="flex items-center gap-1.5 self-start text-xs text-muted-foreground hover:text-foreground"
+          className="-ml-2 self-start text-muted-foreground"
         >
           <PencilIcon className="size-3" /> Something else
-        </button>
+        </Button>
       )}
     </div>
   );

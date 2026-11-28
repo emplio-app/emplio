@@ -3,6 +3,7 @@
 import { DownloadIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { DownloadButton } from "@/components/download-button";
+import { Button } from "@/components/ui/button";
 import { useIsMacBrowser } from "@/lib/use-mac-browser";
 
 // In the sidebar, for people on a Mac who haven't got the Mac app. Closing it hides it for a month on this device.
@@ -25,12 +26,12 @@ export function MacNudge() {
   };
   return (
     <div className="relative mb-2 rounded-xl border border-primary/25 bg-primary/10 p-3 group-data-[collapsible=icon]:hidden">
-      <button type="button" onClick={hide} aria-label="Hide for a month" className="absolute top-2 right-2 rounded p-0.5 text-muted-foreground hover:bg-primary/15 hover:text-foreground">
+      <Button variant="ghost" size="icon-xs" onClick={hide} aria-label="Hide for a month" className="absolute top-1.5 right-1.5 text-muted-foreground">
         <XIcon className="size-3.5" />
-      </button>
+      </Button>
       <div className="pr-5 text-sm font-medium">Emplio for Mac</div>
       <p className="mt-1 text-xs text-muted-foreground">Faster replies, stronger work.</p>
-      <DownloadButton platform="mac" from="sidebar" size="sm" className="mt-2 h-7 w-full">
+      <DownloadButton platform="mac" from="sidebar" size="sm" className="mt-2 w-full">
         <DownloadIcon />
         Download
       </DownloadButton>

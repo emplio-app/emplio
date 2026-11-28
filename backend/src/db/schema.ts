@@ -1,6 +1,6 @@
-import type { Approval, PlanStep, JobInfo } from "@emplio/shared";
+import type { ProcessInput, RunInput, Approval, PlanStep, JobInfo, RecordChange } from "@emplio/shared";
 import { sql, type SQL } from "drizzle-orm";
-import { type AnyPgColumn, bigint, boolean, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, bigint, boolean, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
@@ -46,6 +46,8 @@ export const workspaces = pgTable("workspaces", {
   setupOfferedAt: timestamp({ withTimezone: true }),
   setupDoneAt: timestamp({ withTimezone: true }),
   setupSkippedAt: timestamp({ withTimezone: true }),
+  // the money its services and projects are priced in, ISO 4217 (records.ts)
+  currency: text().notNull().default("INR"),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   // when someone last sent a message, within 5 minutes. Kept by a database trigger on activity, for the console's list.
   lastActiveAt: timestamp({ withTimezone: true }),
@@ -82,9 +84,13 @@ export const workspaceMembers = pgTable(
     // their one ongoing conversation in this business: the same on the web and their channels, and
     // where background work (check-ins, tasks, automations) reports back; made on first use
     mainChatId: uuid(),
+    // their notes' folder, company/team/<slug>/ ([[team/<slug>]] links), set when they join and never changed
+    slug: text(),
+    // what they do here: "Design lead", "Accounts"
+    title: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index().on(t.userId)],
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index().on(t.userId), uniqueIndex().on(t.workspaceId, t.slug)],
 );
 
 // One sign-in code per email, replaced on each ask. Only its hash is kept.
@@ -174,10 +180,16 @@ export const conversations = pgTable(
     // button reopens (browser.ts)
     browserUsedAt: timestamp({ withTimezone: true }),
     browserPage: text(),
+    // the client it's about, if any (the reader labels it)
+    // deferred: see the note above clients
+    clientId: uuid().references((): AnyPgColumn => clients.id),
+    // ponytail: the client's folder name before records were rows; dropped by the next migration once every business
+    // reconciles (scripts/files-to-records.ts --reconcile). Nothing reads it.
+    legacyClient: text("client"),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.userId, t.workspaceId, t.updatedAt), index().on(t.workspaceId, t.updatedAt)],
+  (t) => [index().on(t.userId, t.workspaceId, t.updatedAt), index().on(t.workspaceId, t.updatedAt), index().on(t.clientId)],
 );
 
 // Someone reachable on a channel (one Telegram bot / WhatsApp number / phone number for the whole
@@ -268,6 +280,71 @@ export const actionRuns = pgTable(
   (t) => [index().on(t.workspaceId, t.createdAt)],
 );
 
+// One go of a process (company/processes/<name>.md, processes.ts) for one client, or for anything else with a name (a
+// candidate, an opening): its steps copied from the file when it started (editing the file never changes work in hand),
+// which one it's on, and when each finished. Each step is a task (tasks.runId), made when the one before it is done.
+// One row per process file (company/processes/<name>.md), rebuilt from git by syncProcesses (processes.ts) like
+// automations: the file is the truth, the row is what the app and runs read.
+export const processes = pgTable(
+  "processes",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // the file name without .md, and its git blob sha (unchanged files are skipped)
+    name: text().notNull(),
+    sha: text().notNull(),
+    title: text().notNull(),
+    // what each go is for: "client" or "other" (anything with a name)
+    for: text().notNull().default("client"),
+    // what's filled in when one starts (an invoice number, an amount, a deadline)
+    inputs: jsonb().$type<ProcessInput[]>().notNull().default([]),
+    // ponytail: what starts it on a schedule or for each new client is an automation (process: <name>), never this file
+    steps: jsonb().$type<ProcessStepDef[]>().notNull().default([]),
+    about: text().notNull().default(""),
+    // its file is in restricted/processes/: owners and admins only
+    private: boolean().notNull().default(false),
+    // what's wrong with the file (it can't start until fixed)
+    error: text(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.name)],
+);
+
+export const processRuns = pgTable(
+  "process_runs",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // the file name without .md
+    process: text().notNull(),
+    // the process's title then, and what this go is for: the client's name or the thing's, and the period
+    processTitle: text().notNull(),
+    subject: text().notNull(),
+    // the client and project it's for, if any
+    // deferred: see the note above clients
+    clientId: uuid().references((): AnyPgColumn => clients.id),
+    projectId: uuid().references((): AnyPgColumn => projects.id),
+    // ponytail: dropped once every business reconciles (see conversations.legacyClient)
+    legacyClient: text("client"),
+    // what was filled in when it started (changed since, maybe): the process's inputs then, each with its value
+    inputs: jsonb().$type<RunInput[]>().notNull().default([]),
+    period: text(),
+    steps: jsonb().$type<ProcessStepDef[]>().notNull(),
+    // the step it's on (0-based); steps.length once it's done
+    step: integer().notNull().default(0),
+    // when each step finished, by position (a step sent back to is cleared again)
+    finished: jsonb().$type<(string | null)[]>().notNull().default([]),
+    status: text({ enum: ["active", "done", "stopped"] }).notNull().default("active"),
+    startedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    // a process started on a schedule for each client: "<process>/<client slug>/<period>", never started twice
+    repeatKey: text(),
+    startedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    doneAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [index().on(t.workspaceId, t.process, t.status), index().on(t.clientId), index().on(t.projectId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
+);
+export type ProcessStepDef = { name: string; who: string; how?: string; days?: number; after?: number | "start"; afterInput?: string; back?: number };
+
 // One per file in the company repo's automations/ folder: the file (git) is the source, this row is
 // what runs. Rebuilt from git by syncAutomations; never edited on its own.
 export const automations = pgTable(
@@ -281,7 +358,7 @@ export const automations = pgTable(
     sha: text().notNull(),
     // whoever last saved the file: it runs as them, with their apps
     userId: uuid().references(() => users.id, { onDelete: "set null" }),
-    when: text({ enum: ["trigger", "schedule", "manual"] }).notNull(),
+    when: text({ enum: ["trigger", "schedule", "manual", "new client"] }).notNull(),
     // our trigger name, e.g. gmail.new_gmail_message
     trigger: text(),
     triggerConfig: jsonb(),
@@ -298,6 +375,16 @@ export const automations = pgTable(
     allowed: text().array().notNull().default([]),
     // which of the person's accounts of the trigger's app to watch (its label), when they have several
     account: text(),
+    // a schedule done for each client (the file's clients:): each run adds one task per client instead of a chat.
+    // ["*"]: every active client; else client slugs or names. null: not per client
+    clients: text().array(),
+    // those tasks are due this many days after the run
+    dueDays: integer(),
+    // start this process (company/processes/<name>.md) for each client (or the new one) instead of adding a task
+    process: text(),
+    // who does the task each run makes (the file's who:): handler, owner, a person, an agent; null: Emplio runs it in a chat
+    // (with clients or for each new client: whoever handles them)
+    who: text(),
     // what's wrong with the file (it doesn't run until fixed)
     error: text(),
     // the provider's id for the trigger it watches
@@ -404,7 +491,7 @@ export const automationRuns = pgTable(
     automationId: uuid().references(() => automations.id, { onDelete: "set null" }),
     // kept after the automation is removed
     name: text().notNull(),
-    reason: text({ enum: ["trigger", "schedule", "manual"] }).notNull(),
+    reason: text({ enum: ["trigger", "schedule", "manual", "new client"] }).notNull(),
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
     status: text({ enum: ["running", "done", "failed"] }).notNull().default("running"),
     error: text(),
@@ -505,9 +592,23 @@ export const activity = pgTable(
     kind: text().notNull(),
     summary: text().notNull(),
     detail: jsonb().$type<Record<string, unknown>>(),
+    // a change to a record (records.ts): which one, the client it belongs to (a contact's or project's too, so it
+    // shows on the client's history), each field from and to, and how it came: the app, Emplio, the move from files, or
+    // the server itself. Written in the same transaction as the change.
+    subjectKind: text({ enum: ["client", "contact", "project", "service", "meeting"] }),
+    subjectId: uuid(),
+    clientId: uuid(),
+    via: text({ enum: ["app", "emplio", "import", "system"] }),
+    changes: jsonb().$type<RecordChange[]>(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.workspaceId, t.createdAt), index().on(t.workspaceId, t.userId, t.createdAt), index().on(t.kind, t.createdAt)],
+  (t) => [
+    index().on(t.workspaceId, t.createdAt),
+    index().on(t.workspaceId, t.userId, t.createdAt),
+    index().on(t.kind, t.createdAt),
+    index().on(t.workspaceId, t.subjectKind, t.subjectId, t.createdAt),
+    index().on(t.workspaceId, t.clientId, t.createdAt),
+  ],
 );
 
 // A site's own requests that browser work has seen, per business (site-calls.ts): addresses and field names, never values.
@@ -563,8 +664,21 @@ export const tasks = pgTable(
     dueAt: timestamp({ withTimezone: true }),
     // the chat it came from
     conversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
+    // the client and project it's for, if any
+    // deferred: see the note above clients
+    clientId: uuid().references((): AnyPgColumn => clients.id),
+    projectId: uuid().references((): AnyPgColumn => projects.id),
+    // ponytail: dropped once every business reconciles (see conversations.legacyClient)
+    legacyClient: text("client"),
     // the AI's own: the chat it last worked on it in
     workConversationId: uuid().references(() => conversations.id, { onDelete: "set null" }),
+    // a repeating job's task: "<automation>/<client slug>/<period>", so a run never adds the same one twice
+    repeatKey: text(),
+    // a process's step (process_runs): which go of it, and which step
+    runId: uuid().references((): AnyPgColumn => processRuns.id, { onDelete: "cascade" }),
+    stepIndex: integer(),
+    // owners, admins, who does it and who asked (and, for a private client, its handlers) only
+    private: boolean().notNull().default(false),
     // reminders sent to the assignee, and when the asker was told it's late; reset when the due date moves
     chasedAt: timestamp({ withTimezone: true }),
     chases: integer().notNull().default(0),
@@ -573,7 +687,7 @@ export const tasks = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index().on(t.workspaceId, t.status, t.dueAt)],
+  (t) => [index().on(t.workspaceId, t.status, t.dueAt), index().on(t.clientId), index().on(t.projectId), uniqueIndex().on(t.workspaceId, t.repeatKey)],
 );
 
 // Saved passwords and keys (logins.ts): one person's, in one business. The value is encrypted (secrets.ts) and
@@ -637,3 +751,194 @@ export const mcpAuth = pgTable(
 
 // --- Usage and credit. Money is kept in micro-dollars (1 = $0.000001) so tiny AI calls add up exactly. ---
 
+
+// --- Records (records.ts): what a client-servicing firm runs on. Rows, never files: the server is the only writer, the
+// app and Emplio's commands call the same functions, every change is a history row (activity) in the same transaction.
+// Notes about one are files, company/<kind>/<slug>/index.md. A slug is set once and never changes (URLs, [[clients/x]]
+// links, --client x); renaming changes only the name. Nothing is deleted by an everyday command: archivedAt.
+
+// The business's own words for where a client is, each in one of three categories the app reasons with: prospect (not
+// won yet), active (being worked for: new-client automations run on entering it), past (no longer).
+export const clientStages = pgTable(
+  "client_stages",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text().notNull(),
+    category: text({ enum: ["prospect", "active", "past"] }).notNull(),
+    position: integer().notNull().default(0),
+  },
+  (t) => [uniqueIndex("client_stages_workspace_id_lower_name_index").on(t.workspaceId, sql`lower(${t.name})`)],
+);
+
+// Links to a client, project, service or stage are DEFERRABLE INITIALLY DEFERRED, set by hand in the records migration
+// (drizzle-kit can't write it): a regenerated link loses it and deleting a business breaks; records.test.ts catches that.
+export const clients = pgTable(
+  "clients",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text().notNull(),
+    name: text().notNull(),
+    stageId: uuid().notNull().references(() => clientStages.id),
+    // the business's client fields (clientFields), by key: values as text ("2026-12-01", "85000", "Monthly")
+    details: jsonb().$type<Record<string, string>>().notNull().default({}),
+    // the same client in other apps, for syncing later: { zoho: "123" }
+    // owners and admins only (private.ts): out of everyone else's lists and commands, notes in restricted/
+    private: boolean().notNull().default(false),
+    externalIds: jsonb().$type<Record<string, string>>().notNull().default({}),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug), index().using("gin", t.name.op("gin_trgm_ops")), index().on(t.stageId)],
+);
+
+// The business's own fields on a kind of record (a client's Tax number, a contact's Birthday, a project's PO number),
+// with their type (fields.ts); the values are in that record's details. A process input of the same name as a client
+// field is filled in from one, and a schedule can pick clients by one. ponytail: named for clients, holds every kind.
+export const clientFields = pgTable(
+  "client_fields",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text({ enum: ["client", "contact", "project", "service"] }).notNull().default("client"),
+    key: text().notNull(),
+    name: text().notNull(),
+    type: text({ enum: ["text", "number", "date", "choice"] }).notNull().default("text"),
+    options: text().array().notNull().default([]),
+    position: integer().notNull().default(0),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.kind, t.key)],
+);
+
+// Who on the team looks after a client
+export const clientHandlers = pgTable(
+  "client_handlers",
+  {
+    clientId: uuid().notNull().references(() => clients.id, { onDelete: "cascade" }),
+    userId: uuid().notNull().references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.clientId, t.userId] }), index().on(t.userId)],
+);
+
+// Someone the business deals with: at one or more clients (contactClients), or elsewhere (org: the auditor's firm)
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text().notNull(),
+    name: text().notNull(),
+    email: text(),
+    phone: text(),
+    title: text(),
+    org: text(),
+    // owners and admins only (private.ts): out of everyone else's lists and commands, notes in restricted/
+    private: boolean().notNull().default(false),
+    // the business's fields for this kind (clientFields), by key, as text
+    details: jsonb().$type<Record<string, string>>().notNull().default({}),
+    externalIds: jsonb().$type<Record<string, string>>().notNull().default({}),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug), index("contacts_workspace_id_lower_email_index").on(t.workspaceId, sql`lower(${t.email})`), index().using("gin", t.name.op("gin_trgm_ops"))],
+);
+
+// A contact at a client, and what they are there ("Director", "Approves designs"): a promoter on five group companies
+export const contactClients = pgTable(
+  "contact_clients",
+  {
+    contactId: uuid().notNull().references(() => contacts.id, { onDelete: "cascade" }),
+    clientId: uuid().notNull().references(() => clients.id),
+    role: text(),
+  },
+  (t) => [primaryKey({ columns: [t.contactId, t.clientId] }), index().on(t.clientId)],
+);
+
+export const MONEY_PERIODS = ["once", "monthly", "yearly", "hourly"] as const;
+
+// What the business sells, at what price, and the process a project of it runs
+export const services = pgTable(
+  "services",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text().notNull(),
+    name: text().notNull(),
+    amount: numeric({ precision: 14, scale: 2 }),
+    currency: text(),
+    period: text({ enum: MONEY_PERIODS }),
+    // what the number doesn't say: "+ GST", "80 hours a month"
+    priceNote: text(),
+    // a process's file name (company/processes/<name>.md)
+    process: text(),
+    // owners and admins only (private.ts): out of everyone else's lists and commands, notes in restricted/
+    private: boolean().notNull().default(false),
+    // the business's fields for this kind (clientFields), by key, as text
+    details: jsonb().$type<Record<string, string>>().notNull().default({}),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug)],
+);
+
+// One client buying one service: who leads it, when, for how much. A retainer has no due date.
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text().notNull(),
+    name: text().notNull(),
+    clientId: uuid().notNull().references(() => clients.id),
+    serviceId: uuid().references(() => services.id),
+    leadId: uuid().references(() => users.id, { onDelete: "set null" }),
+    status: text({ enum: ["active", "on_hold", "done", "cancelled"] }).notNull().default("active"),
+    startOn: date(),
+    dueOn: date(),
+    amount: numeric({ precision: 14, scale: 2 }),
+    currency: text(),
+    period: text({ enum: MONEY_PERIODS }),
+    feeNote: text(),
+    // owners and admins only (private.ts): out of everyone else's lists and commands, notes in restricted/
+    private: boolean().notNull().default(false),
+    // the business's fields for this kind (clientFields), by key, as text
+    details: jsonb().$type<Record<string, string>>().notNull().default({}),
+    externalIds: jsonb().$type<Record<string, string>>().notNull().default({}),
+    doneAt: timestamp({ withTimezone: true }),
+    archivedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug), index().on(t.clientId), index().on(t.serviceId), index().on(t.leadId)],
+);
+
+// Meetings (meetings.ts): when, about which client or project, and who was in it (teammates, contacts, anyone else
+// by name). Its notes are the file meetings/<slug>.md, in restricted/ while it's private (its own switch, or its
+// client's or project's), so who may read them comes from these rows, never from the note's text.
+// ponytail: "meeting_records", as the meeting-bot branch (employee0-meetings) has its own "meetings"; join them if it lands
+export const meetings = pgTable(
+  "meeting_records",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    workspaceId: uuid().notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    // 2026-11-28-northwind-kickoff: the notes' file name; set once
+    slug: text().notNull(),
+    title: text().notNull(),
+    on: date().notNull(),
+    clientId: uuid().references(() => clients.id, { onDelete: "set null" }),
+    projectId: uuid().references(() => projects.id, { onDelete: "set null" }),
+    teamIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    contactIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    // people in it who aren't on the team or a contact, by name
+    others: text().array().notNull().default(sql`'{}'::text[]`),
+    private: boolean().notNull().default(false),
+    createdById: uuid().references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.workspaceId, t.slug), index().on(t.clientId), index().on(t.projectId)],
+);

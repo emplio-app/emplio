@@ -2,26 +2,38 @@
 
 import type { KnowledgeFolder } from "@emplio/shared";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon, PencilIcon, SearchIcon } from "lucide-react";
+import { BriefcaseIcon, Building2Icon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, FolderIcon, FolderKanbanIcon, PencilIcon, SearchIcon, UserIcon, UsersIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { AskFloat, useAskOpen } from "@/components/chat/composer";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, useClients, useContacts, useProjects, useServices } from "@/lib/api";
+import { useTeam } from "@/components/clients/clients-page";
+import { thingHref } from "@/components/things/things";
 import { MemoryTabs } from "@/components/knowledge/memory-tabs";
 
 const KEY = ["knowledge"];
 type Open = { repo: string; path: string };
-const nameOf = (path: string) => path.split("/").pop()!.replace(/\.md$/, "");
+// a thing's page (clients/northwind/index.md) by its folder's name
+const nameOf = (path: string) => path.replace(/\/index\.md$/, "").split("/").pop()!.replace(/\.md$/, "");
 const dirOf = (path: string) => path.split("/").slice(0, -1).join("/");
 // where the AI employee finds the file on its computer
-const agentPath = (o: Open) => `${o.repo.startsWith("me-") ? "me" : o.repo}/${o.path}`;
+// [[clients/northwind]] is that folder's index.md; [[knowledge/pricing]] or [[clients/northwind/decisions]] a note
+const LINK = /\[\[([a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)+)\]\]/g;
+const linkFile = (p: string) => `${p}${p.split("/").length === 2 && p.split("/")[0]! in KIND_ICON ? "/index" : ""}.md`;
+const linkName = (p: string, titles?: { to: string; title: string | null }[]) =>
+  titles?.find((l) => l.to === p)?.title ?? (p.split("/")[0]! in KIND_ICON ? p.split("/").slice(1).join(" · ") : p.split("/").pop()!).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+// where Emplio has it: me/ for one's own; a team member's "Shared with me" (the owners' files) in their shared/
+const agentPath = (o: Open, shared = false) => `${o.repo.startsWith("me-") ? "me" : o.repo === "restricted" && shared ? "shared" : o.repo}/${o.path}`;
 
 // A note's header block (--- key: value --- at the top, as skills have) as fields, and the text after it.
-// ponytail: flat keys only; a nested or list value shows as its raw lines
+// ponytail: flat keys only; a list's "- item" lines become one item a line, a nested value shows as its raw lines
 export function splitNote(text: string) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!m) return { fields: [], body: text };
@@ -31,7 +43,8 @@ export function splitNote(text: string) {
     if (kv) fields.push([kv[1]!, kv[2]!]);
     else if (fields.length) fields[fields.length - 1]![1] += `\n${line.trim()}`;
   }
-  const clean = (v: string) => v.trim().replace(/^[>|]-?\s*/, "").replace(/^(["'])([\s\S]*)\1$/, "$2").trim();
+  const unquote = (v: string) => v.trim().replace(/^(["'])([\s\S]*)\1$/, "$2").trim();
+  const clean = (v: string) => (/^\s*\n?- /.test(v) ? v.trim().split("\n").map((l) => unquote(l.replace(/^- /, ""))).join("\n") : unquote(v.trim().replace(/^[>|]-?\s*/, "")));
   return { fields: fields.map(([k, v]) => [k, clean(v)] as [string, string]), body: text.slice(m[0].length) };
 }
 
@@ -49,10 +62,13 @@ export function KnowledgePage() {
   });
   // /knowledge?file=company/x.md (an @mentioned note clicked in a chat): open it
   const asked = useSearchParams().get("file");
+  const shared = !!folders.data?.some((f) => f.label === "Shared with me");
   useEffect(() => {
-    const f = asked && folders.data?.find((f) => asked.startsWith(`${agentPath({ repo: f.repo, path: "" })}`));
-    if (f) setOpen({ repo: f.repo, path: asked.slice(agentPath({ repo: f.repo, path: "" }).length) });
-  }, [asked, folders.data]);
+    const f = asked && folders.data?.find((f) => asked.startsWith(`${agentPath({ repo: f.repo, path: "" }, shared)}`));
+    if (f) setOpen({ repo: f.repo, path: asked.slice(agentPath({ repo: f.repo, path: "" }, shared).length) });
+    // a private client's notes, for a team member who handles them, as an owner's chat names them
+    else if (asked?.startsWith("restricted/") && folders.data) setOpen({ repo: "restricted", path: asked.slice("restricted/".length) });
+  }, [asked, folders.data, shared]);
   const [q, setQ] = useState("");
   const words = useDeferredValue(q.trim());
   const found = useQuery({
@@ -67,9 +83,19 @@ export function KnowledgePage() {
   const hits = [...named, ...(found.data ?? []).filter((h) => !named.some((n) => n.repo === h.repo && n.path === h.path))];
   const folder = folders.data?.find((f) => f.repo === open?.repo);
   const note = file.data && splitNote(file.data.text);
+  // a client's, contact's, project's… page (<kind>/<name>/index.md): its [[folder/name]] links get their titles
+  const thing = open?.repo === "company" && /^(clients|contacts|team|services|projects)\/[^/]+\/index\.md$/.test(open.path) ? open.path.slice(0, -"/index.md".length) : "";
+  const backlinks = useQuery({ queryKey: [...KEY, "links", open?.repo, open?.path], queryFn: () => api<string[]>(`/knowledge/links?${new URLSearchParams(open!)}`), enabled: !!open?.path.endsWith(".md") });
+  // a client, contact, teammate, service or project lives in the company's files; any other link, in the note's own folder
+  const linkTo = (p: string) => `/knowledge?file=${encodeURIComponent(agentPath({ repo: p.split("/")[0]! in KIND_ICON ? "company" : open!.repo, path: linkFile(p) }, shared))}`;
+  // the tree names a thing's folder by its title (Northwind Traders), not its index.md
+  const thingTitles = useRecordTitles();
+  const titles = [...thingTitles].map(([to, title]) => ({ to, title }));
+  useAskOpen(open && { kind: "note", title: (thing && thingTitles.get(thing)) || nameOf(open.path), ref: agentPath(open, shared) });
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <AskFloat className="md:left-64" />
       {/* the tabs stay put when a note opens; on a phone a note is its own screen, with the back arrow to return */}
       <header className={`flex h-14 shrink-0 items-center gap-2 border-b px-3 ${open ? "max-md:hidden" : ""}`}>
         <SidebarTrigger />
@@ -93,7 +119,7 @@ export function KnowledgePage() {
                   type="button"
                   onClick={() => setOpen({ repo: h.repo, path: h.path })}
                   aria-current={open?.repo === h.repo && open.path === h.path}
-                  className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-accent/60 aria-[current=true]:bg-accent"
+                  className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-muted aria-[current=true]:bg-accent"
                 >
                   <span className="flex items-center gap-2 text-sm">
                     <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -110,7 +136,7 @@ export function KnowledgePage() {
             <section key={f.repo} className="mb-4">
               <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">{f.label}</div>
               {f.files.length ? (
-                <Tree paths={f.files} dir="" depth={0} open={open?.repo === f.repo ? open.path : null} onOpen={(path) => setOpen({ repo: f.repo, path })} />
+                <Tree paths={f.files} dir="" depth={0} open={open?.repo === f.repo ? open.path : null} onOpen={(path) => setOpen({ repo: f.repo, path })} titles={f.repo === "company" ? thingTitles : undefined} />
               ) : (
                 <p className="px-2 text-xs text-muted-foreground">No notes yet.</p>
               )}
@@ -121,20 +147,25 @@ export function KnowledgePage() {
         <main className={`under-tabs min-w-0 flex-1 overflow-y-auto ${open ? "" : "hidden md:block"}`}>
           {open && (
             <div className="material sticky top-0 z-10 flex h-14 items-center gap-2 border-b px-3 md:h-11">
-              <Button size="icon" variant="ghost" className="size-8 md:hidden" aria-label="All notes" onClick={() => setOpen(null)}>
+              <Button size="icon" variant="ghost" className="md:hidden" aria-label="All notes" onClick={() => setOpen(null)}>
                 <ChevronLeftIcon />
               </Button>
               <h2 className="min-w-0 truncate font-sans text-sm font-medium tracking-normal md:px-1">
                 <span className="hidden text-muted-foreground md:inline">
-                  {folder?.label} / {dirOf(open.path) && `${dirOf(open.path)} / `}
+                  {folder?.label} / {dirOf(open.path.replace(/\/index\.md$/, "")) && `${dirOf(open.path.replace(/\/index\.md$/, ""))} / `}
                 </span>
-                {nameOf(open.path)}
+                {(thing && thingTitles.get(thing)) || nameOf(open.path)}
               </h2>
+              {thing && thingHref(thing) && (
+                <Button size="sm" variant="outline" className="ml-auto shrink-0 gap-1.5" nativeButton={false} render={<Link href={thingHref(thing)!} />}>
+                  Open {thingTitles.get(thing) ?? "page"}
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
-                className="ml-auto shrink-0 gap-1.5"
-                onClick={() => router.push(`/chat?file=${encodeURIComponent(agentPath(open))}`)}
+                className={`${thing && thingHref(thing) ? "" : "ml-auto "}shrink-0 gap-1.5`}
+                onClick={() => router.push(`/chat?file=${encodeURIComponent(agentPath(open, shared))}`)}
               >
                 <PencilIcon className="size-3.5" /> Suggest a change
               </Button>
@@ -152,17 +183,32 @@ export function KnowledgePage() {
           ) : (
             <article className="mx-auto max-w-3xl px-6 py-6">
               {!!note!.fields.length && (
-                <dl className="mb-6 grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-2 rounded-lg border bg-muted/40 p-4 text-sm">
+                <dl className="mb-6 grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-2 rounded-lg border bg-muted p-4 text-sm">
                   {note!.fields.map(([k, v]) => (
                     <div key={k} className="contents">
                       <dt className="text-muted-foreground">{k}</dt>
-                      <dd className="whitespace-pre-line">{v}</dd>
+                      <dd className="whitespace-pre-line">
+                        <Linked text={v} prefix="" titles={titles} hrefOf={linkTo} />
+                      </dd>
                     </div>
                   ))}
                 </dl>
               )}
               {/* a tool, script or list: shown as the code it is */}
-              <MessageResponse>{open.path.endsWith(".md") ? note!.body : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              <MessageResponse>{open.path.endsWith(".md") ? note!.body.replace(LINK, (_, p: string) => `[${linkName(p, titles)}](${linkTo(p)})`) : "````" + open.path.split(".").pop() + "\n" + file.data!.text.slice(0, 100_000) + (file.data!.text.length > 100_000 ? "\n… (the rest is too long to show here)" : "") + "\n````"}</MessageResponse>
+              {!!backlinks.data?.length && (
+                <div className="mt-8 border-t pt-4 text-sm">
+                  <p className="mb-2 text-muted-foreground">Linked from</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {backlinks.data.map((p) => (
+                      <Badge key={p} variant="secondary" render={<button type="button" onClick={() => setOpen({ repo: open.repo, path: p })} />}>
+                        <FileTextIcon data-icon="inline-start" />
+                        {(p.endsWith("/index.md") && thingTitles.get(p.slice(0, -"/index.md".length))) || nameOf(p)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
             </article>
           )}
         </main>
@@ -171,42 +217,83 @@ export function KnowledgePage() {
   );
 }
 
-// One folder's notes and, nested under it, its subfolders (closed until clicked).
-function Tree({ paths, dir, depth, open, onOpen }: { paths: string[]; dir: string; depth: number; open: string | null; onOpen: (path: string) => void }) {
+const KIND_ICON: Record<string, typeof UserIcon> = { clients: Building2Icon, contacts: UserIcon, team: UsersIcon, services: BriefcaseIcon, projects: FolderKanbanIcon };
+// A field's [[folder/name]] links as chips that open that thing's index.md ([[folder/name/note]]: that note); other
+// text as it is.
+// hrefOf: where a link goes instead (a client's chip to the Clients page)
+// "clients/northwind" → "Northwind Traders", for every record and teammate: the tree's folder names and [[links]]
+function useRecordTitles() {
+  const lists = [useClients().data, useContacts().data, useProjects({ all: true }).data, useServices().data] as const;
+  const team = useTeam().data ?? [];
+  const kinds = ["clients", "contacts", "projects", "services"] as const;
+  return new Map<string, string>([
+    ...kinds.flatMap((k, i) => (lists[i] ?? []).map((r) => [`${k}/${r.slug}`, r.name] as [string, string])),
+    ...team.flatMap((m) => (m.slug ? [[`team/${m.slug}`, m.name ?? m.email] as [string, string]] : [])),
+  ]);
+}
+
+export function Linked({ text, prefix, titles, hrefOf }: { text: string; prefix: string; titles?: { to: string; title: string | null }[]; hrefOf?: (to: string) => string | null }) {
+  const parts = text.split(LINK);
+  if (parts.length === 1) return text;
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      {parts.map((p, i) => {
+        if (i % 2 === 0) return p.replace(/^[\s,"]+|[\s,"]+$/g, "") ? <span key={i}>{p}</span> : null;
+        const Icon = KIND_ICON[p.split("/")[0]!] ?? FileTextIcon;
+        const name = linkName(p, titles);
+        return (
+          <Badge key={i} variant="secondary" render={<Link href={hrefOf?.(p) ?? `/knowledge?file=${encodeURIComponent(prefix + linkFile(p))}`} />}>
+            <Icon data-icon="inline-start" />
+            {name}
+          </Badge>
+        );
+      })}
+    </span>
+  );
+}
+
+// One folder's notes and, nested under it, its subfolders (closed until clicked). A thing's folder (one with an
+// index.md) goes by its title: one row when that's all it holds, else its page first inside it.
+function Tree({ paths, dir, depth, open, onOpen, titles }: { paths: string[]; dir: string; depth: number; open: string | null; onOpen: (path: string) => void; titles?: Map<string, string> }) {
   const inside = (p: string) => !dir || p.startsWith(`${dir}/`);
   const rest = (p: string) => (dir ? p.slice(dir.length + 1) : p);
-  const mine = paths.filter((p) => inside(p) && !rest(p).includes("/"));
+  const isPage = (p: string) => p.endsWith("/index.md") && paths.includes(p);
+  const mine = paths.filter((p) => inside(p) && !rest(p).includes("/")).sort((a, b) => Number(isPage(b)) - Number(isPage(a)));
   const subs = [...new Set(paths.filter((p) => inside(p) && rest(p).includes("/")).map((p) => rest(p).split("/")[0]!))].sort();
   const pad = { paddingLeft: `${0.5 + depth * 1}rem` };
+  const title = (folder: string) => titles?.get(folder) ?? folder.split("/").pop()!.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  const row = (p: string, label: string, extra = 0) => (
+    <Button
+      key={p}
+      variant="ghost"
+      onClick={() => onOpen(p)}
+      aria-current={open === p}
+      style={{ paddingLeft: `${0.5 + depth * 1 + extra}rem` }}
+      className={`h-auto w-full justify-start gap-2 py-1.5 pr-2 text-left font-normal whitespace-normal ${open === p ? "bg-accent font-medium" : ""}`}
+    >
+      <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate">{label}</span>
+    </Button>
+  );
   return (
     <>
       {subs.map((name) => {
         const sub = dir ? `${dir}/${name}` : name;
+        // just its page: one row, by its title
+        if (paths.filter((p) => p.startsWith(`${sub}/`)).every((p) => p === `${sub}/index.md`)) return row(`${sub}/index.md`, title(sub), depth ? 1.25 : 0);
         return (
           <details key={sub} open={!!open?.startsWith(`${sub}/`) || undefined}>
-            <summary style={pad} className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1.5 pr-2 text-sm hover:bg-accent/60 [&::-webkit-details-marker]:hidden">
+            <summary style={pad} className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1.5 pr-2 text-sm hover:bg-muted [&::-webkit-details-marker]:hidden">
               {/* its own folder's open state only: group-open would also turn every arrow nested inside an open folder */}
               <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform [details[open]>summary>&]:rotate-90" />
               <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{name}</span>
             </summary>
-            <Tree paths={paths} dir={sub} depth={depth + 1} open={open} onOpen={onOpen} />
+            <Tree paths={paths} dir={sub} depth={depth + 1} open={open} onOpen={onOpen} titles={titles} />
           </details>
         );
       })}
-      {mine.map((p) => (
-        <button
-          key={p}
-          type="button"
-          onClick={() => onOpen(p)}
-          aria-current={open === p}
-          style={{ paddingLeft: `${0.5 + depth * 1 + (depth ? 1.25 : 0)}rem` }}
-          className={`flex w-full items-center gap-2 rounded-md py-1.5 pr-2 text-left text-sm ${open === p ? "bg-accent font-medium" : "hover:bg-accent/60"}`}
-        >
-          <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{nameOf(p)}</span>
-        </button>
-      ))}
+      {mine.map((p) => row(p, isPage(p) && dir ? title(dir) : nameOf(p), depth ? 1.25 : 0))}
     </>
   );
 }

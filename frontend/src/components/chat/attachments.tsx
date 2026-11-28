@@ -38,6 +38,8 @@ const kindOf = (name: string | undefined, mediaType: string) =>
 // Kept in this tab, not the address: a link from anywhere could otherwise send a message as whoever opens it.
 export const SAY_TEXT = "emplio-say-text";
 export const SAY_FILES = "emplio-say-files";
+// with them: its @mentions, / command and where it was sent from (composer.tsx PageAsk)
+export const SAY_META = "emplio-say-meta";
 
 export const fileHref = (url: string) => (url.startsWith("/") ? `${API_URL}${url}` : url);
 // A picture to show at about this many CSS pixels wide: the server sends one shrunk to fit a sharp screen (backend

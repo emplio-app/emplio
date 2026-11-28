@@ -2,6 +2,28 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.21 (2026-11-28)
+
+### What's new
+
+- Clients: keep a list of who the business works for, with their stage, who on the team looks after each one, and short details like a tax number. Each client has a panel with their people, projects, meetings, notes and open work.
+- Processes: write down work done the same steps every time (onboarding, a yearly filing, a monthly report) once, and start it for a client. Each step becomes a task for the right person when the one before is done, with due dates, and the Processes page shows where every client stands.
+- Projects, Contacts, Services and Meetings: each has its own page. Tell Emplio about a call and it keeps the meeting with its notes, adds new people and work, and ticks off the step it belonged to.
+- A Today page, a shorter sidebar (the rest is under More), and Emplio's message box at the foot of every page.
+- Private clients: owners and admins can keep a client, with its projects, meetings, tasks and notes, to themselves and whoever handles it.
+- Search on every list page, and notes link to the clients, people and projects they're about.
+- Photos sent from a computer reach WhatsApp as photos, not files.
+- Emplio's instructions are about 13% shorter, so each reply costs a little less.
+
+### For developers
+
+- Records (`records.ts`, `contacts.ts`, `projects.ts`, `services.ts`, `meetings.ts`, `fields.ts`, `private.ts`): clients, contacts, projects, services and meetings in the database with fields, history, archive and privacy; notes files hold only words, linked with `[[folder/slug]]`. 13 new migrations (clients through meetings).
+- Processes (`processes.ts`): files in `company/processes/`, runs in `process_runs`, each step a task; inputs per run (`emplio processes set`), OK steps sent back, started by hand, for each new client or on a schedule.
+- Jobs keep their checklist current (one step doing, ticked as each finishes); scripts run from tmp are kept as tools.
+- `attachFiles`: a file's type comes from its extension in any case (IMG_1234.JPG is image/jpeg).
+- Prompt: records and notes merged into one section, manager rules tightened; meetings converted to Python calls in code mode.
+- Evals: client-records, client-work and process-steps at 90%+ on Haiku; `EVAL_CASES` reruns named cases.
+
 ## 1.4.20 (2026-11-28)
 
 ### What's new

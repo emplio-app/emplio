@@ -10,6 +10,7 @@ import type {
 } from "@emplio/shared";
 import {
   BotIcon,
+  Building2Icon,
   CalendarIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -22,11 +23,18 @@ import {
   Trash2Icon,
   UserIcon,
   XIcon,
+  ChevronLeftIcon,
+  Undo2Icon,
+  WorkflowIcon,
+  ArrowUpRightIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { AskFloat, PageAsk } from "@/components/chat/composer";
+import { Fragment, useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Combobox,
   ComboboxCollection,
@@ -68,7 +76,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { useConfirm } from "@/components/confirm";
 import { Textarea } from "@/components/ui/textarea";
-import { api, tasksQueryKey, useMe, useTasks } from "@/lib/api";
+import { ClientPicker } from "@/components/clients/client-picker";
+import { PrivateSwitch } from "@/components/clients/clients-page";
+import { api, processRunsQueryKey, tasksQueryKey, useClients, useMe, useProjects, useTasks } from "@/lib/api";
+import { inputText } from "@/lib/process-inputs";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Repeating } from "@/components/tasks/repeating";
@@ -107,6 +118,7 @@ const matches = (t: Task, words: string[]) => {
     t.title,
     t.notes,
     t.waitingOn,
+    t.clientName,
     t.assigneeId ? t.assigneeName : (t.agentName ?? "Emplio"),
     t.requesterName,
   ]
@@ -194,28 +206,25 @@ function Due({ t }: { t: Task }) {
 function StatusPill({ status }: { status: TaskStatus }) {
   if (status === "todo") return null;
   return (
-    <span
+    <Badge
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-medium",
-        status === "doing" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-        status === "waiting" &&
-          "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+        status === "doing" && "bg-info/10 text-info",
+        status === "waiting" && "bg-warning/10 text-warning",
         (status === "done" || status === "cancelled") &&
           "bg-muted text-muted-foreground",
       )}
     >
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }
 
 // Everything to be done in the business, by people and by Emplio, read top to bottom like a morning check:
 // what needs you, what Emplio is on, what's coming up (and what repeats), and what got done this week.
 // Opening one shows all of it, editable. Emplio adds and updates them from chats too.
-export function TasksPage() {
-  const { data: me } = useMe();
+// What changing a task needs, shared by the Work page and the task panel opened elsewhere (the Clients page).
+function useTaskActions(onRemoved?: () => void) {
   const queryClient = useQueryClient();
-  const tasks = useTasks();
   const team = useQuery({
     queryKey: ["team"],
     queryFn: () => api<TeamMember[]>("/team"),
@@ -224,18 +233,17 @@ export function TasksPage() {
     queryKey: ["agents"],
     queryFn: () => api<AgentInfo[]>("/agents"),
   });
-  const [show, setShow] = useState("all");
-  const [query, setQuery] = useState("");
-  const [showDone, setShowDone] = useState(false);
-  // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
-  const [openId, setOpenId] = useState<string | null>(
-    useSearchParams().get("task"),
-  );
-  const [confirmDialog, confirm] = useConfirm();
-
+  const clients = useClients();
   const update = useMutation({
+    // one at a time, each carrying the updatedAt the last one came back with: refused only when someone else changed it
+    scope: { id: "task-edit" },
     mutationFn: ({ id, ...body }: TaskInput & { id: string }) =>
-      api<Task>(`/tasks/${id}`, body, "PATCH"),
+      api<Task>(
+        `/tasks/${id}`,
+        { ...body, updatedAt: queryClient.getQueryData<Task[]>(tasksQueryKey)?.find((t) => t.id === id)?.updatedAt },
+        "PATCH",
+      ),
+    onSuccess: (t) => queryClient.setQueryData<Task[]>(tasksQueryKey, (old) => old?.map((x) => (x.id === t.id ? t : x))),
     // show it straight away; the server's answer replaces it
     onMutate: ({ id, ...body }) =>
       queryClient.setQueryData<Task[]>(tasksQueryKey, (old) =>
@@ -249,6 +257,11 @@ export function TasksPage() {
                     body.dueAt &&
                     new Date(`${body.dueAt}T18:00:00+05:30`).toISOString(),
                 }),
+                ...(body.client !== undefined && {
+                  clientName:
+                    clients.data?.find((c) => c.slug === body.client)?.name ??
+                    null,
+                }),
                 ...(body.agent !== undefined && {
                   agentName:
                     agents.data?.find((a) => a.slug === body.agent)?.name ??
@@ -258,16 +271,25 @@ export function TasksPage() {
             : t,
         ),
       ),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      // a step done moves its process on
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+    },
   });
   const start = useMutation({
     mutationFn: (id: string) => api<Task>(`/tasks/${id}/start`, {}),
+    // the started task, as it now is, so the panel says so at once; you hear here and in a message when it's done
+    onSuccess: (t) => {
+      queryClient.setQueryData<Task[]>(tasksQueryKey, (old) => old?.map((x) => (x.id === t.id ? t : x)));
+      toast.success("Emplio started on it", { description: "You'll get a message when it's done or needs you." });
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: tasksQueryKey }),
   });
   const remove = useMutation({
     mutationFn: (id: string) => api(`/tasks/${id}`, undefined, "DELETE"),
     onMutate: (id) => {
-      setOpenId(null);
+      onRemoved?.();
       queryClient.setQueryData<Task[]>(tasksQueryKey, (old) =>
         old?.filter((t) => t.id !== id),
       );
@@ -286,6 +308,31 @@ export function TasksPage() {
       label: m.name ?? m.email,
     })),
   ];
+  return { update, start, remove, people, clients };
+}
+
+export function TasksPage() {
+  const { data: me } = useMe();
+  const tasks = useTasks();
+  const { update, people, clients } = useTaskActions();
+  const [show, setShow] = useState("all");
+  // /tasks?client=<slug> (from the Clients page): that client's
+  const params = useSearchParams();
+  const askedClient = params.get("client");
+  const [client, setClient] = useState(askedClient ?? "all");
+  useEffect(() => setClient(askedClient ?? "all"), [askedClient]);
+  const clientItems = [
+    { value: "all", label: "All clients" },
+    ...(clients.data ?? []).filter((c) => c.stageCategory !== "past" || c.slug === client).map((c) => ({ value: c.slug, label: c.name })),
+  ];
+  const [query, setQuery] = useState("");
+  const [showDone, setShowDone] = useState(false);
+  // /tasks?task=<id> (an @mentioned task clicked in a chat): open it
+  const askedTask = params.get("task");
+  const [openId, setOpenId] = useState<string | null>(askedTask);
+  useEffect(() => void (askedTask && setOpenId(askedTask)), [askedTask]);
+  const [confirmDialog, confirm] = useConfirm();
+
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const all = (tasks.data ?? [])
     .filter((t) =>
@@ -295,6 +342,7 @@ export function TasksPage() {
           ? !t.assigneeId
           : true,
     )
+    .filter((t) => client === "all" || t.client === client)
     .filter((t) => matches(t, words))
     .sort(byDue);
   const openTasks = all.filter(isOpen);
@@ -345,7 +393,7 @@ export function TasksPage() {
   const row = (t: Task) => (
     <li
       key={t.id}
-      className="group flex items-start gap-3 px-2 py-2.5 hover:bg-muted/50 sm:rounded-lg"
+      className="group flex items-start gap-3 px-2 py-2.5 hover:bg-muted sm:rounded-lg"
     >
       <button
         type="button"
@@ -390,6 +438,13 @@ export function TasksPage() {
           </span>
         )}
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {t.clientName && client === "all" && (
+            <Badge variant="secondary" className="max-w-48">
+              <Building2Icon className="text-muted-foreground" />
+              <span className="min-w-0 truncate">{t.clientName}</span>
+            </Badge>
+          )}
+          {t.project && <span className="max-w-48 truncate text-xs text-muted-foreground">{t.project.name}</span>}
           <Person t={t} />
           <Due t={t} />
           {t.requesterName && t.requesterId !== t.assigneeId && (
@@ -419,7 +474,8 @@ export function TasksPage() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <AskFloat />
       <header
         className="flex h-14 shrink-0 items-center gap-2 border-b px-3"
         data-tip="work-page"
@@ -430,6 +486,17 @@ export function TasksPage() {
           Work
         </h1>
         <div className="ml-auto flex items-center gap-2">
+          {clientItems.length > 1 && (
+            <ClientPicker
+              items={clientItems}
+              value={client}
+              onChange={setClient}
+              size="sm"
+              icon
+              label="Which client"
+              className={cn("w-32 sm:w-44", client !== "all" && "border-primary/40 bg-primary/5")}
+            />
+          )}
           <Select
             items={SHOW}
             value={show}
@@ -453,12 +520,12 @@ export function TasksPage() {
         </div>
       </header>
 
-      <div className="under-tabs min-h-0 flex-1 overflow-y-auto">
+      <div className="under-tabs flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-4 px-4 py-4 sm:gap-6 sm:py-6">
-          <QuickAdd people={people} />
+          <QuickAdd people={people} clientId={client === "all" ? null : client} />
 
           <div className="flex shrink-0 items-center gap-2">
-            <InputGroup className="h-8 flex-1">
+            <InputGroup className="flex-1">
               <InputGroupAddon>
                 <SearchIcon />
               </InputGroupAddon>
@@ -502,7 +569,7 @@ export function TasksPage() {
                       className={cn(
                         "px-2 font-sans text-xs font-medium tracking-normal text-muted-foreground",
                         g.label === "Needs you" &&
-                          "text-amber-700 dark:text-amber-300",
+                          "text-warning",
                       )}
                     >
                       {g.label}{" "}
@@ -533,10 +600,11 @@ export function TasksPage() {
               )}
               {!!finished.length && (
                 <section className="grid gap-1">
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={() => setShowDone(!showDone)}
-                    className="flex items-center gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    className="justify-self-start text-muted-foreground"
                   >
                     <ChevronRightIcon
                       className={cn(
@@ -546,7 +614,7 @@ export function TasksPage() {
                     />
                     {words.length ? "Done" : "Done this week"}{" "}
                     <span className="font-normal">{finished.length}</span>
-                  </button>
+                  </Button>
                   {showDone && (
                     <ul className="divide-y sm:divide-y-0">
                       {finished.slice(0, 50).map(row)}
@@ -559,43 +627,120 @@ export function TasksPage() {
         </div>
       </div>
 
-      <Sheet open={!!current} onOpenChange={(o) => !o && setOpenId(null)}>
-        <SheetContent className="w-full gap-0 sm:max-w-md">
-          {current && (
-            <TaskDetails
-              key={current.id}
-              t={current}
-              people={people}
-              onChange={(body) => update.mutate({ id: current.id, ...body })}
-              onRemove={() =>
-                confirm({
-                  title: "Delete this task?",
-                  description: (
-                    <>
-                      &ldquo;{current.title}&rdquo; will be deleted for
-                      everyone. To keep a record, mark it cancelled instead.
-                    </>
-                  ),
-                  onConfirm: () => remove.mutate(current.id),
-                })
-              }
-              onStart={() => start.mutate(current.id)}
-              starting={start.isPending}
-              error={
-                update.error?.message ??
-                start.error?.message ??
-                remove.error?.message
-              }
-            />
-          )}
-        </SheetContent>
-      </Sheet>
+      <TaskSheet id={openId} onClose={() => setOpenId(null)} />
       {confirmDialog}
     </div>
   );
 }
 
+// One task's panel, by id (null: closed): on the Work page and wherever a task is clicked.
+export function TaskSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const tasks = useTasks();
+  const open = !!tasks.data?.some((t) => t.id === id);
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full gap-0 sm:max-w-md">{id && <TaskPanel id={id} onRemoved={onClose} />}</SheetContent>
+    </Sheet>
+  );
+}
+
+// What's inside a task's panel, for a sheet of its own or another panel that shows it in place (a client's), with a
+// way back to that one.
+export function TaskPanel({ id, onRemoved, back }: { id: string; onRemoved: () => void; back?: { label: string; onClick: () => void } }) {
+  const tasks = useTasks();
+  const { update, start, remove, people, clients } = useTaskActions(onRemoved);
+  const [confirmDialog, confirm] = useConfirm();
+  const queryClient = useQueryClient();
+  // sent back, this task is cancelled and the earlier step's new one takes over
+  const sendBack = useMutation({
+    mutationFn: ({ runId, note }: { runId: string; note: string }) => api(`/process-runs/${runId}/back`, { note }),
+    // this task is cancelled now: the panel closes, the earlier step's new task is in the list
+    onSuccess: () => {
+      toast.success("Sent back");
+      onRemoved();
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      void queryClient.invalidateQueries({ queryKey: processRunsQueryKey });
+    },
+  });
+  const current = tasks.data?.find((t) => t.id === id) ?? null;
+  return (
+    <>
+      {back && (
+        <div className="border-b px-2 py-1.5 pr-12">
+          <Button variant="ghost" size="sm" onClick={back.onClick} className="max-w-full gap-1 text-muted-foreground">
+            <ChevronLeftIcon />
+            <span className="truncate">{back.label}</span>
+          </Button>
+        </div>
+      )}
+      {current && (
+        <TaskDetails
+          key={current.id}
+          t={current}
+          people={people}
+          clients={(clients.data ?? []).map((c) => ({ value: c.slug, label: c.name }))}
+          onChange={(body) => {
+            update.mutate({ id: current.id, ...body });
+            // done: nothing left to do here, so the panel closes
+            if (body.status === "done") onRemoved();
+          }}
+          onRemove={() =>
+            confirm({
+              title: "Delete this task?",
+              description: (
+                <>
+                  &ldquo;{current.title}&rdquo; will be deleted for everyone. To keep a record, mark it cancelled instead.
+                </>
+              ),
+              onConfirm: () => remove.mutate(current.id),
+            })
+          }
+          onStart={() => start.mutate(current.id)}
+          starting={start.isPending}
+          error={update.error?.message ?? start.error?.message ?? remove.error?.message ?? sendBack.error?.message}
+          onSendBack={(note) => sendBack.mutate({ runId: current.process!.runId, note })}
+        />
+      )}
+      {current && <PageAsk sheet open={{ kind: "task", title: current.title, ref: current.id }} />}
+      {confirmDialog}
+    </>
+  );
+}
+
 type People = { value: string; label: string }[];
+
+// An OK step that isn't OK: back to the step the process names, with what to fix.
+function SendBack({ to, onSend }: { to: string; onSend: (note: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button variant="outline" size="sm" className="min-w-0 max-w-full justify-self-start" title={`Send back to “${to}”`} />}>
+        <Undo2Icon />
+        <span className="truncate">Send back to &ldquo;{to}&rdquo;</span>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80">
+        <form
+          className="grid gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSend(note.trim());
+            setOpen(false);
+            setNote("");
+          }}
+        >
+          <Label htmlFor="send-back-note">What needs fixing?</Label>
+          <Textarea id="send-back-note" autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Use the new registered address" className="min-h-20" />
+          <Button type="submit" size="sm">
+            Send back
+          </Button>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // Emplio first, then its agents, then the team, each under its own heading; a search box on top, as a business can
 // have dozens of agents (the plain list ran off the screen)
@@ -674,7 +819,7 @@ function WhoSelect({
 }
 
 // The add box: type what's to be done, Enter. Who and when are optional (default: the AI, no date).
-function QuickAdd({ people }: { people: People }) {
+function QuickAdd({ people, clientId }: { people: People; clientId: string | null }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [who, setWho] = useState(AI);
@@ -697,7 +842,7 @@ function QuickAdd({ people }: { people: People }) {
       onSubmit={(e) => {
         e.preventDefault();
         if (title.trim())
-          add.mutate({ title, ...pick(who), dueAt: due || null });
+          add.mutate({ title, ...pick(who), dueAt: due || null, client: clientId });
       }}
     >
       <div className="flex items-center gap-2 px-1">
@@ -715,14 +860,14 @@ function QuickAdd({ people }: { people: People }) {
           people={people}
           value={who}
           onChange={setWho}
-          className="h-8 min-w-0 flex-1 sm:w-44 sm:flex-none"
+          className="min-w-0 flex-1 sm:w-44 sm:flex-none"
         />
         <Input
           type="date"
           aria-label="Due"
           value={due}
           onChange={(e) => setDue(e.target.value)}
-          className="h-8 min-w-0 flex-1 sm:w-40 sm:flex-none"
+          className="min-w-0 flex-1 sm:w-40 sm:flex-none"
         />
         {/* on a phone a row of its own, so the person and the date each get half the width (the date was cut off) */}
         <Button
@@ -742,22 +887,50 @@ function QuickAdd({ people }: { people: People }) {
 }
 
 // One task, every field editable; text fields save when you leave them.
+// the client's project this task is part of (its open ones, and the one it's on)
+function ProjectSelect({ t, onChange }: { t: Task; onChange: (body: TaskInput) => void }) {
+  const projects = useProjects({ client: t.client! }).data ?? [];
+  const items = [{ value: "none", label: "No project" }, ...projects.map((p) => ({ value: p.slug, label: p.name })), ...(t.project && !projects.some((p) => p.slug === t.project!.slug) ? [{ value: t.project.slug, label: t.project.name }] : [])];
+  if (items.length < 2) return null;
+  return (
+    <>
+      <Label className="text-muted-foreground">Project</Label>
+      <Select items={items} value={t.project?.slug ?? "none"} onValueChange={(v) => v && onChange({ project: v === "none" ? null : (v as string) })}>
+        <SelectTrigger aria-label="Project" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((i) => (
+            <SelectItem key={i.value} value={i.value}>
+              {i.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </>
+  );
+}
+
 function TaskDetails({
   t,
   people,
+  clients,
   onChange,
   onRemove,
   onStart,
   starting,
   error,
+  onSendBack,
 }: {
   t: Task;
   people: People;
+  clients: People;
   onChange: (body: TaskInput) => void;
   onRemove: () => void;
   onStart: () => void;
   starting: boolean;
   error?: string;
+  onSendBack?: (note: string) => void;
 }) {
   const [title, setTitle] = useState(t.title);
   const [notes, setNotes] = useState(t.notes ?? "");
@@ -792,10 +965,43 @@ function TaskDetails({
       </SheetHeader>
 
       <div className="grid flex-1 content-start gap-4 overflow-y-auto p-4">
-        {!t.assigneeId && t.running && (
+        {/* from the moment Start is pressed: what it's doing and where to watch (its own chat, once it has one) */}
+        {!t.assigneeId && (t.running || t.status === "doing") && (
           <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
-            <Spinner className="size-4" />
-            Emplio is working on this now.
+            <Spinner className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1">{t.workConversationId ? "Emplio is working on this now." : "Emplio is starting on this…"}</span>
+            {t.workConversationId && (
+              <Button variant="ghost" size="xs" className="shrink-0 text-primary hover:text-primary" nativeButton={false} render={<Link href={`/chat/${t.workConversationId}`} />}>
+                Watch
+                <ArrowUpRightIcon />
+              </Button>
+            )}
+          </div>
+        )}
+        {t.process && (
+          <div className="grid gap-2 rounded-lg border bg-card px-3 py-2.5">
+            <Link href={`/processes/${t.process.name}`} className="flex items-center gap-2 text-sm hover:underline">
+              <WorkflowIcon className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                Step {t.process.step} of {t.process.of} · {t.process.title}
+              </span>
+            </Link>
+            <span className="h-1 overflow-hidden rounded-full bg-muted">
+              <span className="block h-full rounded-full bg-primary" style={{ width: `${((t.process.step - 1) / t.process.of) * 100}%` }} />
+            </span>
+            {t.process.inputs.some((x) => x.value) && (
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
+                {t.process.inputs
+                  .filter((x) => x.value)
+                  .map((x) => (
+                    <Fragment key={x.key}>
+                      <dt className="text-muted-foreground">{x.name}</dt>
+                      <dd className="min-w-0 truncate">{inputText(x)}</dd>
+                    </Fragment>
+                  ))}
+              </dl>
+            )}
+            {t.process.backTo && onSendBack && <SendBack to={t.process.backTo} onSend={onSendBack} />}
           </div>
         )}
         <div className="grid grid-cols-[6rem_1fr] items-center gap-x-3 gap-y-3">
@@ -831,6 +1037,14 @@ function TaskDetails({
             onChange={(v) => onChange(pick(v))}
             className="w-full"
           />
+          <Label className="text-muted-foreground">Client</Label>
+          <ClientPicker
+            items={[{ value: "none", label: "No client" }, ...clients]}
+            value={t.client ?? "none"}
+            onChange={(v) => onChange({ client: v === "none" ? null : v })}
+            className="w-full"
+          />
+          {t.client && <ProjectSelect t={t} onChange={onChange} />}
           <Label htmlFor="task-due" className="text-muted-foreground">
             Due
           </Label>
@@ -857,6 +1071,11 @@ function TaskDetails({
               />
             </>
           )}
+          <PrivateSwitch
+            on={t.private}
+            what="Only owners, admins, who does it and who asked see this task (and, for a private client, the people who handle it)."
+            onChange={(on) => onChange({ private: on })}
+          />
         </div>
 
         <div className="grid gap-1.5">

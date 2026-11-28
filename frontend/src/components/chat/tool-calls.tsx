@@ -319,7 +319,7 @@ function Job({ id, run }: { id: string; run?: string }) {
   const took = w?.ms === undefined ? undefined : working ? w.ms + Date.now() - dataUpdatedAt : w.ms;
   return (
     <div className="flex w-full flex-col gap-1.5">
-      <div className="w-full rounded-lg border bg-card text-sm">
+      <div className="w-full rounded-xl border bg-card text-sm">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useMe } from "@/lib/api";
 
-// Memory is three pages, notes (Knowledge), Files and Database: one place in the sidebar, switched here.
+// Memory is four pages, notes (Knowledge), the Brain (the notes and records as a map), Files and Database: one place in the sidebar, switched here.
 export function MemoryTabs() {
   const pathname = usePathname();
   const { data: me } = useMe();
@@ -15,6 +15,7 @@ export function MemoryTabs() {
     <nav className="flex items-center gap-1" aria-label="Memory" data-tip="memory-page" data-tip-side="bottom">
       {[
         { href: "/knowledge", label: "Notes" },
+        { href: "/brain", label: "Brain" },
         { href: "/files", label: "Files" },
         ...(role && role !== "member" ? [{ href: "/database", label: "Database" }] : []),
       ].map((t) => (

@@ -231,22 +231,23 @@ export function BrowserChip({ className = "" }: { className?: string }) {
   const browser = useBrowser();
   if (!browser || browser.open || (!browser.url && !browser.canReopen)) return null;
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
+      size="xs"
       disabled={browser.reopening}
       onClick={browser.url ? browser.show : browser.reopen}
-      className={`inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-60 ${className}`}
+      className={className}
     >
       {browser.url ? <LiveDot /> : <GlobeIcon className="size-3.5 text-muted-foreground" />}
       {browser.reopening ? "Opening…" : "Live browser"}
-    </button>
+    </Button>
   );
 }
 
 const LiveDot = () => (
   <span className="relative flex size-2">
-    <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+    <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
+    <span className="relative inline-flex size-2 rounded-full bg-primary" />
   </span>
 );
 
@@ -482,38 +483,37 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
                 size="icon"
                 variant={browser.mic === "muted" ? "secondary" : "ghost"}
                 onClick={browser.toggleMic}
-                className="size-8 max-sm:size-10"
+                className="max-sm:size-10"
                 title={micLabel}
                 aria-label={micLabel}
                 aria-pressed={browser.mic === "muted"}
               >
                 {browser.mic === "on" ? <MicIcon className="size-4" /> : <MicOffIcon className="size-4" />}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => browser.endShowing(false)} className="h-8 rounded-full max-sm:h-10">
+              <Button variant="ghost" onClick={() => browser.endShowing(false)} className="max-sm:h-10">
                 Cancel
               </Button>
-              <Button size="sm" onClick={() => browser.endShowing(true)} className="h-8 rounded-full max-sm:h-10">
+              <Button onClick={() => browser.endShowing(true)} className="max-sm:h-10">
                 Done
               </Button>
             </>
           ) : (
             <>
-              <Button size="sm" variant="outline" onClick={() => setAsking(true)} className="h-8 gap-1.5 rounded-full max-sm:size-10 max-sm:px-0" title="Show Emplio how">
+              <Button variant="outline" onClick={() => setAsking(true)} className="max-sm:size-10 max-sm:px-0" title="Show Emplio how">
                 <CircleDotIcon className="size-3.5 max-sm:size-4" />
                 <span className="max-sm:sr-only">Show Emplio how</span>
               </Button>
               <Button
-                size="sm"
                 variant={control ? "default" : "outline"}
                 onClick={() => takeControl(!control)}
                 title={control ? "Stop controlling" : "Take control"}
-                className={`h-8 gap-1.5 rounded-full transition-shadow max-sm:size-10 max-sm:px-0 ${nudged ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background" : ""}`}
+                className={`transition-shadow max-sm:size-10 max-sm:px-0 ${nudged ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background" : ""}`}
               >
                 {control ? <EyeIcon className="size-3.5 max-sm:size-4" /> : <MousePointerClickIcon className="size-3.5 max-sm:size-4" />}
                 <span className="max-sm:sr-only">{control ? "Stop controlling" : "Take control"}</span>
               </Button>
               {/* one X, then ask: people read it as "close this panel", but it used to end the browser too */}
-              <Button size="icon" variant="ghost" onClick={() => setClosing(true)} className="size-8 max-sm:size-10" aria-label="Close">
+              <Button size="icon" variant="ghost" onClick={() => setClosing(true)} className="max-sm:size-10" aria-label="Close">
                 <XIcon className="size-4" />
               </Button>
             </>
@@ -544,11 +544,11 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
           What you save here really saves. Passwords aren&apos;t recorded.
         </p>
       ) : control && (
-        <p className="shrink-0 border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-900 dark:text-amber-200">
+        <p className="shrink-0 border-b bg-warning/10 px-4 py-2 text-xs text-warning">
           You&apos;re in control. Finish what you need (a login, a code, a CAPTCHA), then tell Emplio to carry on.
         </p>
       )}
-      <div className="group relative min-h-0 flex-1 bg-muted/40 p-2 lg:p-3">
+      <div className="group relative min-h-0 flex-1 bg-muted p-2 lg:p-3">
         {/* Watching vs control only locks the view (inert): changing the link (readOnly) reloads the live
             view, which reconnects to a blank tab instead of the page the agent was on */}
         {native ? (
@@ -577,7 +577,7 @@ export function BrowserPanel({ tabs = [], active, onPick }: { tabs?: BrowserTab[
                 size="sm"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => takeControl(true)}
-                className="h-7 gap-1.5 rounded-full"
+                className="rounded-full"
               >
                 <MousePointerClickIcon className="size-3.5" />
                 Take control

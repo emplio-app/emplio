@@ -7,6 +7,7 @@
 import { CornerDownRightIcon, XIcon } from "lucide-react";
 import { useEffect, useState, type RefObject } from "react";
 import { Marked } from "@/components/chat/highlight";
+import { Button } from "@/components/ui/button";
 
 export type Quote = { text: string; note: string };
 
@@ -153,14 +154,15 @@ export function QuoteChips({ quotes, onChange }: { quotes: Quote[]; onChange: (q
           <div className="flex items-start gap-2">
             <CornerDownRightIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
             <p className={`flex-1 text-sm text-muted-foreground ${many ? "line-clamp-1" : "line-clamp-2"}`}>{q.text}</p>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => onChange(quotes.filter((_, j) => j !== i))}
               aria-label="Remove quote"
-              className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="text-muted-foreground"
             >
               <XIcon className="size-3.5" />
-            </button>
+            </Button>
           </div>
           {many && (
             <textarea

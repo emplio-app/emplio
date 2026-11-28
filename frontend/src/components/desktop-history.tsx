@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 // The Mac app has no browser bar: back and forward sit next to the window's traffic lights (globals.css leaves room).
 export function DesktopHistory() {
@@ -19,15 +20,14 @@ export function DesktopHistory() {
     return () => nav.removeEventListener("currententrychange", look);
   }, []);
   if (!mac) return null;
-  const cls = "flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent [-webkit-app-region:no-drag]";
   return (
     <div className="fixed top-[0.845rem] left-[5.5rem] z-50 flex gap-0.5">
-      <button type="button" aria-label="Back" disabled={!can.back} onClick={() => history.back()} className={cls}>
+      <Button variant="ghost" size="icon-sm" aria-label="Back" disabled={!can.back} onClick={() => history.back()} className="text-muted-foreground [-webkit-app-region:no-drag]">
         <ChevronLeft className="size-5" />
-      </button>
-      <button type="button" aria-label="Forward" disabled={!can.forward} onClick={() => history.forward()} className={cls}>
+      </Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Forward" disabled={!can.forward} onClick={() => history.forward()} className="text-muted-foreground [-webkit-app-region:no-drag]">
         <ChevronRight className="size-5" />
-      </button>
+      </Button>
     </div>
   );
 }

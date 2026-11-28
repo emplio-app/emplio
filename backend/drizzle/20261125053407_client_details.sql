@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "details" jsonb DEFAULT '[]'::jsonb NOT NULL;

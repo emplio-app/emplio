@@ -154,9 +154,10 @@ export function ChannelsPanel() {
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
                   <CheckIcon className="size-3.5" /> Connected
                 </span>
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                <Button
+                  variant="link"
+                  size="xs"
+                  className="h-auto p-0 text-muted-foreground hover:text-foreground"
                   onClick={() =>
                     confirm({
                       title: "Disconnect Telegram?",
@@ -168,7 +169,7 @@ export function ChannelsPanel() {
                   }
                 >
                   Disconnect
-                </button>
+                </Button>
               </div>
             ) : (
               d.telegram.url && (
@@ -238,15 +239,16 @@ export function ChannelNudge() {
   if (!data || !bot || data.telegram.connected || (hidden && !open)) return <ChannelsDialog open={open} onOpenChange={setOpen} />;
   return (
     <>
-      <div className="relative mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 group-data-[collapsible=icon]:hidden">
-        <button
-          type="button"
+      <div className="relative mb-2 rounded-xl border border-warning/30 bg-warning/10 p-3 group-data-[collapsible=icon]:hidden">
+        <Button
+          variant="ghost"
+          size="icon-xs"
           onClick={hide}
           aria-label="Hide for a week"
-          className="absolute top-2 right-2 rounded p-0.5 text-muted-foreground hover:bg-amber-500/20 hover:text-foreground"
+          className="absolute top-1.5 right-1.5 text-muted-foreground"
         >
           <XIcon className="size-3.5" />
-        </button>
+        </Button>
         <div className="flex items-center gap-2 pr-5">
           <div className="grid size-7 shrink-0 place-items-center rounded-lg bg-[#229ED9] text-white">
             <SendIcon className="size-3.5" />
@@ -256,7 +258,7 @@ export function ChannelNudge() {
         <p className="mt-1.5 text-xs text-muted-foreground">
           Connect Telegram to chat on the go and get reports and reminders there.
         </p>
-        <Button size="sm" className="mt-2.5 h-7 w-full" onClick={() => setOpen(true)}>
+        <Button size="sm" className="mt-2.5 w-full" onClick={() => setOpen(true)}>
           Connect Telegram
         </Button>
       </div>

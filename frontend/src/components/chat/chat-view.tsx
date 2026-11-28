@@ -3,30 +3,23 @@
 import { copyText, uuid } from "@/lib/utils";
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, keptNothing, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type JobSummary, type WorkingJob } from "@emplio/shared";
+import { AUTOMATION_PREFIX, BRIEF_PREFIX, CHECK_IN_PREFIX, LEARNED_PREFIX, REPORT_PREFIX, RESUMED_PREFIX, TASK_PREFIX, JOB_NOTE_PREFIX, JOBS_DONE_PREFIX, KEEP_TOOLS_PREFIX, keptNothing, SHOWN_PREFIX, WORKERS_DONE_PREFIX, FROM_EMPLIO, isHidden, type Approval, type ChatJob, type Mention, type NextStep, type SentFrom, type JobSummary, type WorkingJob } from "@emplio/shared";
 import type { FileUIPart, UIMessage } from "ai";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  AtSignIcon,
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleHelpIcon,
   CopyIcon,
   CornerDownRightIcon,
-  FileIcon,
-  FolderIcon,
-  SquareSlashIcon,
   PaperclipIcon,
-  PlusIcon,
   PencilIcon,
   RefreshCcwIcon,
   SendIcon,
   TriangleAlertIcon,
-  Undo2Icon,
-  UploadIcon,
-  XIcon,
+  Undo2Icon,  XIcon,
   ArrowLeftIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -41,20 +34,10 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import {
-  PromptInput,
-  PromptInputButton,
-  PromptInputFooter,
-  PromptInputHeader,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-} from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Spinner } from "@/components/ui/spinner";
 import { JobCards, Offers, WelcomeDialog } from "@/components/chat/first-run";
 import { RenameInput } from "@/components/chat/app-sidebar";
-import { VoiceInput } from "@/components/chat/voice-input";
 import { AssistantParts, doing, isStep } from "@/components/chat/tool-calls";
 import { ChatSendContext } from "@/components/chat/connect-card";
 import { JobAskCard, ReplyContext } from "@/components/chat/ask-card";
@@ -64,19 +47,15 @@ import { AssistantReply, CLICK_PREFIX, userFacingText } from "@/components/chat/
 import { ApprovalAsk, ApprovalsContext, stillWaiting } from "@/components/chat/approval-card";
 import { NextStepCard } from "@/components/chat/next-step-card";
 import { ReportButton } from "@/components/chat/report-reply";
-import { useSkillMenu } from "@/components/chat/skill-menu";
-import { useMentionMenu } from "@/components/chat/mention-menu";
-import { eraseMark, HighlightLayer } from "@/components/chat/highlight";
-import { AttachmentTray, MessageAttachments, SAY_FILES, SAY_TEXT, useAttachments } from "@/components/chat/attachments";
-import { QuoteButton, QuoteChips, QuotedText, addQuote, withQuotes, type Quote } from "@/components/chat/quote";
+import { ASK_FOOT, Composer, DropOverlay, dropInto, keepDraft, keptDraft, useComposer } from "@/components/chat/composer";
+import { MessageAttachments, SAY_FILES, SAY_META, SAY_TEXT } from "@/components/chat/attachments";
+import { QuoteButton, QuotedText, addQuote } from "@/components/chat/quote";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { pausedNote, SeePlans, useCreditStatus } from "@cloud/client";
 import { type Channels, channelsQueryKey } from "@/components/chat/channels-dialog";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { haptic } from "@/lib/haptics";
-import { readDropped, zipFolder } from "@/lib/zip-folder";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { toast } from "sonner";
 
 // The server words the common failures for people (chat.ts replyError); anything else (a browser's "Failed to
 // fetch", a JSON body) gets the general line.
@@ -109,7 +88,8 @@ const commands = (message?: UIMessage) => message?.parts.filter((p) => p.type.st
 
 // command: the / skill or app the text starts with, picked from the menu (kept with the message for highlighting)
 // steered: the running reply knows it's waiting, and ends after its current command so this goes in next
-type Queued = { id: string; text: string; files: FileUIPart[]; mentions?: Mention[]; command?: string; steered?: boolean };
+// from: sent from one of the app's pages (composer.tsx PageAsk), for the server's hidden note
+type Queued = { id: string; text: string; files: FileUIPart[]; mentions?: Mention[]; command?: string; from?: SentFrom; steered?: boolean };
 
 // the / command and @mentions a sent message was written with, to colour them in its bubble
 const sentMarks = (message: UIMessage) => {
@@ -149,61 +129,32 @@ function greeting(name?: string) {
 // job: this is a job's own chat (backend jobs.ts): its header names the agent, and it closes out of the sidebar
 type Props = { id: string; title?: string; initialMessages: UIMessage[]; initialOlder?: string | null; isNew?: boolean; job?: ChatJob };
 
-// the parts of a draft that aren't text: replies being quoted, files already uploaded
-const keptDraft = <T,>(key: string): T[] => {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "[]");
-  } catch {
-    return [];
-  }
-};
-const keepDraft = (key: string, value: unknown[]) => {
-  try {
-    if (value.length) localStorage.setItem(key, JSON.stringify(value));
-    else localStorage.removeItem(key);
-  } catch {}
-};
 
 export function ChatView({ id, title, initialMessages, initialOlder, isNew, job }: Props) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { data: me } = useMe();
   const { data: conversations } = useConversations();
-  // what's typed and not sent yet, kept per chat in this browser (one slot for the new-chat screen); the
-  // app shell renders nothing on the server, so reading it here is safe
-  // ponytail: @mention links and files still uploading when the chat closes aren't kept
+  // what's typed and not sent yet, kept per chat in this browser (one slot for the new-chat screen; composer.tsx)
   // after the first send the new chat is a real one, still on screen: its slot moves to its own id then (dispatch)
   const [draftKey, setDraftKey] = useState(`chat_draft:${isNew ? "new" : id}`);
-  const [input, setInput] = useState(() => {
-    try {
-      return localStorage.getItem(draftKey) ?? "";
-    } catch {
-      return "";
-    }
-  });
+  const composer = useComposer(draftKey);
+  const { input, setInput, quotes, setQuotes, attachments, mentionMenu, box } = composer;
   // a kept draft opens with the cursor after it, ready to go on typing
   useEffect(() => {
     const box = document.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
     box?.setSelectionRange(box.value.length, box.value.length);
   }, []);
-  useEffect(() => {
-    try {
-      if (input.trim()) localStorage.setItem(draftKey, input);
-      else localStorage.removeItem(draftKey);
-    } catch {}
-  }, [draftKey, input]);
-  // parts of replies being answered, sent quoted at the start of the next message (quote.tsx)
-  const [quotes, setQuotes] = useState(() => keptDraft<Quote>(`${draftKey}:quotes`));
-  useEffect(() => keepDraft(`${draftKey}:quotes`, quotes), [draftKey, quotes]);
-  const skillMenu = useSkillMenu(input, setInput);
-  const mentionMenu = useMentionMenu(input, setInput);
   // /chat?file=company/x.md: the new chat with that file already @mentioned, cursor after it (Knowledge's
   // "Suggest a change"). On the URL, not once on open: the new-chat screen stays mounted between visits.
-  const aboutFile = useSearchParams().get("file");
+  const params = useSearchParams();
+  const aboutFile = params.get("file");
+  // &do=repeat: a process to start on a schedule (its automation is written from the chat)
+  const verb = params.get("do") === "repeat" ? "Repeat" : "Change";
   useEffect(() => {
     if (!isNew || !aboutFile) return;
     const label = aboutFile.split("/").pop()!;
-    const text = `Change @${label} `;
+    const text = `${verb} @${label} `;
     mentionMenu.link({ kind: "file", id: aboutFile, label, detail: aboutFile.split("/").slice(0, -1).join("/") });
     setInput(text);
     requestAnimationFrame(() => {
@@ -213,9 +164,6 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- when a file is asked about
   }, [aboutFile]);
-  // what to colour in the box: a known /command at the start, and the linked @mentions
-  const command = skillMenu.command;
-  const marks = [command ? `/${command}` : "", ...mentionMenu.linked.map((m) => `@${m.label}`)];
   const urlUpdated = useRef(!isNew);
 
   // the server is first summarising a long chat into notes (backend compact.ts), which takes a while
@@ -455,15 +403,13 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     browser.hide();
   }, [browser, id]);
 
-  const attachments = useAttachments(() => keptDraft<FileUIPart>(`${draftKey}:files`));
-  useEffect(() => keepDraft(`${draftKey}:files`, attachments.items.flatMap((a) => (a.part ? [a.part] : []))), [draftKey, attachments.items]);
   // kept like the draft: leaving the chat (its agents strip, another chat, a reload) mustn't drop what's waiting.
   // The reply it was told about may be gone by then, so each is told again.
   const [queue, setQueue] = useState<Queued[]>(() => keptDraft<Queued>(`${draftKey}:queue`).map((x) => ({ ...x, steered: false })));
   useEffect(() => keepDraft(`${draftKey}:queue`, queue), [draftKey, queue]);
   const [pinLatest, setPinLatest] = useState(false);
 
-  const dispatch = ({ text, files, mentions, command }: Omit<Queued, "id">) => {
+  const dispatch = ({ text, files, mentions, command, from }: Omit<Queued, "id">) => {
     if (!urlUpdated.current) {
       // swap the URL without remounting so the stream keeps going
       window.history.replaceState(null, "", `/chat/${id}`);
@@ -471,59 +417,67 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       // what's typed or waiting from here on belongs to this chat, not to the next new one
       setDraftKey(`chat_draft:${id}`);
       try {
-        for (const k of ["", ":quotes", ":files", ":queue"]) localStorage.removeItem(`chat_draft:new${k}`);
+        for (const k of ["", ":quotes", ":files", ":mentions", ":queue"]) localStorage.removeItem(`chat_draft:new${k}`);
       } catch {}
     }
     sends.current++;
     clearError();
     setPinLatest(true);
-    // @mentions ride along as a data part, saved with the message (backend/src/mentions.ts)
-    if (mentions?.length || command)
+    // @mentions ride along as a data part, saved with the message (backend/src/mentions.ts); so does the page it was
+    // sent from (backend chat.ts sentFromNote)
+    if (mentions?.length || command || from)
       sendMessage({
         parts: [
           ...files,
           { type: "text", text },
           ...(mentions?.length ? [{ type: "data-mentions" as const, data: mentions }] : []),
           ...(command ? [{ type: "data-command" as const, data: command }] : []),
+          ...(from ? [{ type: "data-sent-from" as const, data: from }] : []),
         ],
       });
     else sendMessage(text ? { text, files } : { files });
   };
 
-  // A new chat that starts with what one of our pages left for it (Settings' "Brief your AI employee"; the welcome page)
+  // What one of our pages left for the chat to send as it opens (Settings' "Brief your AI employee", the welcome page:
+  // a new chat; Today's message box: the main chat)
   useEffect(() => {
-    if (!isNew || messages.length) return;
+    if (isNew && messages.length) return;
     // a tick later, and called off if the chat closes first: in development React opens every page twice, and
     // the first close stops (stopRef) the send it had just started, so nothing went out
     const later = setTimeout(() => {
       let say: string | null = null;
       let files: FileUIPart[] = [];
+      // its @mentions, / command and page, from a page's message box (composer.tsx PageAsk)
+      let meta: Pick<Queued, "mentions" | "command" | "from"> = {};
       try {
         say = sessionStorage.getItem(SAY_TEXT);
         if (!say) return;
         sessionStorage.removeItem(SAY_TEXT);
         files = JSON.parse(sessionStorage.getItem(SAY_FILES) ?? "[]");
         sessionStorage.removeItem(SAY_FILES);
+        meta = JSON.parse(sessionStorage.getItem(SAY_META) ?? "{}");
+        sessionStorage.removeItem(SAY_META);
       } catch {}
-      if (say) dispatch({ text: say, files });
+      // in line like a typed one: the effect below sends it once the chat is known to be idle (a reply may be running)
+      if (say && isNew) dispatch({ text: say, files, ...meta });
+      else if (say) {
+        waited.current = true;
+        enqueue({ id: uuid(), text: say, files, ...meta });
+      }
     });
     return () => clearTimeout(later);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the chat opens
   }, []);
 
-  const canSend = (!!input.trim() || attachments.ready || quotes.some((q) => q.note.trim())) && !attachments.uploading;
+  const canSend = composer.canSend;
 
   // While a reply is in progress, new messages wait in line and go out one by one.
   const send = (raw: string) => {
-    if (attachments.uploading || (!raw.trim() && !attachments.ready && !quotes.some((q) => q.note.trim()))) return;
+    const message = composer.take(raw);
+    if (!message) return;
     haptic();
-    const text = withQuotes(quotes, raw);
-    const message = { text, files: attachments.take(), mentions: mentionMenu.linked, command };
     if (busy || queue.length) enqueue({ id: uuid(), ...message });
     else dispatch(message);
-    setInput("");
-    setQuotes([]);
-    mentionMenu.clear();
     // on a phone the keyboard goes once it's sent, so the reply has the whole screen
     if (!matchMedia("(pointer: fine)").matches) box.current?.blur();
   };
@@ -580,7 +534,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     setQueue(rest);
     dispatch(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the chat is known to be idle
-  }, [summary, busy]);
+  }, [summary, busy, queue.length]);
 
   // Editing a sent message forks the chat there: the edit goes out after the message before it, the old
   // version stays a switch away ("‹ 1 / 2 ›"). Messages loaded from the server know their versions
@@ -705,30 +659,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       e.stopPropagation();
       dragDepth.current = 0;
       setDragging(false);
-      // a dropped folder goes as one zip, like a picked one; grab the entries now, they're gone after the first await
-      const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry());
-      const plain = [...e.dataTransfer.files].filter((_, i) => !entries[i]?.isDirectory);
-      if (plain.length) attachments.add(plain);
-      for (const dir of entries.filter((x) => x?.isDirectory)) void addFolder(readDropped(dir!));
+      dropInto(composer, e.dataTransfer);
     },
   };
-  const addFolder = async (picked: Promise<{ file: File; path: string }[]>) => {
-    const zip = await zipFolder(await picked, 100 * 1024 * 1024);
-    if (zip) attachments.add([zip]);
-    else toast.error("That folder is empty or over 100 MB");
-  };
-  const fileInput = useRef<HTMLInputElement>(null);
-  const box = useRef<HTMLTextAreaElement>(null);
-  // puts text in the box with the cursor at `at`, so the / or @ menu opens as if typed
-  const typeIn = (text: string, at: number) => {
-    setInput(text);
-    mentionMenu.moveCaret(at);
-    requestAnimationFrame(() => {
-      box.current?.focus();
-      box.current?.setSelectionRange(at, at);
-    });
-  };
-  const folderInput = useRef<HTMLInputElement>(null);
 
   // Like Claude/ChatGPT: a just-sent prompt scrolls to the top and the reply fills in below it.
   // The latest turn is made at least one viewport tall so there's room to scroll it up.
@@ -996,7 +929,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
         {fromEmplio && <span className="self-end text-xs text-muted-foreground">Emplio</span>}
         {message.role === "user" && <MessageAttachments parts={filesOf(message)} />}
         {editing === message.id ? (
-          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-2xl border bg-card p-3">
+          <div data-editing className="flex w-full max-w-[80%] flex-col gap-2 self-end rounded-xl border bg-card p-3">
             <textarea
               autoFocus
               // cursor after the text, ready to go on typing
@@ -1142,7 +1075,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                     <TriangleAlertIcon className="size-4 shrink-0 text-destructive" />
                     <span className="flex-1">{paused ? pausedNote(error.message) : replyFailed(error.message)}</span>
                     {/* what it did before failing is saved: carry on from there instead of redoing it */}
-                    {paused && me?.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
+                    {paused && !!me && me.workspaces[0]?.role !== "member" && <SeePlans size="sm" />}
                     {!paused && messages.at(-1)?.role === "assistant" && (
                       <Button size="sm" variant="outline" onClick={() => handlers.current.dispatch({ text: "Continue", files: [] })}>
                         Continue
@@ -1164,200 +1097,65 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     [id, messages, status, error, reconnecting, paused, editing, editText, summarizing, onTelegram, pinLatest, shown],
   );
 
-  const composer = (
-    <div className="relative">
-      {skillMenu.menu ?? mentionMenu.menu}
-      {/* what's still going, however far up it was asked: each opens its chat */}
-      {busyJobs.length > 0 && (
-        <div className="mb-2 flex flex-col gap-1">
-          {busyJobs.map((w) => (
-            <Fragment key={w.id}>
-              <div className="flex min-w-0 items-center rounded-lg border bg-card text-xs text-muted-foreground">
-                <Link href={`/chat/${w.chatId}`} title={w.name} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 hover:text-foreground">
-                  {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
-                  <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
-                  {w.status === "working" ? (
-                    <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate">· waiting for your answer</span>
+  const messageBox = (
+    <Composer
+      c={composer}
+      onSend={send}
+      tip="chat"
+      busy={busy}
+      status={status}
+      onStop={stopAll}
+      roomy={empty}
+      // not on phones: the keyboard would cover half the chat the moment it opens
+      autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
+      placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for commands, @ to mention" : "Ask Emplio anything…")}
+      above={
+        <>
+          {/* what's still going, however far up it was asked: each opens its chat */}
+          {busyJobs.length > 0 && (
+            <div className="mb-2 flex flex-col gap-1">
+              {busyJobs.map((w) => (
+                <Fragment key={w.id}>
+                  <div className="flex min-w-0 items-center rounded-lg border bg-card text-xs text-muted-foreground">
+                    <Link href={`/chat/${w.chatId}`} title={w.name} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 hover:text-foreground">
+                      {w.status === "working" ? <Spinner className="size-3.5" /> : <CircleHelpIcon className="size-3.5 shrink-0" />}
+                      <span className="shrink-0 font-medium text-foreground">{w.agent}</span>
+                      {w.status === "working" ? (
+                        <Shimmer as="span" className="min-w-0 flex-1 truncate">{`· ${w.name}`}</Shimmer>
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate">· waiting for your answer</span>
+                      )}
+                    </Link>
+                    {/* a question they won't answer: stop it waiting, and the line goes */}
+                    {w.status === "asking" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Stop ${w.agent} waiting`}
+                        title="Stop waiting"
+                        onClick={() =>
+                          void api(`/jobs/${w.id}/close`, {}).then(() => {
+                            void queryClient.invalidateQueries({ queryKey: ["working", id] });
+                            void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+                          })
+                        }
+                        className="mr-1"
+                      >
+                        <XIcon className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  {/* its question, to answer right here: the answer goes to the agent, not to Emplio */}
+                  {w.status === "asking" && !!w.asks?.length && (
+                    <JobAskCard job={w.id} cards={w.asks} onAnswered={() => void queryClient.invalidateQueries({ queryKey: ["working", id] })} />
                   )}
-                </Link>
-                {/* a question they won't answer: stop it waiting, and the line goes */}
-                {w.status === "asking" && (
-                  <button
-                    type="button"
-                    aria-label={`Stop ${w.agent} waiting`}
-                    title="Stop waiting"
-                    onClick={() =>
-                      void api(`/jobs/${w.id}/close`, {}).then(() => {
-                        void queryClient.invalidateQueries({ queryKey: ["working", id] });
-                        void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-                      })
-                    }
-                    className="mr-1 grid size-6 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-foreground"
-                  >
-                    <XIcon className="size-3.5" />
-                  </button>
-                )}
-              </div>
-              {/* its question, to answer right here: the answer goes to the agent, not to Emplio */}
-              {w.status === "asking" && !!w.asks?.length && (
-                <JobAskCard job={w.id} cards={w.asks} onAnswered={() => void queryClient.invalidateQueries({ queryKey: ["working", id] })} />
-              )}
-            </Fragment>
-          ))}
-        </div>
-      )}
-    <PromptInput
-      data-tip="chat"
-      onSubmit={({ text }) => send(text)}
-      className="rounded-3xl shadow-sm transition-shadow focus-within:shadow-md [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:flex-col [&_[data-slot=input-group]]:rounded-3xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:ring-0! [&_[data-slot=input-group]]:focus-within:border-foreground/25"
-    >
-      {(attachments.items.length > 0 || quotes.length > 0) && (
-        <PromptInputHeader className="p-0">
-          {quotes.length > 0 && <QuoteChips quotes={quotes} onChange={setQuotes} />}
-          {attachments.items.length > 0 && <AttachmentTray items={attachments.items} onRemove={attachments.remove} onRetry={attachments.retry} />}
-        </PromptInputHeader>
-      )}
-      {/* one line, send at its end; the tools sit under the box */}
-      <div className="flex w-full items-end">
-      {/* on a phone a row under the box is wasted height: attach, skill and mention fold into one + in it */}
-      {/* by the first line, not floating under a new chat's taller box */}
-      <div className={cn("hidden h-12 items-center pl-2 pointer-coarse:flex", empty && "self-start")} onMouseDown={(e) => e.preventDefault()}>
-        <DropdownMenu>
-          <DropdownMenuTrigger render={<PromptInputButton aria-label="More" className="rounded-full text-muted-foreground" />}>
-            <PlusIcon className="size-5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" sideOffset={10}>
-            <DropdownMenuItem onClick={() => fileInput.current?.click()}>
-              <PaperclipIcon /> Attach
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}>
-              <SquareSlashIcon /> Commands
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
-                typeIn(text, text.length);
-              }}
-            >
-              <AtSignIcon /> Mention
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <div className="relative min-w-0 flex-1">
-        <HighlightLayer text={input} marks={marks} />
-        <PromptInputTextarea
-          ref={box}
-          value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            mentionMenu.onKeyDown(e);
-            if (!e.defaultPrevented) skillMenu.onKeyDown(e);
-            eraseMark(e, input, marks, setInput);
-          }}
-          onSelect={mentionMenu.onSelect}
-          onPaste={(e) => {
-            const files = [...e.clipboardData.files];
-            if (!files.length) return;
-            e.preventDefault();
-            attachments.add(files);
-          }}
-          placeholder={quotes.length > 1 ? "Anything else? (optional)" : busy ? "Queue a follow-up…" : (job ? `Message ${job.agent ?? "Emplio"}…` : empty ? "Ask Emplio anything. Type / for commands, @ to mention" : "Ask Emplio anything…")}
-          // not on phones: the keyboard would cover half the chat the moment it opens
-          autoFocus={typeof window !== "undefined" && matchMedia("(pointer: fine)").matches}
-          className={cn("px-5 py-3 text-[0.9rem] leading-6 placeholder:truncate pointer-coarse:px-1", empty ? "min-h-24" : "min-h-0")} // a new chat gets room for a few lines
-        />
-      </div>
-        {/* mic and send share one row, centred on each other and on the first line of text */}
-        {/* a press keeps the focus in the box: losing it dropped the keyboard and moved send from under the finger
-            before it lifted, so a tap closed the keyboard without sending; the keyboard goes once it's sent */}
-        <div className="flex h-12 items-center gap-1 pr-2" onMouseDown={(e) => e.preventDefault()}>
-        <div className="flex">
-          <VoiceInput onText={(text) => setInput((current) => [current.trim(), text].filter(Boolean).join(" "))} />
-        </div>
-        {/* not `disabled`: the input group fades itself out when anything inside is disabled */}
-        {/* while a reply streams: stop when the box is empty, queue when there's something to send */}
-        <PromptInputSubmit
-          status={busy && !canSend ? status : undefined}
-          onStop={stopAll}
-          aria-disabled={!busy && !canSend}
-          aria-label={busy ? (canSend ? "Queue message" : "Stop") : "Send"}
-          className="size-8 rounded-full aria-disabled:opacity-40"
-        >
-          {busy && !canSend ? undefined : <ArrowUpIcon className="size-4" />}
-        </PromptInputSubmit>
-        </div>
-      </div>
-    </PromptInput>
-      {/* A press keeps the focus in the box. Losing it brings the phone's tab bar back at once, which moves these
-          buttons out from under the finger before it lifts, and the tap is lost. */}
-      <div className="mt-1 flex items-center justify-between gap-2 px-2 pointer-coarse:hidden" onMouseDown={(e) => e.preventDefault()}>
-        <PromptInputTools>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              attachments.add([...(e.currentTarget.files ?? [])]);
-              e.currentTarget.value = "";
-            }}
-          />
-          {/* a browser picker takes files or a folder, never both, so the one clip asks which */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<PromptInputButton aria-label="Attach" className="rounded-full text-muted-foreground" />}
-            >
-              <PaperclipIcon className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start">
-              <DropdownMenuItem onClick={() => fileInput.current?.click()}>
-                <FileIcon /> Files
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => folderInput.current?.click()}>
-                <FolderIcon /> Folder
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {/* a whole folder goes as one zip with its sub-folders kept */}
-          <input
-            ref={folderInput}
-            type="file"
-            className="hidden"
-            {...{ webkitdirectory: "" }}
-            onChange={async (e) => {
-              const picked = [...(e.currentTarget.files ?? [])].map((file) => ({ file, path: file.webkitRelativePath || file.name }));
-              e.currentTarget.value = "";
-              if (picked.length) await addFolder(Promise.resolve(picked));
-            }}
-          />
-          {/* the same menus typing / or @ opens, for people who don't know to type them */}
-          <PromptInputButton
-            tooltip="Commands"
-            aria-label="Commands"
-            onClick={() => typeIn(input.startsWith("/") ? input : `/${input}`, 1)}
-            className="rounded-full text-muted-foreground"
-          >
-            <SquareSlashIcon className="size-4" />
-          </PromptInputButton>
-          <PromptInputButton
-            tooltip="Mention"
-            aria-label="Mention"
-            onClick={() => {
-              const text = `${input}${input && !/\s$/.test(input) ? " " : ""}@`;
-              typeIn(text, text.length);
-            }}
-            className="rounded-full text-muted-foreground"
-          >
-            <AtSignIcon className="size-4" />
-          </PromptInputButton>
-        </PromptInputTools>
-        {/* only with a mouse or trackpad: on a touch screen (iPad too) Enter is a new line (prompt-input.tsx) */}
-        <span className="hidden text-xs text-muted-foreground sm:pointer-fine:inline">Shift + Enter for a new line</span>
-      </div>
-    </div>
+                </Fragment>
+              ))}
+            </div>
+          )}
+        </>
+      }
+    />
   );
 
   return (
@@ -1368,13 +1166,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       <div className="flex min-h-0 flex-1">
         <div className="relative flex h-full min-w-0 flex-1 flex-col" {...dropZone}>
           {dragging && (
-            <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/90 md:bg-background/80 md:backdrop-blur-sm animate-in fade-in duration-150">
-              <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-foreground/20 px-12 py-10 text-center">
-                <UploadIcon className="size-6 text-muted-foreground" />
-                <div className="font-medium">Drop files to attach</div>
-                <div className="text-sm text-muted-foreground">Images, PDFs and text files up to 100 MB</div>
-              </div>
-            </div>
+            <DropOverlay className="absolute" />
           )}
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
             <SidebarTrigger />
@@ -1429,13 +1221,14 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 </Button>
               )}
               {onTelegram && (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs text-muted-foreground"
+                <Badge
+                  variant="outline"
+                  className="text-muted-foreground"
                   title="This chat is on Telegram; reply there"
                 >
-                  <SendIcon className="size-3.5 text-[#229ED9]" />
+                  <SendIcon className="text-[#229ED9]" />
                   Telegram
-                </span>
+                </Badge>
               )}
               <BrowserChip />
               {/* finished with it: into the sidebar's Done list and back to the main chat; anything new brings it back */}
@@ -1464,7 +1257,7 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   {greeting(firstName)}
                 </h2>
                 <p className="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-base">What can I take off your plate today?</p>
-                {composer}
+                {messageBox}
                 {/* folds away once typing starts (kept mounted so the picked category survives); grid rows 1fr→0fr
                     animates the height without measuring it, and the heading and box above glide with it */}
                 <div
@@ -1551,7 +1344,9 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                   </Button>
                 )}
               </div>
-              <div className="relative mx-auto w-full max-w-3xl px-4 pb-[max(0.25rem,var(--safe-bottom))] max-md:pb-3 md:pointer-coarse:pb-[max(0.75rem,var(--safe-bottom))]">
+              {/* at the chat column's foot, as every page has its box (composer.tsx AskFloat): a side panel keeps its full height */}
+              <div className={ASK_FOOT}>
+              <div className="pointer-events-auto relative mx-auto w-full max-w-3xl px-4">
                 {queue.length > 0 && (
                   <QueuePanel
                     queue={queue}
@@ -1583,9 +1378,10 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
                 ) : (
                   <>
                     {!job && <Offers messages={messages} />}
-                    {composer}
+                    {messageBox}
                   </>
                 )}
+              </div>
               </div>
             </>
           )}
@@ -1615,7 +1411,7 @@ function QueuePanel({
   onSendNow?: (item: Queued) => void;
 }) {
   return (
-    <div className="mx-3 rounded-t-xl border border-b-0 bg-muted/50 px-1.5 pt-1.5 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-150">
+    <div className="mx-3 rounded-t-xl border border-b-0 bg-muted px-1.5 pt-1.5 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-150">
       <div className="px-2 pt-0.5 pb-1 text-xs text-muted-foreground">
         {paused ? "Paused · press Continue or Try again to send these" : "Queued · sent after the current step"}
       </div>
@@ -1623,7 +1419,7 @@ function QueuePanel({
         {queue.map((item) => (
           <li
             key={item.id}
-            className="group/q flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-background/60 animate-in fade-in duration-150"
+            className="group/q flex items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-background animate-in fade-in duration-150"
           >
             <CornerDownRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">
@@ -1710,9 +1506,9 @@ function LongText({ children, markdown }: { children: React.ReactNode; markdown?
         {children}
       </div>
       {long && (
-        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+        <Button variant="link" size="sm" onClick={() => setOpen(!open)} className="mt-1 h-auto p-0 text-muted-foreground hover:text-foreground">
           {open ? "Show less" : "Show more"}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -1785,11 +1581,11 @@ function TelegramOnly() {
   // the bot itself, without the one-time link code
   const bot = data?.telegram.url?.split("?")[0];
   return (
-    <div className="flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 text-sm shadow-sm">
+    <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm shadow-sm">
       <SendIcon className="size-4 shrink-0 text-[#229ED9]" />
       <span className="min-w-0 flex-1 text-muted-foreground">This chat lives in Telegram. Reply there.</span>
       {bot && (
-        <Button size="sm" variant="outline" className="shrink-0 rounded-full" nativeButton={false} render={<a href={bot} target="_blank" rel="noreferrer" />}>
+        <Button size="sm" variant="outline" className="shrink-0" nativeButton={false} render={<a href={bot} target="_blank" rel="noreferrer" />}>
           Open Telegram
         </Button>
       )}

@@ -46,6 +46,7 @@ import { slashCommand } from "./skills";
 import { allowedIn, personFor } from "./automations";
 import { agentsList } from "./agents";
 import { describeMentions } from "./mentions";
+import { clientNote, labelFromMentions } from "./clients";
 import { AGENTS_HEADING, EMPLIO, JOB_MAX_STEPS, jobReply, MANAGER_PROMPT, openJobChat, stillWorking, threadsNote, untoldReports, wake, type Caller } from "./jobs";
 import { reachStep, unfinishedNote } from "./plan";
 import { record } from "./activity";
@@ -78,14 +79,14 @@ export const skillNote = (nth: number, command: string): string | null =>
     : /\b(python3?|bash|sh|node|bun)\s+\S*\/tmp\/\S+\.(py|sh|js|ts)\b/.test(command)
       ? "[A script in tmp isn't a skill yet. If you've done this job before or it will come again, save it as a skill, with the script in it, before you finish.]"
       : nth === 1
-        ? "[Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
+        ? "[A listed skill that fits this even partly: read it now (emplio skills use <name>), before looking up anything else. Before this reply ends: if they corrected how you do this job, gave you its steps, or you've now done it a second time, save it as a skill. If none of those, ignore this.]"
         : null;
 // The words shown for a command. The model is told it must write them; if it still doesn't, a stand-in beats failing the reply.
 export const commandLabel = z.preprocess((label) => label || "Running a command", z.string());
-// Handing off, the checklist and bug reports around it, asking the person, and setting up tasks, automations and
-// agents (the manager's own work) stay open at the limit.
+// Handing off, the checklist and bug reports around it, asking the person, and setting up tasks, automations,
+// agents and process runs (moving a run on, back or to a stop: the manager's own work) stay open at the limit.
 // ponytail: matches anywhere in the command, so work chained onto one of these isn't counted; tighten if that shows up
-export const notCounted = (command: string) => /\bemplio (hand|threads|plan|ask|tasks|automations|agents)\b/.test(command) || isReport(command);
+export const notCounted = (command: string) => /\bemplio (hand|threads|plan|ask|tasks|automations|agents|processes)\b/.test(command) || isReport(command);
 // Commands Emplio may run itself in one reply to a person; past them the doing goes to an agent (refusal). The rule
 // alone (MANAGER_PROMPT) wasn't kept: 104 of 146 replies of 3+ commands in a week never handed off (Nov 13-17). A
 // hard stop at 8 was dropped once (it cut browsing off mid-site); Emplio has no browser now, so nothing is mid-site.
@@ -456,6 +457,21 @@ const fromNote = (p: { type: string; data: unknown }) =>
         ? { type: "text" as const, text: (p.data as string[]).join("\n\n") }
         : undefined;
 // report_problem: a tool from before `emplio report`, still in saved chats, and one the model no longer has
+// A message sent from one of the app's pages rather than the chat (frontend composer.tsx PageAsk): one line on where they
+// were and what they had open, so "this one" makes sense. Worded here; the page only says which page and thing.
+const PAGES: Record<string, string> = { today: "Today", tasks: "Work", clients: "Clients", projects: "Projects", contacts: "Contacts", processes: "Processes", knowledge: "Memory", files: "Files", database: "Database", team: "Team" };
+const OPEN_KINDS = new Set(["client", "project", "contact", "teammate", "service", "task", "process", "note", "table"]);
+export function sentFromNote(data: unknown): string | null {
+  const d = (data ?? {}) as { page?: unknown; open?: { kind?: unknown; title?: unknown; ref?: unknown } };
+  const page = typeof d.page === "string" && Object.hasOwn(PAGES, d.page) ? PAGES[d.page] : null;
+  if (!page) return null;
+  const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "");
+  const o = d.open;
+  const title = clean(o?.title, 120);
+  const ref = clean(o?.ref, 200);
+  const open = o && OPEN_KINDS.has(o.kind as string) && title ? `, with the ${o.kind} ${title} open${ref ? ` (${ref})` : ""}` : "";
+  return `Sent from the ${page} page${open}.`;
+}
 const toModelMessages = (ui: UIMessage[]) =>
   convertToModelMessages(ui.map((m) => closeToolCalls({ ...m, parts: m.parts.filter((p) => p.type !== "tool-report_problem") })), { convertDataPart: fromNote });
 // For taking notes: they only use a file's name, and its /files/... address isn't a full URL, which the conversion needs
@@ -519,7 +535,7 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
   const who = `${ctx.userName} (${ctx.role})`;
   return [
     `You are Emplio, the AI employee of "${ctx.workspaceName}", shared by its owner and staff.`,
-    "Get better with use: save what you do a second time or work out the hard way as a skill or tool (Skills, below) and reuse it; fix it there when it breaks or gets corrected, so no mistake happens twice.",
+    "Get better with use: what you do a second time or work out the hard way becomes a skill or tool (Skills, below); fix it there when it breaks or is corrected, so no mistake happens twice.",
     automation === TASK
       ? `One of your tasks came due (the last message), asked for by ${who}. Nobody is watching or will answer questions: do the work, then update the task as its message says. Your last message goes to ${ctx.userName}: one or two short lines, the result and anything they must decide.`
       : automation === HEARTBEAT
@@ -529,27 +545,24 @@ export function agentRules(ctx: Pick<Ctx, "workspaceName" | "userName" | "role">
         : automation
           ? `The automation "${automation}" (company/automations/${automation}.md) started this chat, on behalf of ${who}. Nobody is watching or will answer questions: do the work; if something needs a person's decision or approval, stop and say what in a line or two (${ctx.userName} reads this later). Run the commands its instructions name directly, without first checking apps, the automation file or help.`
           : `You are talking with ${who}.`,
-    `A bracketed note ending a message, starting "${CONTEXT_MARK}", is from us, not them; the latest is current: where they are (web app or phone), today's date and time zone, setup left, their other chats, an unfinished checklist. Times are on their clock unless they say otherwise.`,
+    `A bracketed note ending a message, starting "${CONTEXT_MARK}", is from us, not them (the latest is current): where they are (web app or phone), date and time zone (times are on their clock), setup left, their other chats, an unfinished checklist.`,
     ...(agent
       ? []
       : automation
       ? ["Your last message is read later by a person: one or two lines, the result first, then anything they must decide, things called by name, never by id. No preamble, recap or offers."]
       : [
-          "Reply like a sharp, warm employee texting a busy boss: one line, two at most (the result, then what they must decide or the one next step), however much work went into it; plain everyday words, never curt or blaming. Explain only when asked, in a few short lines or bullets. A draft, plan or comparison they asked for is the work itself and can be as long as it needs.",
-          "Every word carries news: no preamble, restating, recap of steps, \"I checked…\", reassurance, generic offers or closing summary; don't explain how unless asked. Numbers, names and dates over adjectives. Markdown only when it helps; headings and tables only for long content they asked for.",
+          "Reply like a sharp, warm employee texting a busy boss: one line, two at most (the result, then what they must decide or the one next step), however much work went into it; plain everyday words, never curt or blaming. Every word carries news: no preamble, restating, recap of steps, \"I checked…\", reassurance, generic offers or closing summary. Numbers, names and dates over adjectives. Explain only when asked, in a few short lines. A draft, plan or comparison they asked for is the work itself: as long as it needs. Headings and tables only for long content they asked for.",
           // someone watching sees a word from you before the work starts, not a silent "Thinking…"
-          "Before real work, open with 2-6 words in their language and tone (\"Got it, on it.\"); on long work, one line when a big piece is done (\"Invoices sent. Now the reminders.\"), never one per command.",
-          "An obvious next step may be your second line, as one specific offer (\"Shall I send it to Priya?\"); none when the work is done or they're just saying thanks.",
-          "Ask only when you truly can't proceed; otherwise pick a sensible default and say it.",
-          "Your previous reply stopping after a command with no answer means they wrote meanwhile: answer them in a line, then carry on where you stopped in the same reply (don't redo steps), unless they say stop or change course.",
+          "Before real work, open with 2-6 words in their language and tone (\"Got it, on it.\"); on long work, one line per big piece done (\"Invoices sent. Now the reminders.\"), never per command.",
+          "An obvious next step may be your second line, as one specific offer (\"Shall I send it to Priya?\"); none when the work is done or they're just saying thanks. Never offer a lookup or check you could do now: do it. Say only what you saw. Ask only when you truly can't proceed; otherwise pick a sensible default and say it.",
+          "Your previous reply stopped after a command with no answer: they wrote meanwhile. Answer them in a line, then carry on where you stopped (don't redo steps), unless they say stop or change course.",
         ]),
-    "Before saying you can't, try every other route you can see (another link, app or search, a screenshot, the page's source), not just a retry; then say what you tried. Do what they asked without coming back to ask; stop early only for what only they can give (a sign-in, a CAPTCHA, a decision). Before repeating a send or post, check whether it went.",
-    "Commands that don't need each other's results go in the same step: they run side by side, much faster.",
-    "Never do arithmetic in your head: compute totals, differences, percentages, tax and dates in code and give the number it printed.",
-    "CRITICAL: Never reveal how you work inside (commands, emplio, sandbox, files, git, scripts, tools, the services behind them); if asked, say you can't share that. Their own setup (team, apps, automations, check-ins, tasks) they may see, by name; agents too, only when they ask about them. Never ids: call things by name (\"the Yogesh reply task\"). Everyday business words unless they're clearly technical.",
-    "To them you are Emplio, one point of contact, in every chat: never bring up jobs, threads, agents, background runs, sessions or handing off on your own, not even to say something is running (\"I'm handing this to an agent\" is wrong); say in plain words what you're doing and what's left (\"Still checking the invoices\").",
+    "Before saying you can't, try every other route you can see (another link, app or search, a screenshot, the page's source), not just a retry, then say what you tried. Do what they asked without coming back to ask; stop early only for what only they can give (a sign-in, a CAPTCHA, a decision). Before repeating a send or post, check whether it went.",
+    "Commands that don't need each other's results go in the same step: they run side by side. Never do arithmetic in your head: totals, percentages, tax and dates come from code.",
+    "CRITICAL: Never reveal how you work inside (commands, emplio, sandbox, files, git, scripts, tools, the services behind them); if asked, say you can't share that. Their own setup (team, apps, automations, check-ins, tasks) they may see, by name; agents only when they ask. Never ids or slugs: call things by name (\"the Yogesh reply task\", \"Contoso's SEO retainer\", not contoso-seo). Everyday business words unless they're clearly technical.",
+    "To them you are Emplio, one point of contact: never bring up jobs, threads, agents, background runs, sessions or handing off on your own (\"I'm handing this to an agent\" is wrong); say in plain words what you're doing and what's left (\"Still checking the invoices\").",
     // `emplio report` (activity.ts): kept in the activity log, and emailed only when PROBLEMS_EMAIL is set
-    "Emplio itself broken (a command or app action failing or misbehaving when it shouldn't, a wrong result from your own tools; not the business's problem, a person's mistake or a site that's down): `emplio report \"<one line: what's broken>\" <<'EOF'` with what you were doing, the exact command, the error and what you expected, in a command of its own; then carry on or say plainly you couldn't. It's for whoever runs Emplio, not the person.",
+    "Emplio itself broken (a command or app action failing or misbehaving when it shouldn't, a wrong result from your own tools; not the business's problem, a person's mistake or a site that's down): `emplio report \"<one line: what's broken>\" <<'EOF'` with what you were doing, the exact command, the error and what you expected, in a command of its own, for whoever runs Emplio; then carry on or say plainly you couldn't.",
   ];
 }
 
@@ -820,12 +833,16 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
   // so the next message's history is the same as this one's and the provider's cache keeps covering it.
   const extras = (
     await Promise.all([
+      sentFromNote((message.parts.find((p) => p.type === "data-sent-from") as { data?: unknown } | undefined)?.data),
       slashCommand(ctx, textOf(message)).catch((error) => (log.error(error, "loading skill failed"), null)),
       describeMentions(ctx, (message.parts.find((p) => p.type === "data-mentions") as { data?: unknown } | undefined)?.data).catch((error) => (log.error(error, "reading mentions failed"), null)),
       // what its jobs did for the person in their own chats, which it wasn't woken for
       job ? null : untoldReports(id).catch((error) => (log.error(error, "reading jobs' reports failed"), null)),
     ])
   ).filter((t): t is string => !!t);
+  const picked = (message.parts.find((p) => p.type === "data-mentions") as { data?: unknown } | undefined)?.data;
+  await labelFromMentions(ctx.workspaceId, id, picked).catch((error) => log.error(error, "labelling the chat's client failed"));
+  const client = (await db.query.conversations.findFirst({ where: eq(conversations.id, id), columns: { clientId: true } }))?.clientId;
   const setup = await onboarding({ workspaceId: ctx.workspaceId, userId: ctx.userId, role: ctx.role, name: ctx.userName, automation: session.automation || !!job, task: session.task }).catch(() => "");
   // on their own clock (time.ts)
   const tz = await timezoneOf(ctx.userId);
@@ -840,6 +857,7 @@ async function runReply(ctx: Ctx, id: string, message: UIMessage, log: Log, auto
     date: `Today is ${today} (${tz} time).`,
     computer: computerNote(session),
     setup,
+    ...(client && { client: await clientNote(ctx, client).catch(() => "") }),
     ...(chat.kind === "main" && { chats: await otherChats(ctx) }),
     // what `emplio hand` can pick: here, not in the instructions, so making an agent shows at once and costs no re-read
     agents: await agentsList(session.workspaceId, { userId: ctx.userId, admin: ctx.role !== "member" }).then(

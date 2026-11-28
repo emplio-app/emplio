@@ -2,8 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { JobSummary } from "@emplio/shared";
-import {
+import { BriefcaseIcon,
   BlocksIcon,
+  ContactIcon,
+  FolderKanbanIcon,
+  SunIcon,
+  Building2Icon,
   BookOpenIcon,
   CheckIcon,
   ChevronsUpDownIcon,
@@ -24,6 +28,7 @@ import {
   SparklesIcon,
   Trash2Icon,
   Undo2Icon,
+  WorkflowIcon,
   UsersIcon,
   ZapIcon,
 } from "lucide-react";
@@ -176,7 +181,22 @@ export function AppSidebar() {
         <div className="px-1">
           <Logo href={main ? `/chat/${main.id}` : "/home"} onClick={() => setOpenMobile(false)} />
         </div>
-        <SidebarMenu>
+      </SidebarHeader>
+
+      {/* everything between the logo and the foot scrolls as one: the menu and the chats */}
+      <SidebarContent className="px-1">
+        <SidebarMenu className="px-2">
+          {/* what needs a look today, across every client */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname.startsWith("/today")}
+              render={<Link href="/today" onClick={() => setOpenMobile(false)} />}
+              className="h-9 font-medium"
+            >
+              <SunIcon />
+              Today
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               isActive={!!main && pathname === `/chat/${main.id}`}
@@ -232,7 +252,7 @@ export function AppSidebar() {
                 {!!waitingOnMe && (
                   <span
                     title={`${waitingOnMe} waiting on you`}
-                    className="grid h-5 min-w-5 place-items-center rounded-md bg-amber-500/15 px-1 text-amber-700 dark:text-amber-300"
+                    className="grid h-5 min-w-5 place-items-center rounded-md bg-warning/10 px-1 text-warning"
                   >
                     {waitingOnMe}
                   </span>
@@ -248,37 +268,22 @@ export function AppSidebar() {
               </SidebarMenuBadge>
             )}
           </SidebarMenuItem>
+          {/* who the business works for */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              isActive={pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database")}
-              data-tip="memory"
+              isActive={pathname.startsWith("/clients")}
+              data-tip="clients"
               data-tip-side="right"
-              render={
-                <Link href="/knowledge" onClick={() => setOpenMobile(false)} />
-              }
+              render={<Link href="/clients" onClick={() => setOpenMobile(false)} />}
               className="h-9 font-medium"
             >
-              <BookOpenIcon />
-              Memory
+              <Building2Icon />
+              Clients
             </SidebarMenuButton>
           </SidebarMenuItem>
-          {/* the people here and Emplio's agents: who does the work */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={pathname.startsWith("/team")}
-              data-tip="team"
-              data-tip-side="right"
-              render={<Link href="/team" onClick={() => setOpenMobile(false)} />}
-              className="h-9 font-medium"
-            >
-              <UsersIcon />
-              Team
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          {/* the rest, folded away so the menu stays short; open while one of them is the page */}
+          <MoreItems pathname={pathname} onOpen={() => setOpenMobile(false)} />
         </SidebarMenu>
-      </SidebarHeader>
-
-      <SidebarContent className="px-1">
         <SidebarGroup className="pb-0">
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarMenu>
@@ -298,15 +303,16 @@ export function AppSidebar() {
                   onKeyDown={(e) => e.key === "Escape" && closeSearch()}
                   className="h-9 w-full rounded-md bg-background pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label="Close search"
                   title="Close search"
                   onClick={closeSearch}
-                  className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground"
                 >
                   <XIcon className="size-4" />
-                </button>
+                </Button>
               </>
             ) : (
               <>
@@ -473,6 +479,53 @@ export function AppSidebar() {
   );
 }
 
+// Everything past the few in front, behind one More that opens in place. Remembered on this device; open by itself
+// while one of them is the page, so where you are is always showing.
+const MORE = [
+  { href: "/projects", label: "Projects", icon: FolderKanbanIcon, tip: undefined },
+  { href: "/contacts", label: "Contacts", icon: ContactIcon, tip: undefined },
+  { href: "/services", label: "Services", icon: BriefcaseIcon, tip: undefined },
+  { href: "/processes", label: "Processes", icon: WorkflowIcon, tip: "processes" },
+  { href: "/knowledge", label: "Memory", icon: BookOpenIcon, tip: "memory", also: ["/brain", "/files", "/database"] },
+  { href: "/team", label: "Team", icon: UsersIcon, tip: "team" },
+];
+function MoreItems({ pathname, onOpen }: { pathname: string; onOpen: () => void }) {
+  const here = MORE.some((m) => [m.href, ...(m.also ?? [])].some((p) => pathname.startsWith(p)));
+  const [open, setOpen] = useState(() => typeof localStorage !== "undefined" && localStorage.getItem("emplio-more") === "1");
+  const toggle = () => {
+    localStorage.setItem("emplio-more", open ? "0" : "1");
+    setOpen(!open);
+  };
+  const shown = open || here;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton onClick={toggle} aria-expanded={shown} className="h-9 font-medium text-muted-foreground hover:text-sidebar-foreground">
+        <MoreHorizontalIcon />
+        More
+        <ChevronDownIcon className={cn("ml-auto transition-transform duration-200", !shown && "-rotate-90")} />
+      </SidebarMenuButton>
+      {shown && (
+        <SidebarMenuSub className="mt-0.5 duration-200 animate-in fade-in-0 slide-in-from-top-1 motion-reduce:animate-none">
+          {MORE.map((m) => (
+            <SidebarMenuSubItem key={m.href}>
+              <SidebarMenuSubButton
+                isActive={[m.href, ...(m.also ?? [])].some((p) => pathname.startsWith(p))}
+                data-tip={m.tip}
+                data-tip-side="right"
+                render={<Link href={m.href} onClick={onOpen} />}
+                className="h-8"
+              >
+                <m.icon />
+                {m.label}
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
 // A chat's opened jobs: a tree line down to each with a tick into it, the last one curving in
 function JobRows({ jobs, pathname, onOpen, onClose }: { jobs: JobSummary[]; pathname: string; onOpen: () => void; onClose: (id: string) => void }) {
   return (
@@ -492,7 +545,7 @@ function JobRows({ jobs, pathname, onOpen, onClose }: { jobs: JobSummary[]; path
             {j.status === "working" ? (
               <Spinner className="ml-auto size-3 shrink-0 text-muted-foreground" aria-label="Working" />
             ) : j.status === "asking" ? (
-              <CircleHelpIcon className="ml-auto size-3 shrink-0 text-amber-500" aria-label="Has a question" />
+              <CircleHelpIcon className="ml-auto size-3 shrink-0 text-warning" aria-label="Has a question" />
             ) : j.status === "failed" ? (
               <XIcon className="ml-auto size-3 shrink-0 text-destructive" aria-label="Failed" />
             ) : null}

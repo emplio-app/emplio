@@ -18,7 +18,10 @@ export function syncFiles(workspaceId: string, repo: string) {
   const key = `${workspaceId}/${repo}`;
   const run = (syncing.get(key) ?? Promise.resolve()).then(async () => {
     const files = (await listPaths(workspaceId, repo)).filter((f) => TEXT.test(f.path) && f.size <= MAX_BYTES);
-    const rows = await db.select({ path: fileIndex.path, sha: fileIndex.sha }).from(fileIndex).where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo)));
+    const rows = await db
+      .select({ path: fileIndex.path, sha: fileIndex.sha })
+      .from(fileIndex)
+      .where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo)));
     const gone = rows.filter((r) => !files.some((f) => f.path === r.path)).map((r) => r.path);
     if (gone.length) await db.delete(fileIndex).where(and(eq(fileIndex.workspaceId, workspaceId), eq(fileIndex.repo, repo), inArray(fileIndex.path, gone)));
     for (const f of files) {

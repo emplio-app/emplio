@@ -71,13 +71,14 @@ function Fields({ approval }: { approval: Approval }) {
                     {v}
                   </div>
                   {long(v) && (
-                    <button
-                      type="button"
+                    <Button
+                      variant="link"
+                      size="xs"
                       onClick={() => setOpened((o) => (folded ? [...o, k] : o.filter((x) => x !== k)))}
-                      className="mt-0.5 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      className="mt-0.5 h-auto p-0 text-muted-foreground hover:text-foreground"
                     >
                       {folded ? "Show all" : "Show less"}
-                    </button>
+                    </Button>
                   )}
                 </dd>
               </div>
@@ -85,14 +86,15 @@ function Fields({ approval }: { approval: Approval }) {
           })}
         </dl>
       )}
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="xs"
         onClick={() => setDetails((d) => !d)}
         aria-expanded={details}
-        className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+        className="-ml-2 self-start text-muted-foreground"
       >
         <ChevronRightIcon className={`size-3 transition-transform ${details ? "rotate-90" : ""}`} /> Details
-      </button>
+      </Button>
       {details && (
         <pre className="max-h-60 overflow-auto rounded-lg bg-muted p-2 text-xs whitespace-pre-wrap break-words">
           {JSON.stringify(approval.input, null, 2)}
@@ -177,7 +179,7 @@ export function ApprovalCard({ approval: card, waiting }: { approval: Approval; 
   const failed = allowed && approval.result?.ok === false;
   return (
     <div className="flex w-full max-w-md flex-col rounded-xl border bg-card text-sm">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
         <AppLogo src={approval.logo} className="size-5" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{titleOf(approval)}</span>
         <span className={`flex shrink-0 items-center gap-1 text-xs ${allowed && !failed ? "text-primary" : failed ? "text-destructive" : "text-muted-foreground"}`}>

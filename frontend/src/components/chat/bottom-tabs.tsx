@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenIcon, ClipboardListIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
+import { Building2Icon, ClipboardListIcon, MessageCircleIcon, SunIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -69,7 +69,6 @@ export function BottomTabs() {
       (t.assigneeId === me?.user.id && t.status !== "done" && t.status !== "cancelled" && t.dueAt && new Date(t.dueAt).getTime() < endOfToday),
   ).length;
   const onChat = pathname.startsWith("/chat") || pathname.startsWith("/home");
-  const onMemory = pathname.startsWith("/knowledge") || pathname.startsWith("/files") || pathname.startsWith("/database");
   const chatHref = main ? `/chat/${main.id}` : "/home";
 
   const router = useRouter();
@@ -78,7 +77,7 @@ export function BottomTabs() {
   const hrefs = useRef<Record<string, string>>({});
   // the tab just tapped, until its page has opened: telling the bar the old page meanwhile flicked the selection back
   const [pending, setPending] = useState<string>();
-  hrefs.current = { chat: chatHref, work: "/tasks", memory: "/knowledge", team: "/team" };
+  hrefs.current = { today: "/today", chat: chatHref, work: "/tasks", clients: "/clients" };
   useEffect(() => {
     if (!bar) return;
     const listening = bar.addListener("select", ({ id }) => {
@@ -99,7 +98,7 @@ export function BottomTabs() {
     [bar],
   );
   const chatBadge = main?.running || (main?.unread && !onChat) ? "" : undefined;
-  const here = onChat ? "chat" : pathname.startsWith("/tasks") ? "work" : onMemory ? "memory" : pathname.startsWith("/team") ? "team" : undefined;
+  const here = onChat ? "chat" : pathname.startsWith("/tasks") ? "work" : pathname.startsWith("/today") ? "today" : pathname.startsWith("/clients") ? "clients" : undefined;
   if (pending && pending === here) setPending(undefined);
   const selected = pending ?? here;
   useEffect(() => {
@@ -107,10 +106,10 @@ export function BottomTabs() {
     void bar
       .set({
         tabs: [
+          { id: "today", title: "Today", icon: "sun.max", badge: undefined },
           { id: "chat", title: "Chat", icon: "message", badge: chatBadge },
           { id: "work", title: "Work", icon: "checklist", badge: needsMe ? String(needsMe) : undefined },
-          { id: "memory", title: "Memory", icon: "book", badge: undefined },
-          { id: "team", title: "Team", icon: "person.2", badge: undefined },
+          { id: "clients", title: "Clients", icon: "building.2", badge: undefined },
         ],
         selected,
         visible,
@@ -143,6 +142,7 @@ export function BottomTabs() {
   return (
     <nav aria-label="Main" className="bottom-tabs material absolute inset-x-0 bottom-0 z-20 border-t pb-(--safe-bottom) md:hidden">
       <div className="grid h-14 grid-cols-4">
+        {tab("/today", "Today", <SunIcon />, pathname.startsWith("/today"))}
         {tab(
           chatHref,
           "Chat",
@@ -165,8 +165,8 @@ export function BottomTabs() {
           ) : undefined,
           "work",
         )}
-        {tab("/knowledge", "Memory", <BookOpenIcon />, onMemory, undefined, "memory")}
-        {tab("/team", "Team", <UsersIcon />, pathname.startsWith("/team"), undefined, "team")}
+        {/* the rest (Projects, Memory, Team…) is under More in the side menu */}
+        {tab("/clients", "Clients", <Building2Icon />, pathname.startsWith("/clients"))}
       </div>
     </nav>
   );

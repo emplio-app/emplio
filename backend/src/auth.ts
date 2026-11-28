@@ -54,7 +54,7 @@ export async function currentUser(req: FastifyRequest) {
 // Every business they're on, the one this sign-in has open first (else the first they joined).
 async function workspacesOf(user: { id: string; workspaceId: string | null }) {
   const ws = await db
-    .select({ id: workspaces.id, name: workspaces.name, role: workspaceMembers.role })
+    .select({ id: workspaces.id, name: workspaces.name, role: workspaceMembers.role, currency: workspaces.currency })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
     .where(eq(workspaceMembers.userId, user.id))
@@ -372,19 +372,22 @@ export async function authRoutes(app: FastifyInstance) {
     },
   );
 
-  // renaming a business (the welcome page's first step): its owner or an admin
-  app.patch<{ Params: { id: string }; Body: { name: string } }>(
+  // renaming a business (the welcome page's first step), or setting the currency its prices and fees are in: its owner
+  // or an admin. Amounts already kept stay in the currency they were written in.
+  app.patch<{ Params: { id: string }; Body: { name?: string; currency?: string } }>(
     "/workspaces/:id",
-    { schema: { body: { type: "object", required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 100 } } } } },
+    { schema: { body: { type: "object", minProperties: 1, additionalProperties: false, properties: { name: { type: "string", minLength: 1, maxLength: 100 }, currency: { type: "string", pattern: "^[A-Z]{3}$" } } } } },
     async (req, reply) => {
       const user = await currentUser(req);
       if (!user) return reply.code(401).send({ error: "Not logged in" });
       const w = (await workspacesOf(user)).find((w) => w.id === req.params.id);
       if (!w) return reply.code(404).send({ error: "Not found" });
-      if (w.role === "member") return reply.code(403).send({ error: "Only the owner or an admin can rename the business" });
-      const name = req.body.name.trim();
-      if (!name) return reply.code(400).send({ error: "Name is required" });
-      await db.update(workspaces).set({ name }).where(eq(workspaces.id, w.id));
+      if (w.role === "member") return reply.code(403).send({ error: "Only the owner or an admin can change the business" });
+      const name = req.body.name?.trim();
+      if (req.body.name !== undefined && !name) return reply.code(400).send({ error: "Name is required" });
+      const { currency } = req.body;
+      if (currency && !Intl.supportedValuesOf("currency").includes(currency)) return reply.code(400).send({ error: `${currency} isn't a currency` });
+      await db.update(workspaces).set({ ...(name && { name }), ...(currency && { currency }) }).where(eq(workspaces.id, w.id));
       return { ok: true };
     },
   );

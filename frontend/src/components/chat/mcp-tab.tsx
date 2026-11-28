@@ -103,7 +103,7 @@ export function McpTab() {
                 <>
                   <Switch checked={s.enabled} onCheckedChange={() => toggle.mutate(s)} aria-label={`Use ${s.name}`} />
                   <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-8" aria-label={`Manage ${s.name}`} />}>
+                    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={`Manage ${s.name}`} />}>
                       <MoreHorizontalIcon />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">

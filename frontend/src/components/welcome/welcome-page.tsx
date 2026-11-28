@@ -89,7 +89,7 @@ export function WelcomePage() {
   const last = step === STEPS.length - 1;
 
   return (
-    <main className="flex min-h-dvh flex-col bg-muted/30 pt-(--safe-top)">
+    <main className="flex min-h-dvh flex-col bg-muted pt-(--safe-top)">
       <header className="flex items-center justify-between px-4 py-4 sm:px-8">
         <Logo />
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => finish.mutate()}>
@@ -105,7 +105,7 @@ export function WelcomePage() {
             ))}
           </div>
 
-          <div key={current.key} className="rounded-2xl border bg-card p-5 shadow-xl shadow-primary/5 animate-in fade-in slide-in-from-bottom-2 duration-300 sm:p-7">
+          <div key={current.key} className="rounded-xl border bg-card p-5 shadow-xl shadow-primary/5 animate-in fade-in slide-in-from-bottom-2 duration-300 sm:p-7">
             <p className="text-xs font-medium text-muted-foreground">
               Step {step + 1} of {STEPS.length}
             </p>
@@ -168,7 +168,7 @@ export function WelcomePage() {
                         e.preventDefault();
                         attachments.add([...e.dataTransfer.files]);
                       }}
-                      className="flex w-full items-center gap-3 rounded-xl border border-dashed p-3 text-left text-sm transition-colors hover:bg-muted/50"
+                      className="flex w-full items-center gap-3 rounded-xl border border-dashed p-3 text-left text-sm transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
                     >
                       <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
                         <PaperclipIcon className="size-4 text-muted-foreground" />

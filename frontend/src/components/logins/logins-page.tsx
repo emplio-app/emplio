@@ -116,7 +116,7 @@ export function LoginsPage() {
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="size-8 text-muted-foreground"
+                      className="text-muted-foreground"
                       aria-label={`Delete ${l.name}`}
                       disabled={remove.isPending}
                       onClick={() =>

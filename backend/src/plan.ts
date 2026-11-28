@@ -53,6 +53,9 @@ export function settle(steps: PlanStep[], doing?: number) {
 }
 
 // `emplio plan ...` in a chat; `plan`: the whole list when it changed, for the chat and the phone to show.
+// after each change while steps are open (the evals show the same)
+export const PLAN_TIP = "[The person is watching this list: keep it current as you work. Before you start a step: `emplio plan doing <n>` (one at a time). The moment it's finished: `emplio plan done <n>`, never several together at the end. Stopping to ask them something, leave the rest open.]";
+
 export async function planCommand(conversationId: string, args: string[]): Promise<{ text: string; plan?: PlanStep[] }> {
   const [sub, ...rest] = args;
   const row = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId), columns: { plan: true } });
@@ -124,7 +127,7 @@ export async function planCommand(conversationId: string, args: string[]): Promi
   const left = next.findIndex((x) => x.status !== "done");
   const tip =
     left >= 0
-      ? `\n[The person is watching this list. Give each command the number of the step it works on (bash's step), and the list moves along by itself. When all the work's done, \`emplio plan done\` ticks off the rest, before your final answer; stopping to ask them something, leave the rest open.]`
+      ? `\n${PLAN_TIP}`
       : "";
   return { text: planText(next) + tip, plan: next };
 }
