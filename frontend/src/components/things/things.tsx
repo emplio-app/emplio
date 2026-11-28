@@ -136,7 +136,8 @@ export function Row({ lead, title, meta, right, sub, href, onClick, dim }: { lea
         {meta && <span className="truncate text-xs text-muted-foreground">{meta}</span>}
       </span>
       {(right || sub) && (
-        <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs tabular-nums">
+        // ponytail: capped at 40% and cut short, so a long price note never squeezes the name
+        <span className="flex max-w-[40%] min-w-0 flex-col items-end gap-0.5 text-right text-xs tabular-nums *:max-w-full *:truncate">
           {right}
           {sub && <span className="text-muted-foreground">{sub}</span>}
         </span>
@@ -600,8 +601,8 @@ export function ServicesPage() {
                 dim={!!s.archivedAt}
                 lead={<TileIcon icon={BriefcaseIcon} />}
                 title={<Named name={s.name} private={s.private} />}
-                meta={[s.activeProjects ? `${s.activeProjects} active project${s.activeProjects === 1 ? "" : "s"}` : "No active projects", s.process && `runs ${processes.find((p) => p.name === s.process)?.title ?? s.process}`].filter(Boolean).join(" · ")}
-                right={<span className="text-muted-foreground">{moneyText(s) || "No price yet"}</span>}
+                meta={[s.activeProjects ? `${s.activeProjects} active project${s.activeProjects === 1 ? "" : "s"}` : "No active projects", s.process && `starts ${processes.find((p) => p.name === s.process)?.title ?? s.process}`].filter(Boolean).join(" · ")}
+                right={<span className="text-muted-foreground" title={moneyText(s) || undefined}>{moneyText(s) || "No price yet"}</span>}
               />
             </li>
           ))}
@@ -985,7 +986,7 @@ function ServicePanel({ slug }: { slug: string }) {
         <Field label="Price note">
           <Text value={s.priceNote} label="Price note" disabled={!admin} placeholder={admin ? "e.g. + GST, 80 hours a month" : "—"} onSave={(priceNote) => save.mutate({ priceNote })} />
         </Field>
-        <Field label="Runs">
+        <Field label="Starts process">
           <Choose value={s.process ?? ""} items={items} label="Process it runs" disabled={!admin} onChange={(process) => save.mutate({ process: process || null })} className={cn(QUIET, "w-full")} />
         </Field>
         <Details kind="service" details={s.details} disabled={!admin} onSave={(details) => save.mutate({ details })} />

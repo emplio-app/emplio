@@ -19,6 +19,7 @@ import { automations, clients, processes, processRuns, projects, tasks, workspac
 import { findAgent } from "./agents";
 import { detailOf, findClient, listClients } from "./clients";
 import { ensureRepo, lastAuthor, listFolder, readFile, writeFile } from "./gitea";
+import { q } from "./records";
 import { listTeam } from "./team";
 import { DEFAULT_ZONE } from "./time";
 
@@ -602,7 +603,7 @@ export async function listRuns(workspaceId: string, f: { process?: string; clien
         f.process ? eq(processRuns.process, f.process) : undefined,
         f.clientId ? eq(processRuns.clientId, f.clientId) : undefined,
         f.all ? undefined : eq(processRuns.status, "active"),
-        member ? sql`(${processRuns.startedBy} = ${member} or exists (select 1 from ${tasks} where ${tasks.runId} = ${processRuns.id} and ${tasks.assigneeId} = ${member}))` : undefined,
+        member ? sql`(${processRuns.startedBy} = ${member} or exists (select 1 from ${tasks} where ${tasks.runId} = ${q(processRuns.id)} and ${tasks.assigneeId} = ${member}))` : undefined,
       ),
     )
     .orderBy(desc(processRuns.startedAt))

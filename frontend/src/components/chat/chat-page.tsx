@@ -10,7 +10,7 @@ import { useDraft } from "@/components/chat/draft";
 import { ChatView } from "@/components/chat/chat-view";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { api } from "@/lib/api";
+import { api, takeChatEarly } from "@/lib/api";
 
 // job: a job's own chat (opening it puts it in the sidebar, under Chat)
 type ConversationResponse = { id: string; title: string; messages: UIMessage[]; older: string | null; job?: ChatJob };
@@ -32,7 +32,10 @@ export function ChatPage() {
   const { data, error } = useQuery({
     queryKey: ["conversation", conversationId],
     // opened from a search result: all of it, so the message is there to show
-    queryFn: () => api<ConversationResponse>(`/conversations/${conversationId}${location.hash.startsWith("#m-") ? "?limit=5000" : ""}`),
+    queryFn: () =>
+      location.hash.startsWith("#m-")
+        ? api<ConversationResponse>(`/conversations/${conversationId}?limit=5000`)
+        : takeChatEarly(conversationId!, () => api<ConversationResponse>(`/conversations/${conversationId}`)),
     enabled: !isDraft,
     staleTime: 0,
     gcTime: 0,

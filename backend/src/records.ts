@@ -9,7 +9,7 @@
 // - a write carrying the updatedAt it read is refused when the row changed since (two people, or Emplio and a person)
 // - Emplio acts with the role of whoever it's working for, never above it
 // Notes about a record are the file company/<kind>/<slug>/index.md: words only, no facts at its top.
-import { and, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, Column, desc, eq, getTableName, is, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { HistoryEntry, RecordChange, Role } from "@emplio/shared";
 import { db } from "./db";
@@ -33,27 +33,30 @@ export const wsOf = (v: Viewer) => (typeof v === "string" ? v : v.workspaceId);
 export const seesPrivate = (v: Viewer) => typeof v === "string" || (!!v.role && v.role !== "member");
 // A client this viewer may see (id and private: that client's columns in the query): everyone's, or a private one
 // they handle. undefined: they see them all
+// A column with its table's name. Drizzle writes a column bare in a one-table query, and bare inside a subquery it means
+// that subquery's own column when it has one by that name ("id" of clients c, "client_id" of client_handlers h).
+export const q = (c: SQL | AnyPgColumn) => (is(c, Column) ? sql.raw(`"${getTableName(c.table)}"."${c.name.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}"`) : c);
 export const visibleClient = (v: Viewer, id: SQL | AnyPgColumn, priv: SQL | AnyPgColumn) =>
   seesPrivate(v)
     ? undefined
     : typeof v !== "string" && v.userId
-      ? sql`(not ${priv} or ${handles(v.userId, id)})`
-      : sql`not ${priv}`;
+      ? sql`(not ${q(priv)} or ${handles(v.userId, id)})`
+      : sql`not ${q(priv)}`;
 // A contact at clients, every one of them private (`as`: that client taken as switched to on already)
 export const allClientsPrivate = (as?: { id: string; on: boolean }) =>
-  sql<boolean>`(exists (select 1 from ${contactClients} l where l.contact_id = ${contacts.id})
-    and not exists (select 1 from ${contactClients} l join ${clients} c on c.id = l.client_id where l.contact_id = ${contacts.id}
+  sql<boolean>`(exists (select 1 from ${contactClients} l where l.contact_id = ${q(contacts.id)})
+    and not exists (select 1 from ${contactClients} l join ${clients} c on c.id = l.client_id where l.contact_id = ${q(contacts.id)}
       and not ${as ? sql`(case when c.id = ${as.id} then ${as.on} else c.private end)` : sql`c.private`}))`;
 const userOf = (v: Viewer) => (typeof v === "string" ? undefined : v.userId);
-export const handles = (userId: string, clientId: SQL | AnyPgColumn) => sql`exists (select 1 from ${clientHandlers} h where h.client_id = ${clientId} and h.user_id = ${userId})`;
+export const handles = (userId: string, clientId: SQL | AnyPgColumn) => sql`exists (select 1 from ${clientHandlers} h where h.client_id = ${q(clientId)} and h.user_id = ${userId})`;
 // private, on its own or with its client
-export const projectPrivate = sql<boolean>`(${projects.private} or exists (select 1 from ${clients} c where c.id = ${projects.clientId} and c.private))`;
-export const contactPrivate = sql<boolean>`(${contacts.private} or ${allClientsPrivate()})`;
+export const projectPrivate = sql<boolean>`(${q(projects.private)} or exists (select 1 from ${clients} c where c.id = ${q(projects.clientId)} and c.private))`;
+export const contactPrivate = sql<boolean>`(${q(contacts.private)} or ${allClientsPrivate()})`;
 // A project this viewer may see (in a query on projects): everyone's, or a private one at a client they handle, or one
 // they lead. undefined: they see them all
 export const visibleProject = (v: Viewer) => {
   const u = userOf(v);
-  return seesPrivate(v) ? undefined : u ? sql`(not ${projectPrivate} or ${handles(u, projects.clientId)} or ${projects.leadId} = ${u})` : sql`not ${projectPrivate}`;
+  return seesPrivate(v) ? undefined : u ? sql`(not ${projectPrivate} or ${handles(u, projects.clientId)} or ${q(projects.leadId)} = ${u})` : sql`not ${projectPrivate}`;
 };
 // A contact this viewer may see (in a query on contacts): everyone's, or a private one at a client they handle
 export const visibleContact = (v: Viewer) => {
@@ -61,17 +64,17 @@ export const visibleContact = (v: Viewer) => {
   return seesPrivate(v)
     ? undefined
     : u
-      ? sql`(not ${contactPrivate} or exists (select 1 from ${contactClients} l where l.contact_id = ${contacts.id} and ${handles(u, sql`l.client_id`)}))`
+      ? sql`(not ${contactPrivate} or exists (select 1 from ${contactClients} l where l.contact_id = ${q(contacts.id)} and ${handles(u, sql`l.client_id`)}))`
       : sql`not ${contactPrivate}`;
 };
 // A meeting is private on its own switch, or while its client or project is
-export const meetingPrivate = sql<boolean>`(${meetings.private}
-  or exists (select 1 from ${clients} c where c.id = ${meetings.clientId} and c.private)
-  or exists (select 1 from ${projects} p left join ${clients} c on c.id = p.client_id where p.id = ${meetings.projectId} and (p.private or c.private)))`;
+export const meetingPrivate = sql<boolean>`(${q(meetings.private)}
+  or exists (select 1 from ${clients} c where c.id = ${q(meetings.clientId)} and c.private)
+  or exists (select 1 from ${projects} p left join ${clients} c on c.id = p.client_id where p.id = ${q(meetings.projectId)} and (p.private or c.private)))`;
 // Someone's own meeting: they were in it or added it, or it's about a client they handle or a project they lead
-export const meetingOf = (u: string) => sql`(${u} = any(${meetings.teamIds}) or ${meetings.createdById} = ${u}
-  or (${meetings.clientId} is not null and ${handles(u, meetings.clientId)})
-  or exists (select 1 from ${projects} p where p.id = ${meetings.projectId} and (p.lead_id = ${u} or ${handles(u, sql`p.client_id`)})))`;
+export const meetingOf = (u: string) => sql`(${u} = any(${q(meetings.teamIds)}) or ${q(meetings.createdById)} = ${u}
+  or (${q(meetings.clientId)} is not null and ${handles(u, meetings.clientId)})
+  or exists (select 1 from ${projects} p where p.id = ${q(meetings.projectId)} and (p.lead_id = ${u} or ${handles(u, sql`p.client_id`)})))`;
 // A meeting this viewer may see (in a query on meetings): everyone's, or a private one of their own
 export const visibleMeeting = (v: Viewer) => {
   const u = userOf(v);

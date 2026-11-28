@@ -2,6 +2,22 @@
 
 The newest version is at the top, and its heading is where Emplio's version number lives. "What's new" is shown to people in the app, so keep it in everyday words. See [CONTRIBUTING.md](CONTRIBUTING.md#releasing-a-new-version).
 
+## 1.4.23 (2026-11-28)
+
+### What's new
+
+- Removing, archiving or deleting a client, contact, project, service, process, meeting, stage or field, and making any of them private or shared, now always asks you to Allow first. An automation asks once, when it's set up.
+- Contacts linked to a client no longer show as private when nothing is private.
+- Services: a long price no longer squeezes the name, and "Runs" is now "Starts process".
+- Emplio starts on your message sooner in a long chat, and sending from a page's message box no longer waits for the chat to open.
+
+### For developers
+
+- `sandbox.ts` `recordAsk`/`askFirst`: archive, remove, delete and private/shared changes on records go through `approve` with `alwaysAsk` (unless an automation, allowed at setup).
+- `records.ts` `q()`: columns of the outer table inside raw privacy subqueries are named in full; bare `"id"` bound to the subquery's own table (every linked contact read as private; a handler of any client saw every private project).
+- `chat.ts` `loadMessages(id, from)`: a reply reads parts only from where its notes end; versions grouped once instead of per message; attachments from a jsonb query. A 3,400-message chat: about 1 s to 0.1 s.
+- `api.ts` `fetchChatEarly`: PageBox fetches the main chat while typing; ChatPage takes it.
+
 ## 1.4.22 (2026-11-28)
 
 ### What's new

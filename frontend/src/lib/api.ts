@@ -278,3 +278,21 @@ export function useLiveEvents() {
   // a different page in front of them
   useEffect(() => tell.current(), [pathname]);
 }
+
+// A chat asked for before its page opens: a page's message box (composer.tsx PageBox) starts it once something's
+// typed, so the chat is there to send into when they press send instead of loading after. Taken once; a minute
+// old, it's asked again.
+const EARLY_FOR = 60_000;
+const early = new Map<string, { at: number; data: Promise<unknown> }>();
+export const fetchChatEarly = (id: string) => {
+  const e = early.get(id);
+  if (e && Date.now() - e.at < EARLY_FOR) return;
+  const data = api(`/conversations/${id}`);
+  data.catch(() => {});
+  early.set(id, { at: Date.now(), data });
+};
+export const takeChatEarly = <T,>(id: string, fetch: () => Promise<T>) => {
+  const e = early.get(id);
+  early.delete(id);
+  return e && Date.now() - e.at < EARLY_FOR ? (e.data as Promise<T>).catch(fetch) : fetch();
+};
