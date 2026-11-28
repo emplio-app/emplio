@@ -217,7 +217,7 @@ export function useLiveEvents() {
     // The lists the server can change without this app asking (jobs' chats aren't in the chat list: theirs is the
     // jobs list). Only those named as changed are fetched again: every nudge used to fetch them all. Nudges close
     // together (a reply starting, then its title) come as one fetch each.
-    const keys = { chats: conversationsQueryKey, jobs: ["jobs"], tasks: tasksQueryKey, approvals: approvalsQueryKey };
+    const keys = { chats: conversationsQueryKey, jobs: ["jobs"], tasks: tasksQueryKey, approvals: approvalsQueryKey, nextStep: ["next-step"] };
     type Changed = keyof typeof keys;
     const due = new Set<Changed>();
     let soon: ReturnType<typeof setTimeout> | undefined;

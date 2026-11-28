@@ -762,7 +762,9 @@ async function carryOn(who: Who, conversationId: string, w: Row, brief: string):
   else {
     // finished, it takes the new work's name (as a fresh job would), so its line and report say what it's on now
     w.name = brief.split("\n")[0]!.trim().slice(0, 80) || w.name;
-    await db.update(jobs).set({ name: w.name }).where(eq(jobs.id, w.id));
+    // working from now, not from when its run begins (began): in between, the chat's reply can end and the
+    // next-step card (chat.ts nextStep) would ask the person to go ahead with work that's already handed off
+    await db.update(jobs).set({ name: w.name, status: "working", finishedAt: null }).where(eq(jobs.id, w.id));
     await db.update(conversations).set({ title: w.agent ? `${agentName(w.agent)}: ${w.name}` : w.name }).where(eq(conversations.id, w.chatId));
   }
   track(w.id);

@@ -2422,6 +2422,8 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
     else if (line.startsWith(`APPS:${key}\t`)) {
       const args = Buffer.from(line.slice(`APPS:${key}\t`.length), "base64").toString().split("\0").slice(0, -1);
       const who = { workspaceId: s.workspaceId, userId: s.user.id, role: s.role };
+      // what the person changed on the Allow card before allowing, said after the result so Emplio knows
+      const edits: string[] = [];
       // an MCP server's tools come through emplio apps too, under its name
       const viaMcp = await mcpViaApps(s, args, (name, text) => park(box, name, text));
       const reply = viaMcp ??
@@ -2430,7 +2432,7 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
         s.conversationId,
         args,
         (name, text) => park(box, name, text),
-        (action, input, account) => approve(s, action, input, { account }),
+        (action, input, account) => approve(s, action, input, { account, editable: (note) => edits.push(note) }),
         (path) => download(box, path),
         async (name, bytes) => {
           const path = `${WORK}/tmp/apps/files/${basename(name)}`;
@@ -2438,9 +2440,9 @@ export async function runEz(box: Box, s: Session, output: string, key: string, j
           return path;
         },
         ));
-      if (typeof reply === "string") lines.push(reply);
+      if (typeof reply === "string") lines.push(reply, ...edits);
       else {
-        lines.push(reply.text);
+        lines.push(reply.text, ...edits);
         if ("path" in reply.card) cards.push(reply.card);
         else logins.push(reply.card);
       }

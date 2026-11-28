@@ -4,11 +4,11 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { NextStep } from "@emplio/shared";
 import { generateText } from "ai";
-import { promises, type Turn } from "../../src/next-step";
+import { promises } from "../../src/next-step";
 import type { Case } from "./cases";
 
 export type Output = { card: NextStep | null; said: string };
-type Args = { input: Turn[]; output: Output; expected: Case["expect"] };
+type Args = { input: Pick<Case, "chat" | "work">; output: Output; expected: Case["expect"] };
 type Score = { name: string; score: number | null; metadata?: Record<string, unknown> };
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -47,7 +47,7 @@ const JUDGE = [
   "You check a small card shown under a chat between a business owner and their AI employee. The card has a question and 2-3 buttons the owner can tap instead of typing.",
   "Answer PASS only if all of these hold:",
   "1. Tapping any one button, with nothing typed, is a complete answer to the card's question that the AI employee could act on right away.",
-  "2. The question follows from the AI employee's last message: it is the question that message asks or the offer it makes, not something new.",
+  "2. The question follows from the chat: it is the question the AI employee's last message asks, the offer it makes, the plain next step of what the owner asked for (an invoice they wanted is made, so sending it), or a separate piece the owner asked for that can start while other work runs. Not new work nobody asked for.",
   "3. The buttons offer nothing the chat didn't mention. A button that declines, waits, or takes all or none of the named choices is fine.",
   "Otherwise answer FAIL. Reply with PASS or FAIL, then one short sentence saying why.",
 ].join("\n");
@@ -58,7 +58,7 @@ export async function tapAnswers({ input, output, expected }: Args): Promise<Sco
   if (!output.card || !expected.card) return { name: "tap_answers", score: null };
   const promised = output.card.buttons.filter(promises);
   if (promised.length) return { name: "tap_answers", score: 0, metadata: { why: `promise button: ${promised.join(", ")}` } };
-  const chat = input.map((t) => `${t.role === "user" ? "Owner" : "AI employee"}: ${t.text}`).join("\n\n");
+  const chat = input.chat.map((t) => `${t.role === "user" ? "Owner" : "AI employee"}: ${t.text}`).join("\n\n");
   const { text } = await generateText({
     model: createOpenRouter()(JUDGE_MODEL),
     system: JUDGE,

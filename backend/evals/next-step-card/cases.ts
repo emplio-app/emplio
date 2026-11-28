@@ -8,7 +8,11 @@ import type { Turn } from "../../src/next-step";
 // - nothing: the work is done, still under way, or it was small talk, so there must be no card
 // - decision: a yes/no the person can settle with a tap, so there must be a card
 // - options: the reply named the choices, so the card must offer those
-export type Category = "typing" | "nothing" | "decision" | "options";
+// - next: the work they asked for is done and its next step follows plainly from what they asked, so a card offers it
+// - working: Emplio or its agents are still on it (it said so, or handed it off), so there must be no card
+// - meanwhile: an agent is on it, and the owner asked for a separate piece that doesn't need its result, so a card
+//   offers that piece (and only that: never about the running work)
+export type Category = "typing" | "nothing" | "decision" | "options" | "next" | "working" | "meanwhile";
 
 export type Case = {
   name: string;
@@ -16,6 +20,8 @@ export type Case = {
   // real: seen in a real chat (rewritten). written: made up to cover a kind of chat we haven't caught yet
   source: "real" | "written";
   chat: Turn[];
+  // commands Emplio ran in its last reply, before its words: what the card writer sees besides the chat
+  work?: { description: string; command: string; output: string }[];
   // offers: words the buttons must carry, one per named choice. devanagari: the card must be in that script
   expect: { card: boolean; offers?: string[]; devanagari?: boolean };
 };
@@ -229,7 +235,7 @@ export const cases: Case[] = [
   },
   {
     name: "fixed a mistake",
-    category: "nothing",
+    category: "next",
     source: "written",
     chat: [
       u("make the invoice for Mehta & Sons"),
@@ -237,7 +243,7 @@ export const cases: Case[] = [
       u("gst should be 18 not 12"),
       e("Fixed. Invoice 231 now shows 18% GST, for a total of ₹73,160."),
     ],
-    expect: { card: false },
+    expect: { card: true },
   },
 
   // ── decision: card ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -423,5 +429,198 @@ export const cases: Case[] = [
       e("The printer has three sizes ready to go: small (3x2 ft), medium (6x3 ft) and large (10x4 ft). Which size should I order?"),
     ],
     expect: { card: true, offers: ["small", "medium", "large"] },
+  },
+
+  // ── next: the work is done and its next step is plain, so a card offers it ────────────────────────────────────────
+  {
+    name: "invoice made for a customer",
+    category: "next",
+    source: "written",
+    chat: [
+      u("make an invoice for Northwind for the 40 cushions"),
+      e("Invoice 245 for Northwind is ready: 40 cushions at ₹900, ₹36,000 plus 18% GST, ₹42,480 in all. It's saved in Files."),
+    ],
+    expect: { card: true },
+  },
+  {
+    name: "quote ready for the owner to check",
+    category: "next",
+    source: "written",
+    chat: [
+      u("prepare the quote for the lakeview hotel order, i want to check it before it goes"),
+      e("The quote for Lakeview Hotel is ready: 120 bedsheets and 60 curtains, ₹3,84,000 with GST, valid 15 days. It's in Files for you to check."),
+    ],
+    expect: { card: true },
+  },
+  {
+    name: "meeting notes for everyone",
+    category: "next",
+    source: "written",
+    chat: [
+      u("write up the notes from today's staff meeting for everyone"),
+      e("The notes are ready: new opening hours from Monday, Raj takes over online orders, and the stock count is on the 28th. They're saved in Files."),
+    ],
+    expect: { card: true },
+  },
+  {
+    name: "reply to the customer drafted",
+    category: "next",
+    source: "written",
+    chat: [
+      u("sarah from northwind asked about the delayed curtains, draft a reply"),
+      e("Here's a reply for Sarah:\n\n> Hi Sarah, your curtains left our workshop today and should reach you by Friday. Sorry for the wait.\n\nIt's saved as a draft in Gmail."),
+    ],
+    expect: { card: true },
+  },
+  {
+    name: "contacts made, nothing follows",
+    category: "nothing",
+    source: "written",
+    chat: [
+      u("create contacts for the clients we're working with and link them to their companies"),
+      e("Done. I made 14 contacts across 6 companies, each linked to its company with email and phone. They're under Contacts."),
+    ],
+    expect: { card: false },
+  },
+
+  // ── working: Emplio or its agents are still on it ──────────────────────────────────────────────────────────────────
+  {
+    name: "handed to an agent, table to follow",
+    category: "working",
+    source: "real",
+    chat: [
+      u("fill in contacts for the people we're actively working with, link them to their companies, with their contact details"),
+      e("I'm creating contacts for the people you're actively working with, like the Northwind team and Sarah at Contoso. Each will be linked to their company, with emails and phone numbers from your mail. I'll send you a table once it's done."),
+    ],
+    work: [
+      {
+        description: "Hand the contacts work to Document Finder",
+        command: 'emplio hand document-finder "Create contacts for the people we actively work with and link them to their companies"',
+        output: 'started 3f2a91 "Create contacts for the people we actively work with" with Document Finder',
+      },
+    ],
+    expect: { card: false },
+  },
+  {
+    name: "agent comparing suppliers",
+    category: "working",
+    source: "written",
+    chat: [u("find 5 suppliers for jute bags and get their prices"), e("Supplier Finder is on it. It'll ask five suppliers for prices on jute bags and come back with a comparison.")],
+    work: [
+      {
+        description: "Hand the supplier search to Supplier Finder",
+        command: 'emplio hand supplier-finder "Find 5 jute bag suppliers and get their prices"',
+        output: 'started 81c0de "Find 5 jute bag suppliers and get their prices" with Supplier Finder',
+      },
+    ],
+    expect: { card: false },
+  },
+
+  // ── meanwhile: an agent is on it; a separate piece they asked for can go ahead ─────────────────────────────────────
+  {
+    name: "price list while suppliers quote",
+    category: "meanwhile",
+    source: "written",
+    chat: [
+      u("find 5 jute bag suppliers and get their prices. we also need a new price list for the shop"),
+      e("Supplier Finder is asking five jute bag suppliers for prices now. I'll share the comparison when it's back."),
+    ],
+    work: [{ description: "Hand the supplier search to Supplier Finder", command: 'emplio hand supplier-finder "Find 5 jute bag suppliers and get their prices"', output: 'started 81c0de "Find 5 jute bag suppliers and get their prices" with Supplier Finder' }],
+    expect: { card: true },
+  },
+  {
+    name: "proofread while printers quote",
+    category: "meanwhile",
+    source: "written",
+    chat: [
+      u("get quotes from 3 printers for 500 brochures. also the brochure text needs a proofread before it goes"),
+      e("Quote Finder is asking three printers for quotes on 500 brochures. I'll bring the quotes back here."),
+    ],
+    work: [{ description: "Hand the printer quotes to Quote Finder", command: 'emplio hand quote-finder "Get quotes from 3 printers for 500 brochures"', output: 'started 2b77e1 "Get quotes from 3 printers for 500 brochures" with Quote Finder' }],
+    expect: { card: true },
+  },
+  {
+    name: "intro emails need the contacts first",
+    category: "working",
+    source: "written",
+    chat: [
+      u("make contacts for the people we're working with, then we'll send them all an intro to our new service"),
+      e("Document Finder is creating the contacts now, each linked to their company. I'll send you the table once it's done."),
+    ],
+    work: [{ description: "Hand the contacts to Document Finder", command: 'emplio hand document-finder "Create contacts for the people we work with"', output: 'started 3f2a91 "Create contacts for the people we work with" with Document Finder' }],
+    expect: { card: false },
+  },
+  {
+    name: "second piece already handed off too",
+    category: "working",
+    source: "written",
+    chat: [
+      u("find 5 jute bag suppliers and also check what our competitors charge for jute bags"),
+      e("Supplier Finder is getting prices from five suppliers, and Price Checker is looking at three competitors. I'll put both together for you."),
+    ],
+    work: [
+      { description: "Hand the supplier search to Supplier Finder", command: 'emplio hand supplier-finder "Find 5 jute bag suppliers and get their prices"', output: 'started 81c0de "Find 5 jute bag suppliers and get their prices" with Supplier Finder' },
+      { description: "Hand the competitor check to Price Checker", command: 'emplio hand price-checker "Check what 3 competitors charge for jute bags"', output: 'started 5d10aa "Check what 3 competitors charge for jute bags" with Price Checker' },
+    ],
+    expect: { card: false },
+  },
+
+  // ── held out: added after the rules settled, to see they generalise ───────────────────────────────────────────────
+  {
+    name: "purchase order made",
+    category: "next",
+    source: "written",
+    chat: [u("make the purchase order for 200 metres of linen from Fabrico"), e("PO-77 for 200 metres of linen from Fabrico is ready, ₹1,60,000 with GST. It's saved in Files.")],
+    expect: { card: true },
+  },
+  {
+    name: "payment link made for a customer",
+    category: "next",
+    source: "written",
+    chat: [u("create a payment link for sarah's order, 12,500"), e("The payment link for ₹12,500 is ready: pay.example/x7k2. It works for cards and UPI.")],
+    expect: { card: true },
+  },
+  {
+    name: "setting changed",
+    category: "nothing",
+    source: "written",
+    chat: [u("change my monday reminder to 10 am"), e("Done. Your Monday reminder now comes at 10 AM.")],
+    expect: { card: false },
+  },
+  {
+    name: "sales figure",
+    category: "nothing",
+    source: "written",
+    chat: [u("how much did we sell yesterday"), e("Yesterday's sales were ₹46,300 from 31 orders, a little above the daily average.")],
+    expect: { card: false },
+  },
+  {
+    name: "they must reconnect",
+    category: "nothing",
+    source: "written",
+    chat: [u("post today's offer on instagram"), e("I couldn't post it: Instagram needs you to sign in again. You can reconnect it under Integrations, and I'll post it then.")],
+    expect: { card: false },
+  },
+  {
+    name: "thank-you wording",
+    category: "typing",
+    source: "written",
+    chat: [u("send a thank-you to the customers who ordered last week"), e("I found 23 customers who ordered last week. What would you like the thank-you to say?")],
+    expect: { card: false },
+  },
+  {
+    name: "renew the domain",
+    category: "decision",
+    source: "written",
+    chat: [u("our domain renews soon right?"), e("Yes, kaveri-home.in renews on 3 December for ₹899. Shall I renew it now so it doesn't lapse?")],
+    expect: { card: true },
+  },
+  {
+    name: "agent comparing prices",
+    category: "working",
+    source: "written",
+    chat: [u("compare prices for cushion covers on 3 sites"), e("Price Checker is comparing the three sites now. I'll share what it finds here.")],
+    work: [{ description: "Hand the price check to Price Checker", command: 'emplio hand price-checker "Compare cushion cover prices on 3 sites"', output: 'started 5d10aa "Compare cushion cover prices on 3 sites" with Price Checker' }],
+    expect: { card: false },
   },
 ];

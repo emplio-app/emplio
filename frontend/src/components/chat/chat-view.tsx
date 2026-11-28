@@ -575,8 +575,8 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
     dispatch({ text: sent, files: filesOf(message), mentions: part("data-mentions") as Mention[] | undefined, command: part("data-command") as string | undefined });
   };
 
-  // The closable card after each reply, made by a small model (backend chat.ts nextStep). Opening a chat only
-  // shows one already made.
+  // The closable card after each reply, made by a small model (backend chat.ts nextStep). Opening a chat, or the
+  // server saying one was made (a reply this page didn't follow), shows the one kept; a reply followed here asks.
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   // How much of the chat the card floats over. Kept until the next send, so closing it or typing moves nothing.
   const [cardRoom, setCardRoom] = useState(0);
@@ -588,15 +588,26 @@ export function ChatView({ id, title, initialMessages, initialOlder, isNew, job 
       setCardRoom(0);
       return setNextStep(null);
     }
-    if (isNew && !wasBusy) return;
-    if (status !== "ready" || (wasBusy && queue.length)) return;
+    if (!wasBusy || status !== "ready" || queue.length) return;
     let current = true;
-    api<{ card: NextStep | null }>(`/conversations/${id}/next-step${wasBusy ? "" : "?peek=1"}`)
+    api<{ card: NextStep | null }>(`/conversations/${id}/next-step`)
       .then((r) => current && setNextStep(r.card))
       .catch(() => {});
     return () => void (current = false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a reply finishing (and opening the chat), not as the queue changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a reply finishing, not as the queue changes
   }, [status, id]);
+  // one card, for the last reply only: a newer reply (an agent's work done while the card sat there) replaces it,
+  // with its own card or none, so an old question never stays up
+  const lastId = messages.at(-1)?.id;
+  const { data: keptStep, dataUpdatedAt: keptAt } = useQuery({
+    queryKey: ["next-step", id, lastId],
+    queryFn: () => api<{ card: NextStep | null }>(`/conversations/${id}/next-step?peek=1`),
+    enabled: !isNew && status === "ready",
+  });
+  useEffect(() => {
+    if (keptStep && status === "ready" && !queue.length) setNextStep(keptStep.card);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when a kept card is read, not as the reply goes
+  }, [keptAt]);
   // This chat's Allow cards as the server has them (approvals.ts): the ones still waiting sit above the chat box,
   // and each card in a reply reads its answer and outcome from here. Its live nudges refetch it (useLiveEvents).
   const { data: cards } = useQuery({ queryKey: [...approvalsQueryKey, id], queryFn: () => api<Approval[]>(`/conversations/${id}/approvals`) });

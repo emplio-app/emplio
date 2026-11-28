@@ -12,7 +12,7 @@ import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { context } from "./auth";
 import { db } from "./db";
-import { approvals, workspaceMembers } from "./db/schema";
+import { approvals, users, workspaceMembers } from "./db/schema";
 import { postMessage } from "./chat";
 import { startedIn } from "./jobs";
 import { connectCard, getAction, providerFor, runAction } from "./integrations";
@@ -27,7 +27,7 @@ import type { Session } from "./sandbox";
 const WAIT_MS = 10 * 60_000;
 const VALID_MS = 2 * 60 * 60_000;
 
-type Waiting = { workspaceId: string; userId: string; conversationId: string; showIn: string | null; decide: (d: NonNullable<Approval["decision"]>) => void };
+type Waiting = { workspaceId: string; userId: string; conversationId: string; showIn: string | null; card: Approval; edited?: (note: string) => void; decide: (d: NonNullable<Approval["decision"]>) => void };
 // ponytail: in memory, so a server restart drops pending asks (their rows are closed at the next start, approvalRoutes);
 // fine for one server
 const waiting = new Map<string, Waiting>();
@@ -102,7 +102,10 @@ export class Deferred extends Error {}
 // wait false: the card goes up and the command moves on at once; an Allow later runs it then (as after a timeout).
 // For asks that come after something was already done (an automation saved, then its runs allowed): a code-mode
 // ask that waits is redone whole after the command (Deferred), and the redo would do that something twice.
-export async function approve(s: Session, action: string, input: unknown, { account, own, wait = true }: { account?: string; own?: Own; wait?: boolean } = {}): Promise<string | null> {
+// editable: the person can change the card's text fields (an email's body) before allowing; the changes are made to
+// `input` itself, so the caller runs what they allowed, and it's handed a note saying what they changed, for Emplio.
+// Only for callers that run that same object (sandbox.ts apps).
+export async function approve(s: Session, action: string, input: unknown, { account, own, wait = true, editable }: { account?: string; own?: Own; wait?: boolean; editable?: (note: string) => void } = {}): Promise<string | null> {
   // "Just do it" counts only where someone is watching; background runs change things only when "Always allow"ed
   const asks = !!own?.alwaysAsk;
   if (s.settings.approvals === "auto" && !s.automation && !asks) return null;
@@ -135,6 +138,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     input,
     expiresAt: new Date(Date.now() + VALID_MS).toISOString(),
     ...(asks && { oneOff: true }),
+    ...(editable && { editable: true }),
   };
   const showIn = await startedIn(s.conversationId);
   await db.insert(approvals).values({ id: card.id, workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card });
@@ -158,7 +162,7 @@ export async function approve(s: Session, action: string, input: unknown, { acco
     const timer = setTimeout(() => done("timeout"), WAIT_MS);
     // Stop pressed: counts as no
     s.signal?.addEventListener("abort", () => done("deny"), { once: true });
-    waiting.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, decide: done });
+    waiting.set(card.id, { workspaceId: s.workspaceId, userId: s.user.id, conversationId: s.conversationId, showIn, card, edited: editable, decide: done });
   });
   if (decision === "timeout") {
     keepLater();
@@ -191,9 +195,28 @@ export function moveOn(conversationId: string | null) {
 
 // The person's answer to an ask, from whichever channel showed it: true when the waiting command takes it, how it
 // went when the command had stopped waiting (done here), false if it expired or isn't theirs.
-export async function decide(id: string, workspaceId: string, userId: string, decision: NonNullable<Approval["decision"]>): Promise<boolean | string> {
+// The person's edits to an editable card's text fields, made to its input (the object the action runs with) and kept
+// on the card. Only fields that were already text: nothing can be added or change type. A note for Emplio with
+// what they changed, so it doesn't go by its own draft; empty when nothing did.
+const nameOf = async (userId: string) => (await db.query.users.findFirst({ where: eq(users.id, userId), columns: { name: true } }))?.name || "They";
+
+async function applyEdits(card: Approval, changes: Record<string, unknown>, name: string) {
+  const input = card.input as Record<string, unknown>;
+  const changed: string[] = [];
+  for (const [k, v] of Object.entries(changes))
+    if (typeof v === "string" && typeof input[k] === "string" && input[k] !== v) (input[k] = v), changed.push(`${k}: ${v.length > 2000 ? `${v.slice(0, 2000)}…` : v}`);
+  if (!changed.length) return "";
+  await db.update(approvals).set({ card }).where(eq(approvals.id, card.id));
+  return `${name} edited the card before allowing it, so ${card.title} was done with their wording, not your draft. What they changed:\n${changed.join("\n")}`;
+}
+
+export async function decide(id: string, workspaceId: string, userId: string, decision: NonNullable<Approval["decision"]>, changes?: Record<string, unknown>): Promise<boolean | string> {
   const w = waiting.get(id);
+  const mine = (c?: { workspaceId: string; userId: string }) => c?.workspaceId === workspaceId && c.userId === userId;
+  const card = mine(w) ? w!.card : mine(later.get(id)) ? later.get(id)!.card : undefined;
+  const note = card?.editable && changes && decision !== "deny" ? await applyEdits(card, changes, await nameOf(userId)) : "";
   if (w && w.workspaceId === workspaceId && w.userId === userId) {
+    if (note) w.edited?.(note);
     w.decide(decision);
     return true;
   }
@@ -212,7 +235,7 @@ export async function decide(id: string, workspaceId: string, userId: string, de
     decision === "deny"
       ? `You said no to ${l.card.title}, so it wasn't done.`
       : await l.run().then(
-          () => keep(id, userId, { result: { ok: true } }).then(() => `Done: ${l.card.title} (you allowed it).`),
+          () => keep(id, userId, { result: { ok: true } }).then(() => `Done: ${l.card.title} (you allowed it).${note ? `\n\n${note}` : ""}`),
           async (error: unknown) => {
             const why = error instanceof Error ? error.message : "something went wrong";
             await keep(id, userId, { result: { ok: false, text: why.slice(0, 300) } });
@@ -246,13 +269,13 @@ export async function approvalRoutes(app: FastifyInstance) {
   });
 
   // the person answering a card in their chat
-  app.post<{ Params: { id: string }; Body: { decision: string } }>(
+  app.post<{ Params: { id: string }; Body: { decision: string; input?: Record<string, unknown> } }>(
     "/approvals/:id",
-    { schema: { body: { type: "object", required: ["decision"], properties: { decision: { enum: ["once", "always", "deny"] } } } } },
+    { schema: { body: { type: "object", required: ["decision"], properties: { decision: { enum: ["once", "always", "deny"] }, input: { type: "object" } } } } },
     async (req, reply) => {
       const ctx = await context(req, reply);
       if (!ctx) return;
-      const done = await decide(req.params.id, ctx.workspaceId, ctx.userId, req.body.decision as "once" | "always" | "deny");
+      const done = await decide(req.params.id, ctx.workspaceId, ctx.userId, req.body.decision as "once" | "always" | "deny", req.body.input);
       if (!done) return reply.code(404).send({ error: "This request has expired. Ask again in the chat." });
       return { ok: true, ...(typeof done === "string" && { result: done }) };
     },

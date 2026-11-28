@@ -10,6 +10,7 @@ import { useConfirm } from "@/components/confirm";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { api, approvalsQueryKey } from "@/lib/api";
 import { haptic } from "@/lib/haptics";
 
@@ -106,10 +107,29 @@ function Fields({ approval }: { approval: Approval }) {
 
 // An app action Emplio wants to run that sends or changes something, waiting for the person's tap. It sits just
 // above the chat box (chat-view.tsx), not in the scroll, so it's in view whatever was written after it.
+// the card's text fields, the ones Edit lets them change before allowing (approvals.ts applyEdits takes only these)
+const texts = (input: unknown) => Object.entries(input && typeof input === "object" ? input : {}).filter((e): e is [string, string] => typeof e[1] === "string");
+
+function EditFields({ draft, setDraft }: { draft: Record<string, string>; setDraft: (d: Record<string, string>) => void }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {Object.entries(draft).map(([k, v]) => (
+        <label key={k} className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">{k.replaceAll("_", " ")}</span>
+          <Textarea value={v} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} className="min-h-9 text-xs" />
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function ApprovalAsk({ approval }: { approval: Approval }) {
   const queryClient = useQueryClient();
+  // null: not editing; otherwise the text fields as they're being changed, sent with Allow
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const canEdit = !!approval.editable && texts(approval.input).length > 0;
   const answer = useMutation({
-    mutationFn: (decision: "once" | "always" | "deny") => api(`/approvals/${approval.id}`, { decision }),
+    mutationFn: (decision: "once" | "always" | "deny") => api(`/approvals/${approval.id}`, { decision, ...(draft && decision !== "deny" && { input: draft }) }),
     onMutate: (decision) => haptic(decision === "deny" ? "tap" : "success"),
     onSettled: () => queryClient.invalidateQueries({ queryKey: approvalsQueryKey }),
   });
@@ -126,7 +146,7 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
       </div>
       {/* the card shrinks to the room above the chat box: what it'll do scrolls, the buttons stay in view */}
       <div className="-mx-3 flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-3">
-        <Fields approval={approval} />
+        {draft ? <EditFields draft={draft} setDraft={setDraft} /> : <Fields approval={approval} />}
       </div>
       {answer.isPending || answer.isSuccess ? (
         <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -152,6 +172,11 @@ export function ApprovalAsk({ approval }: { approval: Approval }) {
               }
             >
               Always allow
+            </Button>
+          )}
+          {canEdit && (
+            <Button size="sm" variant="ghost" onClick={() => setDraft(draft ? null : Object.fromEntries(texts(approval.input)))}>
+              {draft ? "Cancel edit" : "Edit"}
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={() => answer.mutate("deny")}>
